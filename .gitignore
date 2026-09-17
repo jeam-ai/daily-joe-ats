@@ -1,0 +1,14 @@
+node_modules/
+.npm-cache/
+.next/
+out/
+.env*
+!.env.example
+.data/
+.vercel/
+*.tsbuildinfo
+*.log
+client_secret*.json
+test-results/
+
+.vercel

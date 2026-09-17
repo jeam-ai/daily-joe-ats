@@ -1,0 +1,15 @@
+.env*
+!.env.example
+.data
+.npm-cache
+.next
+node_modules
+test-results
+outputs
+*.log
+*.tsbuildinfo
+client_secret*.json
+.codex
+.agents
+tests
+.vercel
