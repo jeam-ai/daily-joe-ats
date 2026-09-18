@@ -98,7 +98,15 @@ export async function GET(request: NextRequest) {
       /^https:\/\/lh3\.googleusercontent\.com\//.test(payload.picture)
         ? payload.picture
         : undefined;
-    if (!payload?.email_verified || !email || !(await findUser(email)))
+    let registeredUser;
+    try {
+      registeredUser = email ? await findUser(email) : undefined;
+    } catch {
+      // The identity has been verified; failures from this point are storage
+      // failures, not Google authorization failures.
+      throw new SafeError("database", 503);
+    }
+    if (!payload?.email_verified || !email || !registeredUser)
       throw new SafeError("unauthorized");
     if (
       ["official", "intake"].includes(flow.kind || "") &&
@@ -130,38 +138,42 @@ export async function GET(request: NextRequest) {
     )
       throw new SafeError("scope");
     const session = createState();
-    await withStore((s) => {
-      const old = request.cookies.get(SESSION_COOKIE)?.value;
-      if (old) delete s.sessions[sessionHash(old, c.sessionSecret)];
-      for (const key of Object.keys(s.sessions))
-        if (s.sessions[key].expiresAt < Date.now()) delete s.sessions[key];
-      s.sessions[sessionHash(session, c.sessionSecret)] = {
-        email: flow.gmail ? initiator!.email : email,
-        name: flow.gmail ? initiator!.name : payload.name || email,
-        picture: flow.gmail ? initiator!.avatarUrl : picture,
-        expiresAt: Date.now() + 8 * 3600000,
-      };
-      if (flow.gmail) {
-        const key =
-          flow.kind === "sheets"
-            ? "sheetsConnection"
-            : ["official", "intake"].includes(flow.kind || "")
-              ? "officialConnection"
-              : "connection";
-        s[key] = {
-          email,
-          accessToken: tokens.access_token!,
-          refreshToken:
-            tokens.refresh_token ||
-            (s[key]?.email === email ? s[key]?.refreshToken : undefined),
-          scopes: tokens.scope?.split(" "),
-          expiresAt: tokens.expiry_date || Date.now() + 3500000,
-          connectedAt: new Date().toISOString(),
+    try {
+      await withStore((s) => {
+        const old = request.cookies.get(SESSION_COOKIE)?.value;
+        if (old) delete s.sessions[sessionHash(old, c.sessionSecret)];
+        for (const key of Object.keys(s.sessions))
+          if (s.sessions[key].expiresAt < Date.now()) delete s.sessions[key];
+        s.sessions[sessionHash(session, c.sessionSecret)] = {
+          email: flow.gmail ? initiator!.email : email,
+          name: flow.gmail ? initiator!.name : payload.name || email,
+          picture: flow.gmail ? initiator!.avatarUrl : picture,
+          expiresAt: Date.now() + 8 * 3600000,
         };
-        recordEvent(s, email, "gmail.connected");
-      }
-      recordEvent(s, email, "auth.login");
-    });
+        if (flow.gmail) {
+          const key =
+            flow.kind === "sheets"
+              ? "sheetsConnection"
+              : ["official", "intake"].includes(flow.kind || "")
+                ? "officialConnection"
+                : "connection";
+          s[key] = {
+            email,
+            accessToken: tokens.access_token!,
+            refreshToken:
+              tokens.refresh_token ||
+              (s[key]?.email === email ? s[key]?.refreshToken : undefined),
+            scopes: tokens.scope?.split(" "),
+            expiresAt: tokens.expiry_date || Date.now() + 3500000,
+            connectedAt: new Date().toISOString(),
+          };
+          recordEvent(s, email, "gmail.connected");
+        }
+        recordEvent(s, email, "auth.login");
+      });
+    } catch {
+      throw new SafeError("database", 503);
+    }
     const response = NextResponse.redirect(
       new URL(flow.gmail ? "/settings/integrations?connected=1" : "/", origin),
     );
