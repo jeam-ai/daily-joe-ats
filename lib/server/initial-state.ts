@@ -8,7 +8,12 @@ export function initialState(): AppState {
   ].map((email) => ({
     id: email,
     email,
-    name: "",
+    name:
+      email === "deveraajeam@gmail.com"
+        ? "Jeam"
+        : email === official
+          ? "Daily Joe Careers"
+          : "",
     role: email === owner ? "Admin" : "Talent Acquisition",
     title:
       email === official ? "Talent Acquisition Specialist" : "HR Associate",

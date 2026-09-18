@@ -55,7 +55,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       (document.documentElement.dataset.theme =
         theme === "system" ? (media.matches ? "dark" : "light") : theme);
     apply();
-    document.documentElement.classList.remove("theme-pending");
     media.addEventListener("change", apply);
     return () => media.removeEventListener("change", apply);
   }, [state?.preferences.theme]);

@@ -5,6 +5,17 @@ import { withStore } from "@/lib/server/store";
 import { findUser } from "@/lib/server/repository";
 import { sessionHash } from "./security";
 export const SESSION_COOKIE = "dj_session";
+function fallbackDisplayName(email: string) {
+  const normalized = email.toLowerCase();
+  if (normalized === "deveraajeam@gmail.com") return "Jeam";
+  if (normalized === "careers@daily-joe.com") return "Daily Joe Careers";
+  return email
+    .split("@")[0]
+    .split(/[._-]+/)
+    .filter(Boolean)
+    .map((part) => part[0]?.toUpperCase() + part.slice(1))
+    .join(" ");
+}
 export async function currentUser() {
   const id = (await cookies()).get(SESSION_COOKIE)?.value;
   if (!id) return null;
@@ -18,7 +29,12 @@ export async function currentUser() {
   return user
     ? {
         ...user,
-        name: session.name || user.name || user.email,
+        name:
+          (session.name &&
+            session.name.toLowerCase() !== user.email.toLowerCase() &&
+            session.name) ||
+          user.name ||
+          fallbackDisplayName(user.email),
         avatarUrl: session.picture || user.avatarUrl,
       }
     : null;

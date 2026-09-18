@@ -1,16 +1,18 @@
 "use client";
 import { useState, useEffect } from "react";
-import { Button, Card, Badge } from "./ui";
+import { Button, Card, Badge, Modal } from "./ui";
 import { Intake } from "./intake";
 import { useApp } from "./provider";
 export function OfficialIntegration() {
-  const { notify } = useApp();
+  const { state, notify } = useApp();
   const [status, setStatus] = useState<{
     officialConnected: boolean;
     intakeAuthorized: boolean;
     sheetsConfigured: boolean;
     sheetsConnected: boolean;
   } | null>(null);
+  const [confirmSync, setConfirmSync] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   useEffect(() => {
     fetch("/api/integrations/gmail")
       .then((r) => r.json())
@@ -85,9 +87,9 @@ export function OfficialIntegration() {
         </div>
         <div className="padded form-stack">
           <p>
-            The Excel tracker reflects every saved ATS change. Google Sheets
-            receives one-way updates when a spreadsheet ID and dedicated tab are
-            configured.
+            The Excel tracker reflects every saved ATS change. When a
+            spreadsheet ID and dedicated tab are configured, Google Sheets is
+            exported automatically after each saved workspace change.
           </p>
           <div className="inline-actions">
             <a className="button secondary" href="/api/tracker">
@@ -98,15 +100,10 @@ export function OfficialIntegration() {
             </a>
             <Button
               variant="ghost"
-              onClick={async () => {
-                const r = await fetch("/api/integrations/sheets", {
-                  method: "POST",
-                });
-                const d = await r.json();
-                notify(d.message || d.error);
-              }}
+              disabled={syncing}
+              onClick={() => setConfirmSync(true)}
             >
-              Retry Sheets sync
+              {syncing ? "Syncing tracker…" : "Sync tracker now"}
             </Button>
           </div>
           <p className="fine-print">
@@ -116,6 +113,58 @@ export function OfficialIntegration() {
           </p>
         </div>
       </Card>
+      {confirmSync && (
+        <Modal
+          title="Export ATS tracker?"
+          onClose={() => !syncing && setConfirmSync(false)}
+        >
+          <div className="export-confirmation">
+            <div className="export-confirmation-icon" aria-hidden="true">
+              ↗
+            </div>
+            <p>
+              Export the latest saved applications and recruitment updates to
+              the connected ATS Tracker sheet. This is a one-way export; your
+              workspace remains the source of truth.
+            </p>
+            <div className="export-progress" aria-live="polite">
+              <span>
+                {syncing ? "Preparing secure export…" : "Ready to export"}
+              </span>
+              <strong>{state?.applications.length || 0} applications</strong>
+            </div>
+          </div>
+          <div className="modal-actions">
+            <Button
+              variant="secondary"
+              disabled={syncing}
+              onClick={() => setConfirmSync(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              disabled={syncing}
+              onClick={async () => {
+                setSyncing(true);
+                try {
+                  const r = await fetch("/api/integrations/sheets", {
+                    method: "POST",
+                  });
+                  const d = await r.json();
+                  notify(d.message || d.error);
+                  if (r.ok) setConfirmSync(false);
+                } catch {
+                  notify("Export failed. Your ATS records are still saved.");
+                } finally {
+                  setSyncing(false);
+                }
+              }}
+            >
+              {syncing ? "Exporting…" : "Confirm & export"}
+            </Button>
+          </div>
+        </Modal>
+      )}
     </>
   );
 }

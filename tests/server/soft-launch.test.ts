@@ -16,6 +16,8 @@ import { seal } from "../../lib/auth/security";
 import {
   confirmImport,
   previewImport,
+  resumeScreeningInsight,
+  screenResumeAgainstCriteria,
   type PreviewRow,
 } from "../../lib/google/gmail/intake";
 import type { AppState, User } from "../../types";
@@ -101,6 +103,45 @@ async function preview(rows: PreviewRow[]) {
   return id;
 }
 test("transactional soft-launch repository and intake boundaries", async (t) => {
+  await t.test(
+    "resume insights use direct qualification mentions without automatic rejection",
+    () => {
+      const criteria = [
+        {
+          id: "barista",
+          label: "Barista experience",
+          kind: "Minimum" as const,
+          absenceFails: true,
+        },
+        {
+          id: "schedule",
+          label: "Weekend availability",
+          kind: "Preferred" as const,
+          absenceFails: false,
+        },
+      ];
+      const screened = screenResumeAgainstCriteria(
+        "Two years of Barista experience in a busy cafe.",
+        criteria,
+      );
+      assert.equal(screened[0].result, "Met");
+      assert.match(screened[0].evidence, /Direct resume mention/);
+      assert.equal(screened[1].result, "Unclear");
+      assert.doesNotMatch(screened[1].evidence, /Not Met/);
+      assert.match(
+        resumeScreeningInsight(
+          "candidate@example.com · 09171234567 · 2 years Barista experience",
+          "image/jpeg",
+          criteria,
+        ),
+        /Image OCR extracted.*email address.*phone-number pattern.*experience reference.*1 of 2 configured qualifications.*preliminary signal/i,
+      );
+      assert.match(
+        resumeScreeningInsight("", "image/png"),
+        /OCR could not extract reliable text.*review the original image/i,
+      );
+    },
+  );
   await t.test(
     "real workspace starts empty and durable saves survive new reads",
     async () => {
@@ -256,10 +297,12 @@ test("transactional soft-launch repository and intake boundaries", async (t) => 
           sendCalls++;
           throw Error("Automated sends forbidden");
         }
-        if (url.includes("messages?"))
+        if (url.includes("messages?")) {
+          assert.match(url, /maxResults=40/);
           return Response.json({
             messages: [{ id: "older" }, { id: "newer" }, { id: "missing" }],
           });
+        }
         const name = url.includes("newer")
           ? "newer"
           : url.includes("missing")

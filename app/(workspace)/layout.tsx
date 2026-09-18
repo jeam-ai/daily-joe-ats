@@ -11,7 +11,7 @@ export default async function WorkspaceLayout({
   const demo = demoEnabled();
   if (!user) redirect("/login");
   return (
-    <Shell email={user?.email} demo={false}>
+    <Shell email={user?.email} name={user?.name} demo={false}>
       {children}
     </Shell>
   );

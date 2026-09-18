@@ -41,7 +41,7 @@ export async function GET(
         {
           headers: {
             "Content-Type": mime,
-            "Content-Disposition": `${mime === "application/pdf" ? "inline" : "attachment"}; filename*=UTF-8''${encodeURIComponent(String(row.filename))}`,
+            "Content-Disposition": `${mime === "application/pdf" || mime.startsWith("image/") ? "inline" : "attachment"}; filename*=UTF-8''${encodeURIComponent(String(row.filename))}`,
             "Cache-Control": "private, no-store",
             "X-Content-Type-Options": "nosniff",
             "X-Frame-Options": "SAMEORIGIN",

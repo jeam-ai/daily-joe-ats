@@ -31,10 +31,12 @@ const navigation = [
 function Frame({
   children,
   email,
+  name,
   demo,
 }: {
   children: React.ReactNode;
   email?: string;
+  name?: string;
   demo: boolean;
 }) {
   const path = usePathname();
@@ -93,12 +95,12 @@ function Frame({
           </div>
           <Link href="/settings/account" className="sidebar-profile">
             <Avatar
-              name={state?.currentUser?.name || email || "HR"}
+              name={state?.currentUser?.name || name || email || "HR"}
               imageUrl={state?.currentUser?.avatarUrl}
               small
             />
             <span>
-              {state?.currentUser?.name || email}
+              {state?.currentUser?.name || name || email}
               <small>{state?.currentUser?.title}</small>
             </span>
             <ChevronDown size={15} />
@@ -156,7 +158,7 @@ function Frame({
           <span>DAILY JOE CAREERS</span>
           <span>
             {email
-              ? `Signed in as ${email}`
+              ? `Signed in as ${state?.currentUser?.name || name || email}`
               : "Authorized recruitment workspace"}
           </span>
           <a href="/api/auth/logout" aria-label="Sign out">
@@ -170,6 +172,7 @@ function Frame({
 export function Shell(props: {
   children: React.ReactNode;
   email?: string;
+  name?: string;
   demo: boolean;
 }) {
   return (

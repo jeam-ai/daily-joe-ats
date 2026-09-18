@@ -13,9 +13,6 @@
   --radius: 13px;
   --shadow: 0 2px 5px #253d4e03;
 }
-html.theme-pending body {
-  visibility: hidden;
-}
 * {
   box-sizing: border-box;
 }
@@ -1111,6 +1108,107 @@ tbody tr:hover {
   background-size: 200%;
   animation: shimmer 1.5s infinite;
   border-radius: 12px;
+}
+.workspace-loading {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 32px;
+  background: var(--bg);
+}
+.workspace-loading-card {
+  width: min(420px, 100%);
+  padding: 42px 40px 38px;
+  text-align: center;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  box-shadow: 0 18px 55px #5e7c9218;
+}
+.workspace-loading-card img {
+  display: block;
+  width: 126px;
+  height: auto;
+  margin: 0 auto 12px;
+}
+.workspace-loading-kicker {
+  display: block;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+}
+.workspace-loading-card h1 {
+  margin: 26px 0 8px;
+  font-size: 22px;
+}
+.workspace-loading-card p {
+  margin: 0 auto;
+  max-width: 300px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.7;
+}
+.workspace-loading-track {
+  height: 6px;
+  margin-top: 28px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--soft);
+}
+.workspace-loading-track i {
+  display: block;
+  width: 42%;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--blue);
+  animation: loading-slide 1.35s ease-in-out infinite;
+}
+@keyframes loading-slide {
+  0% {
+    transform: translateX(-110%);
+  }
+  55%,
+  100% {
+    transform: translateX(260%);
+  }
+}
+.export-confirmation {
+  display: grid;
+  gap: 16px;
+}
+.export-confirmation-icon {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  color: var(--blue-deep);
+  background: var(--blue);
+  border-radius: 12px;
+  font-size: 22px;
+  font-weight: 700;
+}
+.export-confirmation p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.7;
+}
+.export-progress {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 13px 15px;
+  color: var(--muted);
+  background: var(--soft);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  font-size: 12px;
+}
+.export-progress strong {
+  color: var(--ink);
+  font-weight: 700;
 }
 @keyframes shimmer {
   to {

@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import { FileText, ScanText } from "lucide-react";
 import { useApp } from "./provider";
 import { Button, Card, Field, Input, Select, Badge, Modal, Table } from "./ui";
 type Row = {
@@ -8,6 +9,7 @@ type Row = {
   email: string;
   receivedAt: string;
   filename: string;
+  mime: string;
   subject: string;
 };
 type Preview = {
@@ -82,6 +84,7 @@ export function Intake() {
     }
   }
   const count = Object.values(selection).filter((v) => v.selected).length;
+  const openNeeds = state.hiringNeeds.filter((n) => n.status === "Open");
   return (
     <Card className="spaced">
       <div className="card-heading">
@@ -96,13 +99,38 @@ export function Intake() {
       </div>
       <div className="padded form-stack">
         <p>
-          Preview application emails from the official careers mailbox. Verify
-          each name and map the application to a hiring need. Duplicates and
-          unreadable resumes are skipped.
+          Preview the newest 40 matching application emails from the official
+          careers mailbox. Verify each name and map the application to a hiring
+          need. Duplicates and unreadable resumes are skipped.
         </p>
+        <div className="info-banner">
+          <ScanText size={18} aria-hidden="true" />
+          <div>
+            <strong>Qualification-aware, HR-controlled screening</strong>
+            <p>
+              PDF/DOCX/TXT text and PNG/JPG OCR are scanned during preview. When
+              you map an applicant to a hiring need, direct phrase matches
+              against its configured qualifications are saved as evidence.
+              Missing or unclear text never auto-rejects an applicant.
+            </p>
+          </div>
+        </div>
+        {!openNeeds.length && (
+          <div className="info-banner" role="status">
+            <FileText size={18} aria-hidden="true" />
+            <div>
+              <strong>Create an open hiring need before importing.</strong>
+              <p>
+                It provides the qualifications that the screening review uses.
+              </p>
+            </div>
+          </div>
+        )}
         <Button
           disabled={
-            busy || state.applications.length >= (state.importLimit || 100)
+            busy ||
+            !openNeeds.length ||
+            state.applications.length >= (state.importLimit || 100)
           }
           onClick={() => void request("preview")}
         >
@@ -167,7 +195,15 @@ export function Intake() {
                     <td>
                       {new Date(r.receivedAt).toLocaleString()}
                       <br />
-                      {r.filename}
+                      <strong>{r.filename}</strong>
+                      <br />
+                      <Badge
+                        tone={r.mime.startsWith("image/") ? "orange" : "blue"}
+                      >
+                        {r.mime.startsWith("image/")
+                          ? "Image · OCR attempted"
+                          : "Text extracted"}
+                      </Badge>
                     </td>
                     <td>
                       <Select
@@ -184,13 +220,11 @@ export function Intake() {
                         }
                       >
                         <option value="">Choose a hiring need</option>
-                        {state.hiringNeeds
-                          .filter((n) => n.status === "Open")
-                          .map((n) => (
-                            <option key={n.id} value={n.id}>
-                              {n.position} · {n.location}
-                            </option>
-                          ))}
+                        {openNeeds.map((n) => (
+                          <option key={n.id} value={n.id}>
+                            {n.position} · {n.location}
+                          </option>
+                        ))}
                       </Select>
                     </td>
                   </tr>

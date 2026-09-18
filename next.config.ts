@@ -1,6 +1,12 @@
 import type { NextConfig } from "next";
 const config: NextConfig = {
-  serverExternalPackages: ["pdf-parse", "mammoth", "pg", "exceljs"],
+  serverExternalPackages: [
+    "pdf-parse",
+    "mammoth",
+    "pg",
+    "exceljs",
+    "tesseract.js",
+  ],
   poweredByHeader: false,
   // OAuth callback URLs contain short-lived codes; never print incoming URLs.
   logging: { incomingRequests: false, browserToTerminal: false },

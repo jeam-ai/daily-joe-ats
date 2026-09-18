@@ -86,7 +86,10 @@ export function ResumeViewer({ application: a }: { application: Application }) {
         />
       ) : (
         <pre className="resume-text" style={{ fontSize: (14 * zoom) / 100 }}>
-          {text || "Loading resume text…"}
+          {text ||
+            (mime.startsWith("image/")
+              ? "OCR could not extract reliable text. Review the original image and record evidence manually."
+              : "Loading resume text…")}
         </pre>
       )}
       <p className="fine-print">

@@ -2,7 +2,16 @@
 import { useState } from "react";
 import type { Application, ScreeningCriterion } from "@/types";
 import { useApp } from "./provider";
-import { Button, Card, Field, Input, Select, Modal, StatusBadge } from "./ui";
+import {
+  Badge,
+  Button,
+  Card,
+  Field,
+  Input,
+  Select,
+  Modal,
+  StatusBadge,
+} from "./ui";
 export function ApplicantTools({
   application: a,
 }: {
@@ -13,6 +22,12 @@ export function ApplicantTools({
     [review, setReview] = useState(false);
   if (!state) return null;
   const need = state.hiringNeeds.find((n) => n.id === a.hiringNeedId);
+  const directMatches = a.screening.criteria.filter(
+    (criterion) => criterion.result === "Met",
+  ).length;
+  const needsReview = a.screening.criteria.filter(
+    (criterion) => criterion.result === "Unclear",
+  ).length;
   return (
     <>
       {a.stage === "Initial Interview" && (
@@ -52,17 +67,24 @@ export function ApplicantTools({
         </div>
         <div className="padded">
           <p>
-            Resume received through Gmail.{" "}
-            {a.screening.criteria.filter((c) => c.result === "Unclear").length}{" "}
-            criteria need HR verification. Availability, experience, and
-            interview answers must be confirmed from evidence.
+            {a.screening.insight ||
+              "Resume received through Gmail. Review the evidence against the configured qualifications."}
           </p>
+          <div className="inline-actions spaced">
+            <Badge tone={directMatches ? "green" : "orange"}>
+              {directMatches} direct match{directMatches === 1 ? "" : "es"}
+            </Badge>
+            <Badge tone={needsReview ? "orange" : "green"}>
+              {needsReview}{" "}
+              {needsReview === 1 ? "criterion needs" : "criteria need"} review
+            </Badge>
+          </div>
           <p className="fine-print">
-            AI is not configured. No AI assessment or hiring decision has been
-            made.
+            OCR and text matching are advisory. They do not approve, reject, or
+            advance an applicant.
           </p>
           <Button variant="secondary" onClick={() => setReview(true)}>
-            Record evidence review
+            Review criteria and evidence
           </Button>
           {need?.questions && (
             <>

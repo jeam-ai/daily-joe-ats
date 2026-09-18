@@ -8,6 +8,7 @@ out/
 .vercel/
 *.tsbuildinfo
 *.log
+*.traineddata
 client_secret*.json
 test-results/
 
