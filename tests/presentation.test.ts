@@ -15,8 +15,11 @@ test("disconnected Gmail is never styled as connected", () => {
 test("the sign-in page is visible before workspace hydration", () => {
   const layout = readFileSync("app/layout.tsx", "utf8");
   const login = readFileSync("app/login/page.tsx", "utf8");
+  const provider = readFileSync("components/provider.tsx", "utf8");
   assert.ok(!layout.includes("theme-pending"));
   assert.ok(login.includes("Continue with Google"));
+  assert.ok(provider.includes('state?.preferences.theme === "dark"'));
+  assert.ok(!provider.includes("matchMedia"));
 });
 test("screening renders the configured requirement and evidence with a text result", () => {
   const html = renderToStaticMarkup(

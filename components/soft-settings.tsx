@@ -337,7 +337,7 @@ export function PreferencesSettings() {
               preferences: {
                 ...s.preferences,
                 compact: f.get("compact") === "on",
-                theme: f.get("theme") as "light" | "dark" | "system",
+                theme: f.get("theme") as "light" | "dark",
                 timezone: String(f.get("timezone")),
                 dateFormat: String(f.get("dateFormat")),
                 notifications: f.get("notifications") === "on",
@@ -349,7 +349,6 @@ export function PreferencesSettings() {
             <Select name="theme" defaultValue={state.preferences.theme}>
               <option value="light">Light</option>
               <option value="dark">Dark</option>
-              <option value="system">System</option>
             </Select>
           </Field>
           <Field label="Timezone">

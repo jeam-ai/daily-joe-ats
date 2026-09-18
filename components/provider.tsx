@@ -49,14 +49,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     void refresh();
   }, [refresh]);
   useEffect(() => {
-    const theme = state?.preferences.theme || "system";
-    const media = matchMedia("(prefers-color-scheme: dark)");
-    const apply = () =>
-      (document.documentElement.dataset.theme =
-        theme === "system" ? (media.matches ? "dark" : "light") : theme);
-    apply();
-    media.addEventListener("change", apply);
-    return () => media.removeEventListener("change", apply);
+    // Keep the workspace light by default. Legacy "system" preferences must
+    // not make the app unexpectedly switch to a device's dark appearance.
+    document.documentElement.dataset.theme =
+      state?.preferences.theme === "dark" ? "dark" : "light";
   }, [state?.preferences.theme]);
   const update = useCallback(
     async (fn: (s: AppState) => AppState, confirmed = false) => {
