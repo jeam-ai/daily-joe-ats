@@ -10,6 +10,25 @@ import { SESSION_COOKIE, currentUser } from "@/lib/auth/session";
 import { createGoogleClient } from "@/lib/google/gmail/service";
 import { recordEvent, withStore } from "@/lib/server/store";
 import { findUser } from "@/lib/server/repository";
+
+function providerFailure(error: unknown) {
+  if (!error || typeof error !== "object") return "authorization";
+  const response = "response" in error ? error.response : undefined;
+  if (!response || typeof response !== "object") return "authorization";
+  const data = "data" in response ? response.data : undefined;
+  if (!data || typeof data !== "object" || !("error" in data))
+    return "authorization";
+  const code = data.error;
+  if (
+    code === "invalid_client" ||
+    code === "unauthorized_client" ||
+    code === "redirect_uri_mismatch"
+  )
+    return "oauth_config";
+  if (code === "invalid_grant") return "oauth_retry";
+  return "authorization";
+}
+
 export async function GET(request: NextRequest) {
   let origin = process.env.APP_ORIGIN || "http://localhost:3000";
   try {
@@ -143,7 +162,7 @@ export async function GET(request: NextRequest) {
     response.cookies.set("dj_oauth", "", { path: "/api/auth", maxAge: 0 });
     return response;
   } catch (e) {
-    const code = e instanceof SafeError ? e.message : "authorization";
+    const code = e instanceof SafeError ? e.message : providerFailure(e);
     const response = NextResponse.redirect(
       new URL(`/login?error=${encodeURIComponent(code)}`, origin),
     );

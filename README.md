@@ -49,12 +49,18 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 
 ## Google OAuth
 
-Enable Gmail API in the Google Cloud project that owns the OAuth client. Register the exact callback URL. Login requests identity scopes. Official Gmail connection requests `gmail.send`; applicant intake additionally requests `gmail.readonly`. The app validates PKCE, state, nonce, authorized users, and the authenticated account. OAuth secrets and refresh tokens remain server-side.
+Enable Gmail API in the Google Cloud project that owns the OAuth client. In Google Cloud Console, the client must be a **Web application** and its Authorized redirect URIs must include the exact `GOOGLE_REDIRECT_URI` below (no trailing slash). If the consent screen is in Testing, add every account that can sign in under **Audience → Test users**. Login requests identity scopes. Official Gmail connection requests `gmail.send`; applicant intake additionally requests `gmail.readonly`. The app validates PKCE, state, nonce, authorized users, and the authenticated account. OAuth secrets and refresh tokens remain server-side.
 
 For the deployed app, register:
 
 ```text
 https://<your-vercel-domain>/api/auth/callback
+```
+
+For local development, also register:
+
+```text
+http://localhost:3000/api/auth/callback
 ```
 
 The personal administrator account is `deveraajeam@gmail.com` and displays as **Jeam**. The official mailbox is `careers@daily-joe.com` and displays as **Daily Joe Careers**. Authorize additional active users from Settings → Users & Permissions.

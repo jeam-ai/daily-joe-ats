@@ -8,6 +8,32 @@ export class SafeError extends Error {
   }
 }
 export const gmailScope = "https://www.googleapis.com/auth/gmail.send";
+
+export function oauthUrls(appOrigin: string, redirectUri: string) {
+  let app: URL;
+  let callback: URL;
+  try {
+    app = new URL(appOrigin);
+    callback = new URL(redirectUri);
+  } catch {
+    throw new SafeError("OAuth URLs must be valid absolute URLs.", 503);
+  }
+  if (
+    !["http:", "https:"].includes(app.protocol) ||
+    app.pathname !== "/" ||
+    app.search ||
+    app.hash ||
+    callback.origin !== app.origin ||
+    callback.pathname !== "/api/auth/callback" ||
+    callback.search ||
+    callback.hash
+  )
+    throw new SafeError(
+      "Google OAuth must use this app's /api/auth/callback URL.",
+      503,
+    );
+  return { origin: app.origin, redirectUri: callback.href };
+}
 export function config() {
   const e = process.env;
   const required = [
@@ -33,15 +59,8 @@ export function config() {
       "Server security keys are not configured correctly.",
       503,
     );
-  const origin = new URL(e.APP_ORIGIN!);
-  if (
-    origin.origin !== e.APP_ORIGIN ||
-    new URL(e.GOOGLE_REDIRECT_URI!).origin !== origin.origin
-  )
-    throw new SafeError(
-      "OAuth redirect and application origin must match.",
-      503,
-    );
+  const urls = oauthUrls(e.APP_ORIGIN!, e.GOOGLE_REDIRECT_URI!);
+  const origin = new URL(urls.origin);
   if (
     origin.protocol !== "https:" &&
     !["localhost", "127.0.0.1"].includes(origin.hostname)
@@ -53,12 +72,12 @@ export function config() {
     ).toLowerCase(),
     clientId: e.GOOGLE_CLIENT_ID!,
     clientSecret: e.GOOGLE_CLIENT_SECRET!,
-    redirectUri: e.GOOGLE_REDIRECT_URI!,
+    redirectUri: urls.redirectUri,
     allowedEmail: e.GOOGLE_ALLOWED_EMAIL!.toLowerCase(),
     testRecipient: e.TEST_RECIPIENT_EMAIL?.toLowerCase(),
     sessionSecret: e.SESSION_SECRET!,
     encryptionKey: e.TOKEN_ENCRYPTION_KEY!,
-    origin: origin.origin,
+    origin: urls.origin,
     secure: origin.protocol === "https:",
   };
 }

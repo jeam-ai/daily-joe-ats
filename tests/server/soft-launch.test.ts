@@ -13,6 +13,7 @@ import {
 import { initialState } from "../../lib/server/initial-state";
 import { withStore } from "../../lib/server/store";
 import { seal } from "../../lib/auth/security";
+import { oauthUrls, SafeError } from "../../lib/server/config";
 import {
   confirmImport,
   previewImport,
@@ -33,6 +34,26 @@ process.env.TOKEN_ENCRYPTION_KEY = "a".repeat(64);
 delete process.env.DATABASE_URL;
 delete process.env.VERCEL;
 process.chdir(mkdtempSync(path.join(tmpdir(), "daily-joe-tests-")));
+test("OAuth configuration normalizes an app-origin slash and requires the callback route", () => {
+  assert.deepEqual(
+    oauthUrls(
+      "http://localhost:3000/",
+      "http://localhost:3000/api/auth/callback",
+    ),
+    {
+      origin: "http://localhost:3000",
+      redirectUri: "http://localhost:3000/api/auth/callback",
+    },
+  );
+  assert.throws(
+    () =>
+      oauthUrls(
+        "https://daily-joe-ats.vercel.app",
+        "https://daily-joe-ats.vercel.app/callback",
+      ),
+    SafeError,
+  );
+});
 const user: User = {
   id: "admin@example.com",
   email: "admin@example.com",

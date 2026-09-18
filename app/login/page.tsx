@@ -12,6 +12,10 @@ const errors: Record<string, string> = {
     "Gmail sending permission was not granted. Please reconnect and allow gmail.send.",
   signin: "Sign in before connecting Gmail.",
   identity: "Google could not confirm your account identity.",
+  oauth_config:
+    "Google rejected the OAuth client configuration. Confirm the exact callback URL and that this account is a consent-screen test user.",
+  oauth_retry:
+    "Google could not exchange this one-time sign-in request. Start the sign-in again; if it repeats, verify the registered callback URL.",
   authorization:
     "Google authorization could not be completed. Check the redirect URI, consent screen, and test-user configuration.",
 };
