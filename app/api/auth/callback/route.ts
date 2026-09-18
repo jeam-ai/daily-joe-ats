@@ -29,6 +29,19 @@ function providerFailure(error: unknown) {
   return "authorization";
 }
 
+function callbackFailure(error: unknown) {
+  if (error instanceof SafeError) {
+    if (error.message.includes("DATABASE_URL")) return "database";
+    if (
+      error.message.startsWith("Missing server configuration") ||
+      error.message === "Server security keys are not configured correctly."
+    )
+      return "server_config";
+    return error.message;
+  }
+  return providerFailure(error);
+}
+
 export async function GET(request: NextRequest) {
   let origin = process.env.APP_ORIGIN || "http://localhost:3000";
   try {
@@ -162,7 +175,10 @@ export async function GET(request: NextRequest) {
     response.cookies.set("dj_oauth", "", { path: "/api/auth", maxAge: 0 });
     return response;
   } catch (e) {
-    const code = e instanceof SafeError ? e.message : providerFailure(e);
+    const code = callbackFailure(e);
+    // Keep OAuth codes and tokens out of logs while preserving a useful Vercel
+    // diagnostic category for production-only callback failures.
+    console.error("OAuth callback failed", { category: code });
     const response = NextResponse.redirect(
       new URL(`/login?error=${encodeURIComponent(code)}`, origin),
     );

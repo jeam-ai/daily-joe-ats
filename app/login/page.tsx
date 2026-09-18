@@ -16,6 +16,10 @@ const errors: Record<string, string> = {
     "Google rejected the OAuth client configuration. Confirm the exact callback URL and that this account is a consent-screen test user.",
   oauth_retry:
     "Google could not exchange this one-time sign-in request. Start the sign-in again; if it repeats, verify the registered callback URL.",
+  database:
+    "Google approved the sign-in, but the Vercel app cannot access its database. Check the Production DATABASE_URL setting and redeploy.",
+  server_config:
+    "Google approved the sign-in, but a required Vercel production setting is missing or invalid. Check the deployment settings and redeploy.",
   authorization:
     "Google authorization could not be completed. Check the redirect URI, consent screen, and test-user configuration.",
 };
