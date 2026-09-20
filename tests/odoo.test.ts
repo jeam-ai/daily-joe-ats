@@ -52,7 +52,9 @@ test("Odoo defaults do not invent schedules, merge identities or discard source 
   const rest = a.records.find(
     (r) => r.employee === "DEMO Alex" && r.date === "2026-09-02",
   )!;
-  assert.ok(rest.results.includes("Rest Day / Day Off"));
+  assert.ok(
+    rest.results.includes("System Error — Expected hours missing or zero"),
+  );
   const missing = a.records.find(
     (r) => r.employee === "DEMO Alex" && r.date === "2026-09-03",
   )!;
@@ -101,7 +103,9 @@ test("Odoo floating-point rest-day residue and independently configured start ti
   )!;
   assert.equal(rest.expected, 0);
   assert.equal(rest.pivot[0].expected, 1e-15);
-  assert.ok(rest.results.includes("Rest Day / Day Off"));
+  assert.ok(
+    rest.results.includes("System Error — Expected hours missing or zero"),
+  );
   assert.equal(analysis.records[0].lateMinutes, 30);
   assert.equal(analysis.records[0].earlyMinutes, null);
 });

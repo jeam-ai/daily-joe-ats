@@ -44,7 +44,19 @@ export function extractionReasons(a: Application) {
     reasons.push("Preferred work location is unclear");
   if (missingInformation(a.applicant.location))
     reasons.push("Residence is missing");
-  if (a.extraction?.warnings.length || (a.extraction?.confidence ?? 100) < 80)
+  if (missingInformation(a.applicant.phone))
+    reasons.push("Phone number is missing");
+  if (
+    !a.applicant.email ||
+    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(a.applicant.email)
+  )
+    reasons.push("Email needs verification");
+  if (
+    a.extraction?.method === "ocr" ||
+    a.extraction?.method === "mixed" ||
+    a.extraction?.warnings.length ||
+    (a.extraction?.confidence ?? 100) <= 80
+  )
     reasons.push("Document extraction is incomplete or uncertain");
   if (a.information?.conflicts.length)
     reasons.push("Submitted sources conflict");

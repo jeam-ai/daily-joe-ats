@@ -1,4 +1,5 @@
 import "server-only";
+import { formalName } from "@/lib/names";
 import { GoogleGenAI } from "@google/genai";
 import { createHash } from "node:crypto";
 import { z } from "zod";
@@ -22,6 +23,7 @@ import { recordIssue, resolveIssue } from "./diagnostics";
 import { withDeadline } from "./deadline";
 const fields = [
   "name",
+  "email",
   "phone",
   "residence",
   "position",
@@ -46,7 +48,7 @@ const schema = z
           })
           .strict(),
       )
-      .max(10),
+      .max(11),
     conflicts: z.array(z.string().max(400)).max(8),
   })
   .strict();
@@ -261,7 +263,7 @@ export async function runExtractionJobs(
         a.id,
       );
       const email = encrypted
-        ? unseal<{ body: string; subject: string }>(
+        ? unseal<{ body: string; subject: string; from?: string }>(
             encrypted,
             config().encryptionKey,
           )
@@ -273,7 +275,9 @@ export async function runExtractionJobs(
               config().encryptionKey,
             ).slice(0, 24000)
           : "",
-        email: (email?.body || "").slice(0, 10000),
+        email: (
+          `Sender: ${email?.from || a.applicant.email}\n` + (email?.body || "")
+        ).slice(0, 10000),
         subject: (email?.subject || "").slice(0, 300),
       };
       await audit(tx, job.actor, "ai.extraction_requested", a.id, {
@@ -324,16 +328,24 @@ export async function runExtractionJobs(
               : a.applicant[key as keyof typeof a.applicant];
           if (
             !missingInformation(String(current || "")) &&
-            !(
-              f.field === "name" &&
-              a.information.fields.name?.confidence === "Uncertain"
-            )
+            !(a.information.fields[f.field]?.confidence === "Uncertain")
+          )
+            continue;
+          if (
+            f.field === "email" &&
+            (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(f.value) ||
+              state.applications.some(
+                (other) =>
+                  other.id !== a.id &&
+                  other.applicant.email.toLowerCase() === f.value.toLowerCase(),
+              ))
           )
             continue;
           if (f.field === "position" || f.field === "location")
             a[f.field] = f.value;
           else
-            (a.applicant as unknown as Record<string, unknown>)[key] = f.value;
+            (a.applicant as unknown as Record<string, unknown>)[key] =
+              f.field === "name" ? formalName(f.value) : f.value;
           a.information.fields[f.field] = {
             source: `AI extraction · ${f.source}`,
             evidence: f.evidence,
@@ -362,7 +374,7 @@ export async function runExtractionJobs(
           applicationId: a.id,
           timestamp: job.completedAt,
           user: "System",
-          action: "AI Integration extraction completed",
+          action: "AI Assist extraction completed",
           metadata: {
             note: applied.length
               ? `Evidence-supported fields clarified: ${applied.join(", ")}. HR review required.`
@@ -388,7 +400,7 @@ export async function runExtractionJobs(
       job.status = "Failed";
       job.errorCode = code;
       job.error =
-        "AI Integration could not clarify this document. Existing information and System Analysis remain available.";
+        "AI Assist could not clarify this document. Existing information and System Analysis remain available.";
       delete job.leaseUntil;
       if (
         job.attempts < 3 &&

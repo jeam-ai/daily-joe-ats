@@ -26,6 +26,9 @@ export const userSchema = z.object({
   avatarUrl: z.url().max(500).optional(),
 });
 export const applicationSchema = z.object({
+  assignedBranch: text.optional(),
+  editedBy: text.optional(),
+  editedAt: z.iso.datetime().optional(),
   queueState: z.enum(["Active", "Queued", "Closed"]).optional(),
   information: z
     .object({
@@ -58,6 +61,9 @@ export const applicationSchema = z.object({
   applicant: z.object({
     id,
     name: text,
+    firstName: text.optional(),
+    middleName: text.optional(),
+    lastName: text.optional(),
     email: z.email(),
     phone: text,
     location: text,
@@ -189,6 +195,7 @@ export const stateSchema = z.object({
   importLimit: z.number().int().min(10).max(100).optional(),
   importValidated: z.boolean().optional(),
   intakeQuery: text.optional(),
+  intakePaused: z.boolean().optional(),
   trackerUpdatedAt: text.optional(),
   syncStatus: text.optional(),
   applications: z.array(applicationSchema).max(10000),
@@ -294,7 +301,6 @@ export function validateApplicationChange(
     "deletedBy",
     "deletionReason",
     "extraction",
-    "appliedAt",
     "gmailMessageId",
     "gmailThreadId",
     "resumeId",

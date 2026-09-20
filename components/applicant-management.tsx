@@ -5,6 +5,7 @@ import type { Application } from "@/types";
 import { useApp } from "./provider";
 import { Button, Field, Input, Modal, Select, Badge } from "./ui";
 import { requestJson } from "@/lib/client-request";
+import { formalName, nameParts } from "@/lib/names";
 import { canManage } from "@/lib/data-policy";
 
 export function ApplicantEditor({
@@ -19,6 +20,10 @@ export function ApplicantEditor({
   const [busy, setBusy] = useState(false),
     [error, setError] = useState("");
   const [needId, setNeedId] = useState(application?.hiringNeedId || "");
+  const [createdId, setCreatedId] = useState<string>();
+  const parts = application
+    ? nameParts(application.applicant.name)
+    : { firstName: "", middleName: "", lastName: "" };
   const [requestId] = useState(() => crypto.randomUUID());
   if (!state) return null;
   const need = state.hiringNeeds.find((n) => n.id === needId);
@@ -36,7 +41,22 @@ export function ApplicantEditor({
           setError("");
           const form = new FormData(event.currentTarget);
           const fields = {
-            name: String(form.get("name")).trim(),
+            name: formalName(
+              [
+                form.get("firstName"),
+                form.get("middleName"),
+                form.get("lastName"),
+              ]
+                .filter(Boolean)
+                .join(" "),
+            ),
+            firstName: formalName(String(form.get("firstName") || "")),
+            middleName: formalName(String(form.get("middleName") || "")),
+            lastName: formalName(String(form.get("lastName") || "")),
+            assignedBranch: String(form.get("assignedBranch") || ""),
+            appliedAt: form.get("appliedAt")
+              ? new Date(String(form.get("appliedAt"))).toISOString()
+              : undefined,
             email: String(form.get("email")).trim().toLowerCase(),
             phone: String(form.get("phone")).trim(),
             position: String(form.get("position")).trim(),
@@ -59,12 +79,17 @@ export function ApplicantEditor({
                   position: fields.position,
                   location: fields.location,
                   hiringNeedId: fields.hiringNeedId,
+                  assignedBranch: fields.assignedBranch,
+                  appliedAt: fields.appliedAt || a.appliedAt,
                   applicant: {
                     ...a.applicant,
                     name:
                       a.isDemo && !fields.name.startsWith("DEMO — ")
                         ? `DEMO — ${fields.name}`
                         : fields.name,
+                    firstName: fields.firstName,
+                    middleName: fields.middleName,
+                    lastName: fields.lastName,
                     email: fields.email,
                     phone: fields.phone,
                     location: fields.residence,
@@ -83,14 +108,30 @@ export function ApplicantEditor({
                 return;
               }
             } else {
-              const result = await requestJson<{ id: string }>(
-                "/api/applicants",
-                {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ ...fields, requestId }),
-                },
-              );
+              const result = createdId
+                ? { id: createdId }
+                : await requestJson<{ id: string }>("/api/applicants", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ ...fields, requestId }),
+                  });
+              setCreatedId(result.id);
+              const resume = form.get("resume");
+              if (resume instanceof File && resume.size) {
+                const payload = new FormData();
+                payload.set("resume", resume);
+                try {
+                  await requestJson(`/api/applicants/${result.id}/resume`, {
+                    method: "POST",
+                    body: payload,
+                  });
+                } catch (error) {
+                  await refresh();
+                  throw new Error(
+                    `Applicant saved. Resume upload needs retry: ${(error as Error).message}`,
+                  );
+                }
+              }
               await refresh();
               notify("Applicant created successfully.");
               router.push(`/applications/${result.id}`);
@@ -110,14 +151,54 @@ export function ApplicantEditor({
           </p>
         )}
         <div className="form-grid">
-          <Field label="Applicant name">
+          {(
+            [
+              ["firstName", "First name"],
+              ["middleName", "Middle name / initial"],
+              ["lastName", "Last name"],
+            ] as const
+          ).map(([key, label]) => (
+            <Field key={key} label={label}>
+              <Input
+                name={key}
+                required={key === "firstName"}
+                maxLength={100}
+                defaultValue={application?.applicant[key] ?? parts[key]}
+                autoComplete="off"
+              />
+            </Field>
+          ))}
+          <Field label="Application date">
             <Input
-              name="name"
-              required
-              maxLength={200}
-              defaultValue={application?.applicant.name}
-              autoComplete="off"
+              name="appliedAt"
+              type="datetime-local"
+              defaultValue={
+                application?.appliedAt
+                  ? new Date(
+                      new Date(application.appliedAt).getTime() -
+                        new Date(application.appliedAt).getTimezoneOffset() *
+                          60000,
+                    )
+                      .toISOString()
+                      .slice(0, 16)
+                  : undefined
+              }
             />
+          </Field>
+          <Field label="Assigned branch">
+            <Select
+              name="assignedBranch"
+              defaultValue={application?.assignedBranch || ""}
+            >
+              <option value="">Unassigned</option>
+              {state.locations
+                ?.filter(
+                  (l) => l.active || l.name === application?.assignedBranch,
+                )
+                .map((l) => (
+                  <option key={l.id}>{l.name}</option>
+                ))}
+            </Select>
           </Field>
           <Field label="Email">
             <Input
@@ -161,6 +242,7 @@ export function ApplicantEditor({
           </Field>
           <Field label="Applied position">
             <Input
+              list="applicant-positions"
               name="position"
               required
               defaultValue={application?.position || ""}
@@ -206,6 +288,24 @@ export function ApplicantEditor({
             />
           </Field>
         </div>
+        <datalist id="applicant-positions">
+          {state.qualifications.map((q) => (
+            <option key={q.id} value={q.position} />
+          ))}
+        </datalist>
+        {!application && (
+          <Field label="Upload resume (optional)">
+            <Input
+              name="resume"
+              type="file"
+              accept=".pdf,.docx,.png,.jpg,.jpeg"
+            />
+            <small>
+              PDF, DOCX, PNG or JPG up to 8 MB. No resume is required. Submitted
+              information is processed after the record is saved.
+            </small>
+          </Field>
+        )}
         <Field label="Add an HR note">
           <textarea
             name="notes"

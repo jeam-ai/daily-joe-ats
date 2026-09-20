@@ -3,6 +3,16 @@ import Image from "next/image";
 import { Coffee, ArrowRight, ShieldCheck } from "lucide-react";
 import { demoEnabled } from "@/lib/server/config";
 const errors: Record<string, string> = {
+  official_account:
+    "Please connect the official careers@daily-joe.com account for this integration. Your personal sign-in account can remain the workspace administrator.",
+  database:
+    "Google verified your account, but Daily Joe Careers could not save your session because storage is temporarily unavailable. Please retry; contact your administrator if this continues.",
+  oauth_retry:
+    "This Google authorization expired or was already used. Start a fresh sign-in below.",
+  oauth_config:
+    "Google sign-in configuration needs administrator attention. The application’s callback address or client configuration could not be verified.",
+  server_config:
+    "Daily Joe Careers is missing required server configuration. Please contact your workspace administrator.",
   state:
     "Your sign-in request expired or could not be verified. Please try again.",
   unauthorized:

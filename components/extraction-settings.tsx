@@ -27,7 +27,7 @@ export function ExtractionSettings() {
     <Card>
       <div className="card-heading">
         <div>
-          <h2>AI Integration · extraction fallback</h2>
+          <h2>AI Assist · automatic extraction fallback</h2>
           <p>
             Clarify missing or uncertain submitted information after normal
             extraction.
@@ -47,8 +47,8 @@ export function ExtractionSettings() {
         <p>
           Automatic fallback uses Gemini only for incomplete or conflicting
           evidence. It preserves HR-verified fields and never changes
-          qualification results or hiring stages. Optional AI Assist remains a
-          separate, manually requested interpretation.
+          qualification results or hiring stages. Turning optional insights OFF
+          on an applicant does not disable automatic extraction fallback.
         </p>
         {data && (
           <>

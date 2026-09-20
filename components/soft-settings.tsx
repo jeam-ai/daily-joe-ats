@@ -256,6 +256,8 @@ export function LocationsSettings() {
 }
 export function QualificationsSettings() {
   const { state, update, saving } = useApp();
+  const [adding, setAdding] = useState(false),
+    [positionError, setPositionError] = useState("");
   const [editing, setEditing] = useState<string | null>(null),
     [rules, setRules] = useState<QualificationRule[]>([]);
   if (!state) return null;
@@ -264,7 +266,15 @@ export function QualificationsSettings() {
     <Card>
       <div className="card-heading">
         <h2>Job & Qualification Templates</h2>
-        <Badge>HR-defined criteria</Badge>
+        <Button
+          disabled={saving || state.currentUser?.role !== "Admin"}
+          onClick={() => {
+            setPositionError("");
+            setAdding(true);
+          }}
+        >
+          + Add Position
+        </Button>
       </div>
       <div className="padded">
         {state.qualifications.map((q) => (
@@ -296,6 +306,65 @@ export function QualificationsSettings() {
           </div>
         ))}
       </div>
+      {adding && (
+        <Modal
+          title="Add Position"
+          busy={saving}
+          onClose={() => setAdding(false)}
+        >
+          <form
+            className="form-stack"
+            onSubmit={async (e) => {
+              e.preventDefault();
+              const position = String(
+                new FormData(e.currentTarget).get("position") || "",
+              ).trim();
+              if (
+                state.qualifications.some(
+                  (q) => q.position.toLowerCase() === position.toLowerCase(),
+                )
+              ) {
+                setPositionError("This position already exists.");
+                return;
+              }
+              if (
+                await update((s) => ({
+                  ...s,
+                  qualifications: [
+                    ...s.qualifications,
+                    {
+                      id: crypto.randomUUID(),
+                      position,
+                      minimum: "",
+                      preferred: "",
+                      criteria: "",
+                      questions: "",
+                      rules: [],
+                    },
+                  ],
+                }))
+              )
+                setAdding(false);
+            }}
+          >
+            <Field label="Position name">
+              <Input name="position" required maxLength={200} />
+            </Field>
+            <p>
+              Configure its qualifications after adding it. It will be available
+              for applicants and hiring needs.
+            </p>
+            {positionError && (
+              <p role="alert" className="error-banner">
+                {positionError}
+              </p>
+            )}
+            <Button type="submit" disabled={saving}>
+              Add Position
+            </Button>
+          </form>
+        </Modal>
+      )}
       {q && (
         <Modal
           busy={saving}
@@ -362,6 +431,10 @@ export function PreferencesSettings() {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                   dataset,
+                  intakePaused:
+                    state.currentUser?.role === "Admin" && dataset === "real"
+                      ? f.get("intakePaused") === "on"
+                      : undefined,
                   intakeQuery:
                     state.currentUser?.role === "Admin" && dataset === "real"
                       ? String(f.get("query"))
@@ -435,6 +508,21 @@ export function PreferencesSettings() {
               defaultValue={state.intakeQuery}
             />
           </Field>
+          <label className="checkbox-label">
+            <input
+              name="intakePaused"
+              type="checkbox"
+              defaultChecked={!!state.intakePaused}
+              disabled={
+                state.currentUser?.role !== "Admin" || dataset !== "real"
+              }
+            />{" "}
+            Pause automatic Gmail intake
+          </label>
+          <p className="fine-print">
+            Keep this enabled until you are ready to re-sync applications.
+            Uncheck and save to resume intake.
+          </p>
           <p>
             Only matching messages are previewed. Use Gmail subject, attachment,
             or date filters to keep intake relevant.

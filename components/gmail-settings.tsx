@@ -355,9 +355,12 @@ export function GmailSettings() {
           <h3>Google Sheets</h3>
           <Badge>Available when configured</Badge>
           <p>
-            One-way reporting sync. Configure a spreadsheet and authorize Sheets
-            above.
+            Manage the operational workbook, schema validation, migration and
+            backups in Data Management.
           </p>
+          <a className="button secondary" href="/settings/data">
+            Open Google Sheets & Data Management
+          </a>
         </Card>
       </div>
       {disconnect && (

@@ -3,7 +3,7 @@ import { evidenceInformation } from "@/lib/applicant-information";
 import { recordIssue } from "@/lib/server/diagnostics";
 import { intakeEvidence, messageBody } from "@/lib/intake-evidence";
 import { matchHiringNeed, senderName } from "@/lib/intake-matching";
-import { activeIntake } from "@/lib/data-policy";
+import { activeIntake, intakeCapacity } from "@/lib/data-policy";
 import "server-only";
 import { createHash } from "node:crypto";
 import { PDFParse } from "pdf-parse";
@@ -379,6 +379,14 @@ export async function confirmImport(
         continue;
       }
       const position = r.appliedPosition || "Position requires review";
+      if (intakeCapacity(state.applications).full) {
+        issues.push({
+          message: r.subject,
+          reason:
+            "Intake capacity is full (1,000 eligible applications). This message remains in Gmail and can be imported when space becomes available.",
+        });
+        continue;
+      }
       const location = r.appliedLocation || "Location requires review";
       const rules = need?.criteria || [];
       const now = new Date().toISOString();

@@ -20,6 +20,9 @@ export type ScreeningOutcome =
 export interface Applicant {
   id: string;
   name: string;
+  firstName?: string;
+  middleName?: string;
+  lastName?: string;
   email: string;
   phone: string;
   location: string;
@@ -96,6 +99,9 @@ export interface Application {
     warnings: string[];
   };
   hiringNeedId?: string;
+  assignedBranch?: string;
+  editedBy?: string;
+  editedAt?: string;
   resumeId?: string;
   resumeHash?: string;
   source?: string;
@@ -213,6 +219,7 @@ export interface AppState {
   importLimit?: number;
   importValidated?: boolean;
   intakeQuery?: string;
+  intakePaused?: boolean;
   trackerUpdatedAt?: string;
   syncStatus?: string;
   version: 1;

@@ -47,7 +47,7 @@ export async function POST(
     return Response.json({
       ...result,
       message: result.emailId
-        ? "Stage changed. Check email delivery status in the applicant timeline."
+        ? "Progression requested. The stage will advance after Gmail confirms the email was sent. Check Email History for delivery or retry."
         : "Demo stage changed. No email sent.",
     });
   } catch (e) {

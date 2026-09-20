@@ -192,7 +192,18 @@ export function Dashboard() {
             note={note}
             icon={<Icon size={20} />}
             href={`/applications?${status === "interviews" ? "view=interviews" : `status=${encodeURIComponent(status)}`}&month=current`}
-            tone={i === 0 ? "featured" : i === 5 ? "hired" : ""}
+            tone={
+              [
+                "featured",
+                "metric-new",
+                "metric-review",
+                "metric-approved",
+                "metric-interviews",
+                "hired",
+                "metric-rejected",
+                "metric-withdrawn",
+              ][i]
+            }
           />
         ))}
       </div>

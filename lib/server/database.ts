@@ -5,6 +5,9 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { Pool } from "pg";
 import { SafeError } from "./config";
+import { sheetsPrimary } from "./sheets-gateway";
+import { sheetsTransaction } from "./sheets-database";
+import { assertSourceWritable } from "./persistence-maintenance";
 
 type Row = Record<string, unknown>;
 export interface Transaction {
@@ -45,20 +48,29 @@ const schema = [
       `CREATE TABLE IF NOT EXISTS ${name} (id TEXT PRIMARY KEY, payload TEXT NOT NULL)`,
   ),
 ];
-// SQLite is durable on this local host. Serverless deployments MUST use PostgreSQL.
+// SQLite is durable on this local host. Serverless deployments require the
+// verified Sheets gateway or PostgreSQL; ephemeral local files are never primary.
 async function databaseTransaction<T>(
   fn: (tx: Transaction) => Promise<T>,
   options: { readOnly?: boolean; lockKey?: number } = {},
 ): Promise<T> {
-  if (process.env.DATABASE_URL) {
-    globalDb.djPool ||= new Pool({
-      connectionString: process.env.DATABASE_URL,
-      max: 5,
-      connectionTimeoutMillis: 10000,
-      statement_timeout: 30000,
-      query_timeout: 35000,
-      idle_in_transaction_session_timeout: 60000,
-    });
+  if (sheetsPrimary()) return sheetsTransaction(schema, fn, !!options.readOnly);
+  if (
+    process.env.DATABASE_URL &&
+    process.env.PERSISTENCE_PROVIDER !== "local"
+  ) {
+    if (!globalDb.djPool) {
+      globalDb.djPool = new Pool({
+        connectionString: process.env.DATABASE_URL,
+        max: 5,
+        connectionTimeoutMillis: 10000,
+        statement_timeout: 30000,
+        query_timeout: 35000,
+        idle_in_transaction_session_timeout: 60000,
+      });
+      // Idle provider disconnects must not become uncaught process exceptions.
+      globalDb.djPool.on("error", () => bufferFailure("database.unavailable"));
+    }
     // Existing deployments need a catalog read, not DDL locks on every cold
     // start. CREATE ... IF NOT EXISTS still takes relation locks in PostgreSQL.
     globalDb.djSchemaReady ||= (async () => {
@@ -88,10 +100,12 @@ async function databaseTransaction<T>(
         await client.query("SELECT pg_advisory_xact_lock($1)", [
           options.lockKey ?? 812901,
         ]);
-      const result = await fn({
+      const tx: Transaction = {
         query: async (sql, values = []) =>
           (await client.query(sql, values)).rows,
-      });
+      };
+      if (!options.readOnly) await assertSourceWritable(tx);
+      const result = await fn(tx);
       await client.query("COMMIT");
       return result;
     } catch (error) {
@@ -103,7 +117,7 @@ async function databaseTransaction<T>(
   }
   if (process.env.VERCEL)
     throw new SafeError(
-      "Configure DATABASE_URL before deploying. Local storage is not supported on Vercel.",
+      "Configure verified Google Sheets persistence before deploying. Local storage is not supported on Vercel.",
       503,
     );
   const run = (globalDb.djDbQueue || Promise.resolve()).then(async () => {
@@ -112,8 +126,11 @@ async function databaseTransaction<T>(
         recursive: true,
         mode: 0o700,
       });
+      const filename = process.env.LOCAL_DATABASE_FILE || "careers.sqlite";
+      if (!/^[a-zA-Z0-9_-]+\.sqlite$/.test(filename))
+        throw new SafeError("Invalid local storage filename.", 503);
       globalDb.djSqlite = new DatabaseSync(
-        path.join(process.cwd(), ".data", "careers.sqlite"),
+        path.join(process.cwd(), ".data", filename),
       );
       globalDb.djSqlite.exec(
         "PRAGMA journal_mode=WAL; PRAGMA busy_timeout=10000; PRAGMA foreign_keys=ON;",
@@ -124,7 +141,7 @@ async function databaseTransaction<T>(
     for (const sql of schema) db.exec(sql);
     db.exec("BEGIN IMMEDIATE");
     try {
-      const result = await fn({
+      const tx: Transaction = {
         query: async (sql, values = []) => {
           const order: number[] = [];
           const statement = db.prepare(
@@ -138,7 +155,9 @@ async function databaseTransaction<T>(
             ? (statement.all(...args) as Row[])
             : (statement.run(...args), []);
         },
-      });
+      };
+      if (!options.readOnly) await assertSourceWritable(tx);
+      const result = await fn(tx);
       db.exec("COMMIT");
       return result;
     } catch (error) {

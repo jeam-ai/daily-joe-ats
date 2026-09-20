@@ -29,6 +29,7 @@ interface Store {
   >;
   officialConnection?: StoredConnection;
   sheetsConnection?: StoredConnection;
+  storageConnection?: StoredConnection;
   events: IntegrationEvent[];
   requests: Record<
     string,

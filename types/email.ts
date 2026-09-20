@@ -1,4 +1,9 @@
 export interface EmailRecord {
+  pendingTransition?: {
+    from: import("./index").Stage;
+    next: import("./index").Application;
+    key: string;
+  };
   id: string;
   applicationId: string;
   actor: string;

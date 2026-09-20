@@ -29,6 +29,24 @@ Object.assign(process.env, {
   TOKEN_ENCRYPTION_KEY: "a".repeat(64),
 });
 process.chdir(mkdtempSync(path.join(tmpdir(), "djc-production-intake-")));
+test("paused intake reports its real state and never contacts Gmail even when forced", async () => {
+  const state = initialState();
+  state.intakePaused = true;
+  await transaction((tx) => putRecord(tx, "workspace", "main", state));
+  const original = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls++;
+    throw Error("Paused intake must not call providers");
+  };
+  try {
+    assert.equal((await intakeStatus()).status, "paused");
+    await syncIntake(undefined, true);
+    assert.equal(calls, 0);
+  } finally {
+    globalThis.fetch = original;
+  }
+});
 test("automatic intake resumes beyond ten, maintains latest 100 with an older queue, preserves rejected history and never sends mail", async () => {
   const initial = initialState();
   initial.qualifications.push({

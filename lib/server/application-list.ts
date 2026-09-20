@@ -23,7 +23,8 @@ export async function listApplications(params: URLSearchParams, demo = false) {
     return `$${values.length}`;
   };
   const json = (alias: string, path: string) =>
-    process.env.DATABASE_URL
+    process.env.DATABASE_URL &&
+    !["sheets", "local"].includes(process.env.PERSISTENCE_PROVIDER || "")
       ? `(${alias}.payload::jsonb #>> '{${path.replaceAll(".", ",")}}')`
       : `json_extract(${alias}.payload,'$.${path}')`;
   const where = [

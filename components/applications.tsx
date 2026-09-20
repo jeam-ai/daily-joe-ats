@@ -194,6 +194,13 @@ export function Applications({ talent = false }: { talent?: boolean }) {
         </div>
       </div>
       <Card className="workspace-card">
+        {state.intakePaused && dataset === "real" && (
+          <p className="warning-banner">
+            Gmail intake is paused for this fresh workspace. When you are ready,
+            reconnect Gmail and resume intake in Settings → Appearance &
+            Preferences.
+          </p>
+        )}
         <StageLegend compact />
         {!talent && dataset === "real" && (
           <p className="padded fine-print">
@@ -201,7 +208,8 @@ export function Applications({ talent = false }: { talent?: boolean }) {
             {state.applications.filter(activeIntake).length} active ·{" "}
             {state.applications.filter((a) => a.queueState === "Queued").length}{" "}
             queued. New applications enter the active window; older applications
-            remain available in Queued.
+            remain available in Queued. Intake retains up to 1,000 eligible
+            applications; closed records remain in history.
           </p>
         )}
         {!talent && (

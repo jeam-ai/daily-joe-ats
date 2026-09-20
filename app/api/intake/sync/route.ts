@@ -28,6 +28,12 @@ export async function POST(request: Request) {
     if (!canManage(user))
       throw new SafeError("Recruitment manager access required.", 403);
     const force = new URL(request.url).searchParams.get("force") === "1";
+    if ((await intakeStatus()).status === "paused")
+      return Response.json({
+        queued: false,
+        message:
+          "Gmail intake is paused. Resume it in Settings before importing applications.",
+      });
     after(async () => {
       const started = Date.now();
       await syncIntake(user, force, 140000).catch(() =>

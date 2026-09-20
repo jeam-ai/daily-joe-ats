@@ -55,6 +55,7 @@ export async function PATCH(request: Request) {
         user,
         body.intakeQuery,
         body.dataset === "demo" ? "demo" : "real",
+        body.intakePaused,
       ),
     );
   } catch (e) {

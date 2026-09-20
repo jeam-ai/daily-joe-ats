@@ -1,5 +1,16 @@
 import type { AppState, Application, User } from "@/types";
 
+export const ACTIVE_APPLICATION_LIMIT = 100;
+export const INTAKE_QUEUE_LIMIT = 1000;
+export const intakeCapacity = (applications: Application[]) => {
+  const retained = applications.filter(eligibleIntake).length;
+  return {
+    retained,
+    available: Math.max(0, INTAKE_QUEUE_LIMIT - retained),
+    full: retained >= INTAKE_QUEUE_LIMIT,
+  };
+};
+
 export const isDemo = (record: { isDemo?: boolean }) => record.isDemo === true;
 export const isVisible = (a: Application) => !a.deletedAt;
 export const canManage = (user?: User) =>
@@ -33,7 +44,9 @@ export function balanceIntakeWindow(applications: Application[]) {
         Date.parse(b.appliedAt) - Date.parse(a.appliedAt) ||
         b.id.localeCompare(a.id),
     );
-  const active = new Set(eligible.slice(0, 100).map((a) => a.id));
+  const active = new Set(
+    eligible.slice(0, ACTIVE_APPLICATION_LIMIT).map((a) => a.id),
+  );
   for (const a of applications)
     if (!a.isDemo)
       a.queueState = eligibleIntake(a)
@@ -41,5 +54,8 @@ export function balanceIntakeWindow(applications: Application[]) {
           ? "Active"
           : "Queued"
         : "Closed";
-  return { active: active.size, queued: Math.max(0, eligible.length - 100) };
+  return {
+    active: active.size,
+    queued: Math.max(0, eligible.length - ACTIVE_APPLICATION_LIMIT),
+  };
 }

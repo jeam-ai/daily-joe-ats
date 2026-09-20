@@ -144,6 +144,22 @@ export function AttendanceRulesEditor({
             />
           </Field>
         ))}
+        <Field label="System review above total worked hours">
+          <Input
+            type="number"
+            min={1}
+            max={24}
+            step="0.5"
+            value={rules.excessiveWorkedHours ?? 14}
+            onChange={(e) =>
+              set("excessiveWorkedHours", Number(e.target.value))
+            }
+          />
+          <small>
+            Default: more than 14 hours. This flags HR review; it does not
+            define payroll entitlement.
+          </small>
+        </Field>
         <Field label="Fallback expected hours (optional)">
           <Input
             type="number"

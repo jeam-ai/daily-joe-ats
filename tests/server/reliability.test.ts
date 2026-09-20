@@ -198,7 +198,7 @@ test("Proceed commits one transition and one encrypted email, duplicate sends ar
     proceedApplicant(id, input, user),
   ]);
   assert.equal(a.emailId, b.emailId);
-  assert.equal((await current(id)).interviews.length, 1);
+  assert.equal((await current(id)).interviews.length, 0);
   const original = globalThis.fetch;
   let sends = 0,
     mode = "rate";
@@ -218,7 +218,7 @@ test("Proceed commits one transition and one encrypted email, duplicate sends ar
   try {
     const failed = await deliverEmail(a.emailId!);
     assert.equal(failed.status, "Failed");
-    assert.equal((await current(id)).stage, "Initial Interview");
+    assert.equal((await current(id)).stage, "Screening");
     assert.equal((await deliverEmail(a.emailId!)).status, "Failed");
     assert.equal(sends, 1);
     mode = "success";
@@ -227,13 +227,15 @@ test("Proceed commits one transition and one encrypted email, duplicate sends ar
       deliverEmail(a.emailId!, user, true),
     ]);
     assert.ok(results.some((r) => r.status === "Sent"));
+    assert.equal((await current(id)).stage, "Initial Interview");
+    assert.equal((await current(id)).interviews.length, 1);
     assert.equal(sends, 2);
     assert.equal((await deliverEmail(a.emailId!, user, true)).status, "Sent");
     assert.equal(sends, 2);
     const history = await emailHistory(id, user);
     assert.equal(history.length, 1);
     assert.equal(history[0].messageId, "sent123");
-    assert.ok(history[0].body.includes("FICTIONAL"));
+    assert.ok(history[0].body.includes("Fictional"));
     const stored = await readTransaction((tx) =>
       readRecord<string>(tx, "email_outbox", a.emailId!),
     );

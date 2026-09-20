@@ -45,12 +45,7 @@ export async function POST(request: Request, { params }: Context) {
         );
       return {
         a,
-        need: s.hiringNeeds.find((n) => n.id === a.hiringNeedId) || {
-          position: a.position,
-          location: a.location,
-          criteria: s.qualifications.find((q) => q.position === a.position)
-            ?.rules,
-        },
+        need: s.hiringNeeds.find((n) => n.id === a.hiringNeedId),
         revision: s.revision,
       };
     });

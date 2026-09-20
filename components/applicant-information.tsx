@@ -4,6 +4,7 @@ import { requestJson } from "@/lib/client-request";
 import type { Application } from "@/types";
 import { Card, Badge } from "./ui";
 import { useApp } from "./provider";
+import { missingInformation } from "@/lib/applicant-information";
 export function ApplicantInformation({
   application: a,
 }: {
@@ -64,7 +65,15 @@ export function ApplicantInformation({
           <div key={key}>
             <dt>{label}</dt>
             <dd>
-              {value || "Could not be determined"}
+              {missingInformation(value)
+                ? key === "position"
+                  ? "Applied position was not clearly stated in the submission."
+                  : key === "location"
+                    ? "Preferred work location was not clearly stated."
+                    : key === "residence"
+                      ? "Residence not confirmed from submitted information."
+                      : "Not stated in submitted information"
+                : value}
               {a.information?.fields[key!] && (
                 <>
                   <br />
@@ -91,7 +100,7 @@ export function ApplicantInformation({
                 : "info-banner"
             }
           >
-            AI Integration extraction: {extraction[0].status}.{" "}
+            AI Assist extraction: {extraction[0].status}.{" "}
             {extraction[0].error ||
               "Evidence-supported clarification only; HR verifies applicant information."}
           </p>
@@ -99,6 +108,12 @@ export function ApplicantInformation({
         {extractionError && <p className="fine-print">{extractionError}</p>}
         <h3>Recruitment assignment</h3>
         <p>{need ? `${need.position} — ${need.location}` : "Unassigned"}</p>
+        <p>Assigned branch: {a.assignedBranch || "Unassigned"}</p>
+        {a.editedAt && (
+          <p className="fine-print">
+            Edited by {a.editedBy} · {new Date(a.editedAt).toLocaleString()}
+          </p>
+        )}
         {a.queueState && <Badge>{a.queueState}</Badge>}
         {!!a.information?.conflicts.length && (
           <div className="warning-banner">

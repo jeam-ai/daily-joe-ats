@@ -32,7 +32,13 @@ export const sourceFingerprint = (a: Application) =>
     JSON.stringify({
       email: a.applicant.email,
       name: a.applicant.name,
+      firstName: a.applicant.firstName,
+      lastName: a.applicant.lastName,
+      position: a.position,
+      location: a.location,
+      hiringNeedId: a.hiringNeedId,
       stage: a.stage,
+      status: a.status,
       interviews: a.interviews,
     }),
   );
@@ -214,13 +220,15 @@ export async function proceedApplicant(
         notes: "",
         actor: user.email,
       };
-    state.applications = state.applications.map((v) =>
-      v.id === id ? next : v,
-    );
-    await audit(tx, user.email, "application.stage_changed", id, {
-      previous: a.stage,
-      next: next.stage,
-    });
+    if (a.isDemo) {
+      state.applications = state.applications.map((v) =>
+        v.id === id ? next : v,
+      );
+      await audit(tx, user.email, "application.stage_changed", id, {
+        previous: a.stage,
+        next: next.stage,
+      });
+    }
     let emailId: string | undefined;
     if (!a.isDemo) {
       const template = workflowTemplate(state, next.stage);
@@ -261,8 +269,25 @@ export async function proceedApplicant(
         ).id;
       }
     }
+    if (emailId) {
+      const mail = await readMail(tx, emailId);
+      if (mail) {
+        mail.pendingTransition = { from: a.stage, next, key };
+        mail.sourceFingerprint = sourceFingerprint(a);
+        await saveMail(tx, mail);
+        await audit(tx, user.email, "application.stage_requested", id, {
+          previous: a.stage,
+          next: next.stage,
+          emailId,
+        });
+      }
+    }
     await saveState(tx, state, { sync: !a.isDemo });
-    const result = { stage: next.stage, emailId };
+    const result = {
+      stage: a.isDemo ? next.stage : a.stage,
+      emailId,
+      pendingStage: a.isDemo ? undefined : next.stage,
+    };
     await putRecord(tx, "transitions", key, result);
     return result;
   });
@@ -284,6 +309,136 @@ export async function emailHistory(applicationId: string, user: User) {
     return (await Promise.all(ids.map((id) => readMail(tx, id))))
       .filter((m): m is EmailRecord => !!m)
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  });
+}
+async function applyNotifiedTransition(
+  tx: Transaction,
+  state: AppState,
+  mail: EmailRecord,
+) {
+  const pending = mail.pendingTransition;
+  if (!pending) return;
+  const a = state.applications.find((v) => v.id === mail.applicationId);
+  if (
+    !a ||
+    a.deletedAt ||
+    a.stage !== pending.from ||
+    sourceFingerprint(a) !== mail.sourceFingerprint
+  ) {
+    await recordIssue(
+      "notification.failed",
+      { entityId: mail.applicationId, jobId: mail.id },
+      tx,
+    );
+    await audit(
+      tx,
+      mail.actor,
+      "application.stage_requires_review",
+      mail.applicationId,
+      {
+        emailId: mail.id,
+        reason:
+          "Applicant changed before sent email confirmation. Stage was preserved.",
+      },
+    );
+    return;
+  }
+  const next = pending.next,
+    previous = a.stage;
+  Object.assign(a, {
+    stage: next.stage,
+    status: next.status,
+    interviews: next.interviews,
+    hiredAt: next.hiredAt,
+    employment: next.employment,
+    notes: [...new Set([...a.notes, ...next.notes])],
+    lastActivity: new Date().toISOString(),
+  });
+  a.timeline.push({
+    id: crypto.randomUUID(),
+    timestamp: a.lastActivity,
+    user: mail.actor,
+    action: `Proceeded to ${a.stage} after email confirmation`,
+    applicationId: a.id,
+    metadata: { previous, next: a.stage, emailId: mail.id },
+  });
+  await audit(tx, mail.actor, "application.stage_changed", a.id, {
+    previous,
+    next: a.stage,
+    emailId: mail.id,
+  });
+  await putRecord(tx, "transitions", pending.key, {
+    stage: a.stage,
+    emailId: mail.id,
+  });
+  delete mail.pendingTransition;
+  await saveMail(tx, mail);
+}
+export async function refreshFailedEmail(id: string, user: User) {
+  if (!canManage(user))
+    throw new SafeError("Recruitment manager access required.", 403);
+  return transaction(async (tx) => {
+    const m = await readMail(tx, id);
+    if (!m || m.status !== "Failed")
+      throw new SafeError(
+        "Only a confirmed failed email can be prepared again. Verify uncertain delivery in Gmail first.",
+        409,
+      );
+    const state = await getState(tx),
+      a = state.applications.find(
+        (a) => a.id === m.applicationId && !a.deletedAt && !a.isDemo,
+      );
+    if (
+      !a ||
+      (m.pendingTransition && a.stage !== m.pendingTransition.from) ||
+      ["Rejected", "Withdrawn", "Talent Pool"].includes(a.status)
+    )
+      throw new SafeError(
+        "The applicant workflow changed. Review the applicant before preparing another email.",
+        409,
+      );
+    const target = m.pendingTransition
+      ? {
+          ...m.pendingTransition.next,
+          applicant: a.applicant,
+          position: a.position,
+          location: a.location,
+          hiringNeedId: a.hiringNeedId,
+        }
+      : a;
+    const template =
+      state.emailTemplates.find(
+        (t) => t.id === m.templateId && t.enabled !== false,
+      ) || workflowTemplate(state, target.stage);
+    if (!template)
+      throw new SafeError("Configure this workflow's email template first.");
+    const rendered = renderEmail(template, emailContext(target, state, user));
+    if (rendered.missing.length)
+      throw new SafeError(
+        `Missing template values: ${rendered.missing.join(", ")}.`,
+      );
+    Object.assign(m, {
+      subject: rendered.subject,
+      body: rendered.body,
+      recipient: a.applicant.email,
+      templateId: template.id,
+      templateName: template.name,
+      templateVersion: hash(JSON.stringify(template)),
+      sourceFingerprint: sourceFingerprint(a),
+      errorCode: "reviewed",
+      error:
+        "Preview refreshed. Review the recipient and message, then choose Retry failed email. No email has been sent.",
+    });
+    await saveMail(tx, m);
+    await event(
+      tx,
+      state,
+      m,
+      "email.preview_refreshed",
+      "Failed email preview refreshed for HR review",
+    );
+    await saveState(tx, state, { sync: false });
+    return m;
   });
 }
 export async function deliverEmail(id: string, user?: User, retry = false) {
@@ -325,13 +480,33 @@ export async function deliverEmail(id: string, user?: User, retry = false) {
     if (retry) {
       if (!canManage(user!))
         throw new SafeError("Recruitment manager access required.", 403);
+      if (m.errorCode === "changed")
+        throw new SafeError(
+          "Refresh the email preview and review the new recipient/message before retrying.",
+          409,
+        );
       if (m.errorCode === "template") {
         const template =
           state.emailTemplates.find((t) => t.id === m.templateId) ||
-          workflowTemplate(state, a.stage);
+          workflowTemplate(state, m.pendingTransition?.next.stage || a.stage);
         if (!template)
           throw new SafeError("Configure this stage's email template first.");
-        const rendered = renderEmail(template, emailContext(a, state, user!));
+        const rendered = renderEmail(
+          template,
+          emailContext(
+            m.pendingTransition
+              ? {
+                  ...m.pendingTransition.next,
+                  applicant: a.applicant,
+                  position: a.position,
+                  location: a.location,
+                  hiringNeedId: a.hiringNeedId,
+                }
+              : a,
+            state,
+            user!,
+          ),
+        );
         if (rendered.missing.length)
           throw new SafeError(
             `Missing template values: ${rendered.missing.join(", ")}.`,
@@ -410,6 +585,7 @@ export async function deliverEmail(id: string, user?: User, retry = false) {
       const state = await getState(tx);
       await saveMail(tx, m);
       await event(tx, state, m, "email.sent", "Email sent");
+      await applyNotifiedTransition(tx, state, m);
       await saveState(tx, state, { sync: false });
     });
     // Delivery is already committed; monitoring failure must not change it.
@@ -510,6 +686,7 @@ export async function verifySentEmail(id: string, user: User) {
       "email.sent_verified",
       "Email send verified in Gmail",
     );
+    await applyNotifiedTransition(tx, state, m);
     await saveState(tx, state, { sync: false });
   });
   await resolveIssue("notification.failed", {

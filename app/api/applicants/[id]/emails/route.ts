@@ -5,6 +5,7 @@ import {
   emailHistory,
   deliverEmail,
   verifySentEmail,
+  refreshFailedEmail,
 } from "@/lib/server/email-outbox";
 import { safeError } from "@/lib/server/response";
 import { SafeError } from "@/lib/server/config";
@@ -53,6 +54,8 @@ export async function POST(
       return Response.json({ email: await verifySentEmail(mail.id, user) });
     if (body.action === "retry")
       return Response.json({ email: await deliverEmail(mail.id, user, true) });
+    if (body.action === "prepare")
+      return Response.json({ email: await refreshFailedEmail(mail.id, user) });
     throw new SafeError("Choose Retry or Check Gmail.");
   } catch (e) {
     return safeError(e);

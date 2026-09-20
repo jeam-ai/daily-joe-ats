@@ -1,3 +1,5 @@
+import { formalName } from "@/lib/names";
+import { intakeCapacity } from "@/lib/data-policy";
 import { defaultEmailTemplate } from "@/lib/email-templates";
 import { unresolved } from "./diagnostics";
 import type { DiagnosticIssue } from "@/types/operations";
@@ -37,6 +39,9 @@ export async function getState(tx: Transaction): Promise<AppState> {
     if (a.source === "Demo") a.isDemo = true;
   if (stored) {
     balanceIntakeWindow(stored.applications);
+    for (const name of ["Application Received", "Withdrawal"])
+      if (!stored.emailTemplates.some((t) => t.name === name))
+        stored.emailTemplates.push(defaultEmailTemplate(name));
     // Upgrade only the exact bundled placeholders; preserve authored templates.
     for (const t of stored.emailTemplates) {
       if (
@@ -62,7 +67,25 @@ export async function saveState(
   delete state.currentUser;
   delete state.demoAvailable;
   state.revision = (state.revision || 0) + 1;
+  const priorWindow = new Map(
+    state.applications.map((a) => [a.id, a.queueState]),
+  );
   balanceIntakeWindow(state.applications);
+  for (const a of state.applications)
+    if (priorWindow.get(a.id) === "Queued" && a.queueState === "Active") {
+      a.timeline.push({
+        id: crypto.randomUUID(),
+        timestamp: new Date().toISOString(),
+        user: "System",
+        action: "Promoted from intake queue",
+        applicationId: a.id,
+        metadata: { previous: "Queued", next: "Active" },
+      });
+      await writeAudit(tx, "System", "intake.promoted", a.id, {
+        previous: "Queued",
+        next: "Active",
+      });
+    }
   if (options.sync !== false) state.trackerUpdatedAt = new Date().toISOString();
   for (const need of state.hiringNeeds)
     if (options.sync !== false || need.isDemo)
@@ -206,12 +229,23 @@ export async function audit(
   return writeAudit(tx, actor, action, applicationId, metadata);
 }
 export async function findUser(email: string) {
-  return readTransaction(
-    async (tx) =>
-      (await getState(tx)).users?.find(
-        (u) => u.email.toLowerCase() === email.toLowerCase() && u.active,
-      ) || null,
-  );
+  return readTransaction(async (tx) => {
+    const rows = await tx.query(
+      "SELECT payload FROM users WHERE email=$1 AND active=1",
+      [email.toLowerCase()],
+    );
+    if (rows[0]) return JSON.parse(String(rows[0].payload)) as User;
+    // Empty, newly initialized installations only. Never download the entire
+    // recruitment workspace for every session check.
+    const count = Number(
+      (await tx.query("SELECT COUNT(*) AS n FROM users"))[0].n,
+    );
+    return count === 0
+      ? initialState().users?.find(
+          (u) => u.email === email.toLowerCase() && u.active,
+        ) || null
+      : null;
+  });
 }
 export async function publicState(user: User) {
   return readTransaction(async (tx) => {
@@ -268,9 +302,20 @@ export async function updatePreferences(
   user: User,
   intakeQuery?: unknown,
   dataset: "real" | "demo" = "real",
+  intakePaused?: unknown,
 ) {
   const parsed = stateSchema.shape.preferences.safeParse(input);
   if (!parsed.success) throw new SafeError("Check your preference selections.");
+  if (
+    intakePaused !== undefined &&
+    (typeof intakePaused !== "boolean" ||
+      user.role !== "Admin" ||
+      dataset !== "real")
+  )
+    throw new SafeError(
+      "Only an administrator in the real workspace can pause or resume intake.",
+      403,
+    );
   if (intakeQuery !== undefined) {
     if (user.role !== "Admin" || dataset !== "real")
       throw new SafeError(
@@ -294,10 +339,15 @@ export async function updatePreferences(
     };
     state.preferences = { ...state.preferences, ...parsed.data };
     if (typeof intakeQuery === "string") state.intakeQuery = intakeQuery.trim();
+    if (typeof intakePaused === "boolean") state.intakePaused = intakePaused;
     await saveState(tx, state, { sync: false });
     await audit(tx, user.email, "preferences.updated", undefined, {
       previous,
-      next: { preferences: state.preferences, intakeQuery: state.intakeQuery },
+      next: {
+        preferences: state.preferences,
+        intakeQuery: state.intakeQuery,
+        intakePaused: state.intakePaused,
+      },
     });
     return visibleState(state, user);
   });
@@ -379,6 +429,7 @@ export async function updateState(
         "importLimit",
         "importValidated",
         "intakeQuery",
+        "intakePaused",
       ] as const;
       const changesRealRecords = (
         ["applications", "hiringNeeds", "notifications"] as const
@@ -420,12 +471,18 @@ export async function updateState(
         "importLimit",
         "importValidated",
         "intakeQuery",
+        "intakePaused",
       ] as const;
       if (
         adminKeys.some((k) => changed(before[k], next[k])) &&
         user.role !== "Admin"
       )
         throw new DomainError("An administrator must change these settings.");
+      if (
+        new Set(next.qualifications.map((q) => q.position.trim().toLowerCase()))
+          .size !== next.qualifications.length
+      )
+        throw new DomainError("Each position must have a unique name.");
       if (
         changed(before.emailTemplates, next.emailTemplates) ||
         changed(before.hiringNeeds, next.hiringNeeds)
@@ -478,6 +535,28 @@ export async function updateState(
         if (!changed(b, a)) continue;
         assertEditor(user, b);
         validateApplicationChange(b, a, confirmed);
+        if (
+          intakeCapacity(next.applications).retained >
+          Math.max(1000, intakeCapacity(before.applications).retained)
+        )
+          throw new DomainError(
+            "Intake capacity is full (1,000 eligible applications).",
+          );
+        if (
+          changed(b.applicant, a.applicant) ||
+          b.position !== a.position ||
+          b.location !== a.location ||
+          b.assignedBranch !== a.assignedBranch ||
+          b.appliedAt !== a.appliedAt ||
+          b.hiringNeedId !== a.hiringNeedId
+        ) {
+          a.editedBy = user.email;
+          a.editedAt = new Date().toISOString();
+          a.applicant.name = formalName(a.applicant.name);
+        } else {
+          a.editedBy = b.editedBy;
+          a.editedAt = b.editedAt;
+        }
         if (!a.isDemo && a.stage !== b.stage)
           throw new DomainError(
             "Use Proceed to review the stage email and save this transition safely.",
@@ -487,6 +566,9 @@ export async function updateState(
         );
         for (const key of [
           "name",
+          "firstName",
+          "middleName",
+          "lastName",
           "email",
           "phone",
           "location",

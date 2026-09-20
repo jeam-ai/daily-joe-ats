@@ -19,6 +19,7 @@ import {
   readTransaction,
   readRecord,
   putRecord,
+  type Transaction,
 } from "./database";
 import { audit, getState, saveState } from "./repository";
 import { withDeadline } from "./deadline";
@@ -35,6 +36,7 @@ export const odooRulesSchema = z.object({
   ]),
   graceMinutes: z.number().min(0).max(120),
   overtimeMinutes: z.number().min(0).max(240),
+  excessiveWorkedHours: z.number().min(1).max(24).default(14),
   discrepancyMinutes: z.number().min(0).max(120),
   expectedHours: z.number().min(0).max(24).nullable(),
   workDays: z.array(z.number().int().min(0).max(6)).max(7),
@@ -48,6 +50,30 @@ export type OdooBatch = OdooAnalysis & {
   fingerprint: string;
   previousBatchId?: string;
 };
+async function saveExceptions(tx: Transaction, batch: OdooBatch) {
+  // Named read model: the encrypted batch remains the source of truth. Stable
+  // batch/day IDs let HR inspect exceptions without duplicating analyses.
+  const rows = batch.records.filter(
+    (r) =>
+      r.issues.length ||
+      r.review.status === "For Review" ||
+      r.review.history.length,
+  );
+  for (const r of rows)
+    await putRecord(tx, "odoo_exceptions", `${batch.id}:${r.id}`, {
+      id: `${batch.id}:${r.id}`,
+      batchId: batch.id,
+      name: r.employee,
+      date: r.date,
+      results: r.results,
+      issues: r.issues,
+      worked: r.worked,
+      expected: r.expected,
+      status: r.review.status,
+      review: r.review,
+      createdAt: batch.analyzedAt,
+    });
+}
 type Upload = {
   uploadedAt: string;
   actor: string;
@@ -278,6 +304,7 @@ export async function analyzeOdooUpload(
         seal(upload.files, config().encryptionKey),
       );
       await putRecord(tx, "odoo_fingerprints", fingerprint, batch.id);
+      await saveExceptions(tx, batch);
       await putRecord(tx, "odoo_cutoffs", cutoff, batch.id);
       const flagged = batch.records.filter(
         (r) => r.review.status === "For Review",
@@ -364,6 +391,18 @@ export async function reviewOdoo(input: unknown, user: User) {
       ],
     };
     batch.revision++;
+    await saveExceptions(tx, batch);
+    await putRecord(tx, "odoo_reviews", crypto.randomUUID(), {
+      batchId: batch.id,
+      recordId: row.id,
+      employee: row.employee,
+      date: row.date,
+      previous,
+      status: body.status,
+      note: body.note,
+      reviewer: user.email,
+      createdAt: now,
+    });
     await putRecord(
       tx,
       "odoo_batches",

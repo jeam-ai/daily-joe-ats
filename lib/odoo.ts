@@ -1,5 +1,5 @@
 import { attendanceTimestamp, defaultAttendanceRules } from "./timekeeping";
-export const ODOO_ANALYSIS_VERSION = 3;
+export const ODOO_ANALYSIS_VERSION = 4;
 
 export type OdooCell = string | number | null;
 export type OdooMatrix = OdooCell[][];
@@ -44,6 +44,7 @@ export type OdooRules = {
   end: string;
   graceMinutes: number;
   overtimeMinutes: number;
+  excessiveWorkedHours?: number;
   discrepancyMinutes: number;
   expectedHours: number | null;
   workDays: number[];
@@ -54,6 +55,7 @@ export const defaultOdooRules: OdooRules = {
   end: "",
   graceMinutes: 0,
   overtimeMinutes: 0,
+  excessiveWorkedHours: 14,
   discrepancyMinutes: 1,
   expectedHours: null,
   workDays: [],
@@ -464,8 +466,7 @@ function* analyzeOdooSteps(
       const checkIn = starts.length ? new Date(starts[0]).toISOString() : "",
         checkOut = ends.length ? new Date(ends.at(-1)!).toISOString() : "";
       if (!raw.length) {
-        if (expected === 0) results.push("Rest Day / Day Off");
-        else {
+        {
           results.push("No Attendance");
           issues.push(
             expected === null
@@ -531,7 +532,12 @@ function* analyzeOdooSteps(
       }
       if (raw.length && !pivot.length)
         issues.push("No corresponding daily Pivot record was found.");
-      if (expected === 0 && raw.length) results.push("Rest Day / Day Off");
+      if (expected === 0 || expected === null) {
+        results.push("System Error — Expected hours missing or zero");
+        issues.push(
+          "The system could not determine scheduled working hours for this date. HR must verify the schedule before payroll use.",
+        );
+      }
       if (!incomplete && difference !== null && difference < -1e-7)
         results.push("Undertime");
       if (
@@ -542,6 +548,12 @@ function* analyzeOdooSteps(
           (extra !== null && extra * 60 > rules.overtimeMinutes + 1e-7))
       )
         results.push("Overtime");
+      if (worked !== null && worked > (rules.excessiveWorkedHours ?? 14)) {
+        results.push("Excessive Overtime / System Review");
+        issues.push(
+          `Total worked time exceeds the configured ${rules.excessiveWorkedHours ?? 14}-hour system-review threshold. This is a review flag, not a payroll policy. HR review is required before payroll use.`,
+        );
+      }
       let lateMinutes: number | null = null,
         earlyMinutes: number | null = null;
       if (!rules.start || !rules.end)

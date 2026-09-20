@@ -1,4 +1,10 @@
 import "server-only";
+import { sheetsConfiguration, validateWorkbook } from "./sheets-management";
+import {
+  sheetsPrimary,
+  gatewayRequest,
+  gatewayConfigured,
+} from "./sheets-gateway";
 import { createRequire } from "node:module";
 import type { HealthCheck } from "@/types/operations";
 import type { User } from "@/types";
@@ -53,7 +59,7 @@ const definitions = [
   ["storage", "Application Storage"],
   ["jobs", "Background jobs"],
   ["mail", "Workflow email queue"],
-  ["extraction", "AI Integration extraction"],
+  ["extraction", "AI Assist extraction"],
   ["timekeeping", "Timekeeping processing"],
   ["window", "Application intake window"],
 ];
@@ -122,6 +128,15 @@ async function performChecks(user: User): Promise<HealthSnapshot> {
   const checks = await Promise.all([
     check("database", async () => {
       try {
+        if (sheetsPrimary()) {
+          const status = await gatewayRequest<{ verified: boolean }>("status");
+          return {
+            status: status.verified ? "Healthy" : "Attention Needed",
+            detail: status.verified
+              ? "Google Sheets storage is reachable and its migration is verified."
+              : "Google Sheets migration requires verification.",
+          };
+        }
         await withDeadline(
           readTransaction(async (tx) => {
             await tx.query("SELECT 1 AS connected");
@@ -133,7 +148,12 @@ async function performChecks(user: User): Promise<HealthSnapshot> {
         return {
           status: "Healthy",
           detail:
-            (process.env.DATABASE_URL ? "PostgreSQL" : "Local SQLite") +
+            (sheetsPrimary()
+              ? "Google Sheets transaction gateway"
+              : process.env.PERSISTENCE_PROVIDER !== "local" &&
+                  process.env.DATABASE_URL
+                ? "PostgreSQL"
+                : "Local SQLite") +
             " connectivity and required table reads verified. No schema changes were performed by this check.",
         };
       } catch {
@@ -214,6 +234,27 @@ async function performChecks(user: User): Promise<HealthSnapshot> {
       };
     }),
     check("sheets", async () => {
+      const configured = await sheetsConfiguration();
+      if (configured) {
+        if (sheetsPrimary() && gatewayConfigured()) {
+          const status = await gatewayRequest<{
+            verified: boolean;
+            revision: number;
+          }>("status");
+          return {
+            status: status.verified ? "Healthy" : "Attention Needed",
+            detail: `Google Sheets revision ${status.revision}. Schema: ${configured.schema || "Not checked"}. Migration: ${configured.migration?.status || "Not recorded"}.`,
+            href: "/settings/data",
+            action: "View storage",
+          };
+        }
+        return {
+          status: configured.error ? "Attention Needed" : "Not Verified",
+          detail: `Workbook configured. Schema: ${configured.schema || "Not checked"}. Last successful operation: ${displayTime(configured.lastSuccess)}. Migration: ${configured.migration?.status || "Not started"}. Source database remains primary.`,
+          href: "/settings/data",
+          action: "Validate storage",
+        };
+      }
       if (!process.env.GOOGLE_SHEETS_ID)
         return {
           status: "Not Configured",

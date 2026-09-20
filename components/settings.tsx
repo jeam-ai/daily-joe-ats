@@ -38,6 +38,7 @@ import {
   Avatar,
 } from "./ui";
 import { GmailSettings } from "./gmail-settings";
+import { SheetsSettings } from "./sheets-settings";
 import {
   UsersSettings,
   LocationsSettings,
@@ -54,7 +55,8 @@ const sections = [
   ["locations", "Locations", ClipboardList],
 
   ["integrations", "Gmail & Spreadsheet", Plug],
-  ["ai", "AI Integration", Plug],
+  ["ai", "AI Assist", Plug],
+  ["data", "Migration, Backup & Google Sheets", SlidersHorizontal],
   ["timekeeping", "Attendance & Odoo Mapping", ClipboardList],
   ["preferences", "Appearance & Preferences", SlidersHorizontal],
   ["health", "System Health", SlidersHorizontal],
@@ -140,6 +142,7 @@ export function Settings({ section = "integrations" }: { section?: string }) {
           )}
           <fieldset className="settings-section-fields" disabled={demoReadOnly}>
             {section === "health" && <SystemHealth />}
+            {section === "data" && <SheetsSettings />}
             {section === "diagnostics" && <Diagnostics />}
             {section === "audit" && <AuditHistory />}
             {section === "ai" && (

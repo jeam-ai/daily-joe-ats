@@ -1,5 +1,6 @@
-import { activeIntake } from "@/lib/data-policy";
+import { activeIntake, intakeCapacity } from "@/lib/data-policy";
 import "server-only";
+import { formalName } from "@/lib/names";
 import { z } from "zod";
 import type { Application, User } from "@/types";
 import { canManage } from "@/lib/data-policy";
@@ -11,6 +12,11 @@ import { purgeDemoApplication } from "./demo";
 const createSchema = z.object({
   requestId: z.uuid(),
   name: z.string().trim().min(1).max(200),
+  firstName: z.string().trim().max(100).optional(),
+  middleName: z.string().trim().max(100).optional(),
+  lastName: z.string().trim().max(100).optional(),
+  assignedBranch: z.string().trim().max(200).optional(),
+  appliedAt: z.iso.datetime().optional(),
   email: z.email().max(254),
   phone: z.string().trim().max(60),
   position: z.string().trim().min(1).max(200),
@@ -37,6 +43,11 @@ export async function createApplicant(input: unknown, user: User) {
     );
     if (previous) return previous;
     const state = await getState(tx);
+    if (intakeCapacity(state.applications).full)
+      throw new SafeError(
+        "Intake capacity is full (1,000 eligible applications). Complete or close an application before adding another.",
+        409,
+      );
     if (
       state.applications.some(
         (a) => a.applicant.email.toLowerCase() === values.email.toLowerCase(),
@@ -88,7 +99,10 @@ export async function createApplicant(input: unknown, user: User) {
       },
       applicant: {
         id: crypto.randomUUID(),
-        name: values.name,
+        name: formalName(values.name),
+        firstName: values.firstName,
+        middleName: values.middleName,
+        lastName: values.lastName,
         email: values.email.toLowerCase(),
         phone: values.phone,
         location: values.residence || "Residence requires review",
@@ -100,7 +114,10 @@ export async function createApplicant(input: unknown, user: User) {
       position: values.position,
       location: values.location,
       hiringNeedId: need?.id,
-      appliedAt: now,
+      appliedAt: values.appliedAt || now,
+      assignedBranch: values.assignedBranch,
+      editedBy: user.email,
+      editedAt: now,
       lastActivity: now,
       stage: "Screening",
       status: "New",
@@ -232,6 +249,14 @@ export async function restoreApplicant(id: string, user: User) {
       (a) => a.id === id && a.deletedAt && !a.isDemo,
     );
     if (!a) throw new SafeError("Archived applicant not found.", 404);
+    if (
+      !["Hired", "Rejected", "Withdrawn", "Talent Pool"].includes(a.status) &&
+      intakeCapacity(state.applications).full
+    )
+      throw new SafeError(
+        "Intake capacity is full. Close an eligible application before restoring this record.",
+        409,
+      );
     delete a.deletedAt;
     delete a.deletedBy;
     delete a.deletionReason;

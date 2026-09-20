@@ -92,8 +92,18 @@ export function ApplicantTools({
           </p>
           <div className="inline-actions spaced">
             <Badge tone={directMatches ? "green" : "orange"}>
-              {directMatches} direct match{directMatches === 1 ? "" : "es"}
+              Qualification match:{" "}
+              {a.screening.criteria.length
+                ? Math.round(
+                    (directMatches / a.screening.criteria.length) * 100,
+                  ) + "%"
+                : "Not assessed"}
             </Badge>
+            <span className="fine-print">
+              {directMatches} of {a.screening.criteria.length} configured
+              qualifications met. MET ÷ all configured criteria; unclear and
+              unassessed criteria do not count as met. Informational only.
+            </span>
             <Badge tone={needsReview ? "orange" : "green"}>
               {needsReview}{" "}
               {needsReview === 1 ? "criterion needs" : "criteria need"} review

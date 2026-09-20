@@ -1,3 +1,4 @@
+import { formalName } from "./names";
 import { senderName } from "./intake-matching";
 export interface IntakeEvidence {
   name: string;
@@ -151,14 +152,7 @@ export function intakeEvidence(input: {
   const explicitResumeName = named(resume);
   const resumeName = explicitResumeName || headingName;
   const submittedName = named(body);
-  const normalizeName = (name: string) =>
-    name.includes(",")
-      ? name
-          .split(",")
-          .reverse()
-          .map((s) => s.trim())
-          .join(" ")
-      : name;
+  const normalizeName = formalName;
   const residence =
     (resume + "\n" + body)
       .match(

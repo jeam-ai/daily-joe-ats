@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { RefreshCw } from "lucide-react";
 import { requestJson } from "@/lib/client-request";
-import { canManage, activeIntake } from "@/lib/data-policy";
+import { canManage } from "@/lib/data-policy";
 import type { IntakeSync } from "@/lib/google/gmail/sync";
 import { useApp } from "./provider";
 import { Button } from "./ui";
@@ -14,9 +14,7 @@ export function IntakeSyncStatus() {
     [busy, setBusy] = useState(false),
     last = useRef("");
   const enabled = dataset === "real" && canManage(state?.currentUser);
-  const atCapacity = useRef(false);
-  atCapacity.current =
-    (state?.applications.filter(activeIntake).length || 0) >= 100;
+  const paused = !!state?.intakePaused;
   async function check() {
     const value = await requestJson<IntakeSync>("/api/intake/sync");
     setJob(value);
@@ -27,7 +25,7 @@ export function IntakeSyncStatus() {
     return value;
   }
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled || paused) return;
     let stopped = false,
       timer: ReturnType<typeof setTimeout>;
     async function tick() {
@@ -45,7 +43,9 @@ export function IntakeSyncStatus() {
                 : 60000;
         setError("");
         if (
-          !["checking", "processing", "authorization"].includes(value.status) &&
+          !["checking", "processing", "authorization", "paused"].includes(
+            value.status,
+          ) &&
           (value.consecutiveFailures || 0) < 3 &&
           (!value.retryAt || value.retryAt <= Date.now())
         ) {
@@ -72,14 +72,16 @@ export function IntakeSyncStatus() {
       stopped = true;
       clearTimeout(timer);
     };
-  }, [enabled]);
+  }, [enabled, paused]);
   if (!enabled) return null;
   return (
     <div className="intake-sync" aria-label="Automatic Gmail intake">
       <div>
         <strong>Gmail intake</strong>
         <span role="status">
-          {error || job?.message || "Checking sync status…"}
+          {paused
+            ? "Paused — applications will not be imported until intake is resumed."
+            : error || job?.message || "Checking sync status…"}
         </span>
         {job?.completedAt && (
           <small>
@@ -100,7 +102,11 @@ export function IntakeSyncStatus() {
         ) : null}
       </div>
       <div className="button-row">
-        {job?.status === "authorization" ? (
+        {paused ? (
+          <a className="button secondary" href="/settings/preferences">
+            Manage intake
+          </a>
+        ) : job?.status === "authorization" ? (
           <a className="button secondary" href="/settings/integrations">
             Connect Gmail
           </a>

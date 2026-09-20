@@ -40,6 +40,33 @@
   --shadow: 0 2px 6px #22334c05;
   --shadow-elevated: 0 12px 36px #192e4a24;
 }
+.metric.metric-new {
+  background: var(--info-bg);
+  color: var(--info);
+}
+.metric.metric-review {
+  background: var(--warning-bg);
+  color: var(--warning);
+}
+.metric.metric-approved {
+  background: var(--success-bg);
+  color: var(--success);
+}
+.metric.metric-interviews {
+  background: var(--purple-bg);
+  color: var(--purple);
+}
+.metric.metric-rejected {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+.metric.metric-withdrawn {
+  background: var(--surface-subtle);
+  color: var(--text-secondary);
+}
+.metric[class*="metric-"] .metric-note {
+  color: inherit;
+}
 html[data-theme="dark"] {
   color-scheme: dark;
   --background: #111922;

@@ -13,6 +13,10 @@ import { createGoogleClient } from "@/lib/google/gmail/service";
 import { recordEvent, withStore } from "@/lib/server/store";
 import { findUser } from "@/lib/server/repository";
 import { withDeadline } from "@/lib/server/deadline";
+import {
+  storageGoogleClient,
+  storageOAuthConfig,
+} from "@/lib/server/storage-oauth";
 
 function providerFailure(error: unknown) {
   if (!error || typeof error !== "object") return "authorization";
@@ -84,7 +88,10 @@ export async function GET(request: NextRequest) {
         ))
     )
       throw new SafeError("signin");
-    const client = createGoogleClient();
+    const storage = flow.kind === "storage";
+    if (storage && initiator?.role !== "Admin")
+      throw new SafeError("unauthorized");
+    const client = storage ? storageGoogleClient() : createGoogleClient();
     const { tokens } = await withDeadline(
       client.getToken({
         code,
@@ -97,7 +104,7 @@ export async function GET(request: NextRequest) {
     const ticket = await withDeadline(
       client.verifyIdToken({
         idToken: tokens.id_token,
-        audience: c.clientId,
+        audience: storage ? storageOAuthConfig().clientId : c.clientId,
       }),
       15000,
     );
@@ -119,17 +126,17 @@ export async function GET(request: NextRequest) {
     if (!payload?.email_verified || !email || !registeredUser)
       throw new SafeError("unauthorized");
     if (
-      ["official", "intake"].includes(flow.kind || "") &&
+      ["official", "intake", "sheets", "storage"].includes(flow.kind || "") &&
       email !== c.officialEmail
     )
-      throw new SafeError("unauthorized");
+      throw new SafeError("official_account");
     if (flow.kind === "gmail" && email !== initiator?.email)
       throw new SafeError("unauthorized");
     if ((payload as unknown as { nonce?: string }).nonce !== flow.nonce)
       throw new SafeError("state");
     if (
       flow.gmail &&
-      flow.kind !== "sheets" &&
+      !["sheets", "storage"].includes(flow.kind || "") &&
       (!tokens.access_token || !tokens.scope?.split(" ").includes(gmailScope))
     )
       throw new SafeError("scope");
@@ -141,10 +148,19 @@ export async function GET(request: NextRequest) {
     )
       throw new SafeError("scope");
     if (
-      flow.kind === "sheets" &&
+      ["sheets", "storage"].includes(flow.kind || "") &&
       !tokens.scope
         ?.split(" ")
         .includes("https://www.googleapis.com/auth/spreadsheets")
+    )
+      throw new SafeError("scope");
+    if (
+      storage &&
+      (!tokens.access_token ||
+        !tokens.refresh_token ||
+        !tokens.scope
+          ?.split(" ")
+          .includes("https://www.googleapis.com/auth/drive"))
     )
       throw new SafeError("scope");
     const session = createState();
@@ -161,8 +177,9 @@ export async function GET(request: NextRequest) {
           expiresAt: Date.now() + 8 * 3600000,
         };
         if (flow.gmail) {
-          const key =
-            flow.kind === "sheets"
+          const key = storage
+            ? "storageConnection"
+            : flow.kind === "sheets"
               ? "sheetsConnection"
               : ["official", "intake"].includes(flow.kind || "")
                 ? "officialConnection"
@@ -178,7 +195,15 @@ export async function GET(request: NextRequest) {
             connectedAt: new Date().toISOString(),
             connectedBy: initiator!.email,
           };
-          recordEvent(s, email, "gmail.connected");
+          recordEvent(
+            s,
+            email,
+            storage
+              ? "storage.connected"
+              : flow.kind === "sheets"
+                ? "sheets.connected"
+                : "gmail.connected",
+          );
         }
         recordEvent(s, email, "auth.login");
       });
@@ -186,7 +211,14 @@ export async function GET(request: NextRequest) {
       throw new SafeError("database", 503);
     }
     const response = NextResponse.redirect(
-      new URL(flow.gmail ? "/settings/integrations?connected=1" : "/", origin),
+      new URL(
+        storage
+          ? "/settings/data?connected=1"
+          : flow.gmail
+            ? "/settings/integrations?connected=1"
+            : "/",
+        origin,
+      ),
     );
     response.cookies.set(SESSION_COOKIE, session, {
       httpOnly: true,
@@ -196,7 +228,8 @@ export async function GET(request: NextRequest) {
       maxAge: 8 * 3600,
     });
     response.cookies.set("dj_oauth", "", { path: "/api/auth", maxAge: 0 });
-    after(() => syncIntake(flow.gmail ? initiator! : registeredUser, true));
+    if (!storage)
+      after(() => syncIntake(flow.gmail ? initiator! : registeredUser, true));
     return response;
   } catch (e) {
     const code = callbackFailure(e);

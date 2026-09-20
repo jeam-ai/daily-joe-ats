@@ -1,13 +1,37 @@
 import { reportIssue, resolveIssue } from "@/lib/server/diagnostics";
 import { writeAudit } from "@/lib/server/audit";
 import "server-only";
-import { transaction, readRecord, putRecord } from "@/lib/server/database";
+import { sheetsPrimary } from "@/lib/server/sheets-gateway";
+import {
+  transaction,
+  readTransaction,
+  readRecord,
+  putRecord,
+} from "@/lib/server/database";
+import { refreshWorkbookViews } from "@/lib/server/sheets-management";
+import type { DatabaseRow } from "@/lib/sheets-schema";
 import { getState } from "@/lib/server/repository";
 import { withStore } from "@/lib/server/store";
 import { accessToken } from "./gmail/service";
 import { trackerHeaders, trackerRows } from "@/lib/tracker";
 // One-way mirror into the explicitly configured dedicated tab. The ATS always wins.
 export async function syncSheets() {
+  if (sheetsPrimary()) {
+    try {
+      const positions = await readTransaction((tx) =>
+        tx.query("SELECT * FROM qualification_templates"),
+      );
+      await refreshWorkbookViews({
+        version: 1,
+        exportedAt: new Date().toISOString(),
+        tables: { qualification_templates: positions as DatabaseRow[] },
+      });
+      return "Changes committed to Google Sheets.";
+    } catch {
+      await reportIssue("sheets.sync").catch(() => undefined);
+      return "Records are saved. Spreadsheet views need attention; retry Sync Now.";
+    }
+  }
   if (!process.env.GOOGLE_SHEETS_ID)
     return "Excel tracker updated; Google Sheets is not configured.";
   const connection = await withStore((s) => s.sheetsConnection, false);

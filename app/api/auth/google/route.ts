@@ -4,12 +4,18 @@ import { config, gmailScope, SafeError } from "@/lib/server/config";
 import { createState, seal } from "@/lib/auth/security";
 import { currentUser } from "@/lib/auth/session";
 import { safeError } from "@/lib/server/response";
+import { storageOAuthConfig } from "@/lib/server/storage-oauth";
 export async function GET(request: Request) {
   try {
-    const c = config();
     const kind = new URL(request.url).searchParams.get("flow") || "login";
-    const gmail = ["gmail", "intake", "official", "sheets"].includes(kind);
+    const storage = kind === "storage";
+    const c = storage ? storageOAuthConfig() : config();
+    const gmail = ["gmail", "intake", "official", "sheets", "storage"].includes(
+      kind,
+    );
     const user = await currentUser();
+    if (storage && user?.role !== "Admin")
+      throw new SafeError("An administrator must connect storage.", 403);
     if (
       gmail &&
       user &&
@@ -26,8 +32,9 @@ export async function GET(request: Request) {
       client_id: c.clientId,
       redirect_uri: c.redirectUri,
       response_type: "code",
-      scope:
-        kind === "sheets"
+      scope: storage
+        ? "openid email profile https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive"
+        : kind === "sheets"
           ? "openid email profile https://www.googleapis.com/auth/spreadsheets"
           : gmail
             ? `openid email profile ${gmailScope}${["intake", "official"].includes(kind) ? " https://www.googleapis.com/auth/gmail.readonly" : ""}`
@@ -36,10 +43,10 @@ export async function GET(request: Request) {
       nonce,
       code_challenge: createHash("sha256").update(verifier).digest("base64url"),
       code_challenge_method: "S256",
-      include_granted_scopes: "true",
+      include_granted_scopes: storage ? "false" : "true",
       access_type: gmail ? "offline" : "online",
       prompt: gmail ? "consent" : "select_account",
-      login_hint: ["intake", "official"].includes(kind)
+      login_hint: ["intake", "official", "sheets", "storage"].includes(kind)
         ? c.officialEmail
         : user?.email || c.allowedEmail,
     }).toString();

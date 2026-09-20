@@ -18,7 +18,7 @@ function EmailDetails({
   const { state, refresh } = useApp();
   const [busy, setBusy] = useState(false),
     [error, setError] = useState("");
-  async function action(action: "retry" | "verify") {
+  async function action(action: "retry" | "verify" | "prepare") {
     setBusy(true);
     setError("");
     try {
@@ -79,7 +79,19 @@ function EmailDetails({
         )}
         <div className="button-row">
           {mail.status === "Failed" && canManage(state?.currentUser) && (
-            <Button disabled={busy} onClick={() => void action("retry")}>
+            <Button
+              variant="secondary"
+              disabled={busy}
+              onClick={() => void action("prepare")}
+            >
+              Refresh email preview
+            </Button>
+          )}
+          {mail.status === "Failed" && canManage(state?.currentUser) && (
+            <Button
+              disabled={busy || mail.errorCode === "changed"}
+              onClick={() => void action("retry")}
+            >
               {busy ? "Retrying…" : "Retry failed email"}
             </Button>
           )}

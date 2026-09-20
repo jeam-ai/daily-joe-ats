@@ -10,6 +10,7 @@ import { missingInformation } from "./applicant-information";
 export const templateVariables = [
   "applicant_name",
   "first_name",
+  "last_name",
   "position",
   "location",
   "application_id",
@@ -32,8 +33,13 @@ export function emailContext(a: Application, state: AppState, user: User) {
       : a.applicant.name,
     first_name: missingInformation(a.applicant.name)
       ? ""
-      : a.applicant.name.split(/\s+/)[0],
+      : a.applicant.firstName || a.applicant.name.split(/\s+/)[0],
     position: missingInformation(a.position) ? "" : a.position,
+    last_name: missingInformation(a.applicant.name)
+      ? ""
+      : a.applicant.lastName ||
+        a.applicant.name.trim().split(/\s+/).at(-1) ||
+        "",
     location: missingInformation(a.location) ? "" : a.location,
     application_id: a.id,
     interview_date: interview
@@ -83,6 +89,10 @@ export function defaultEmailTemplate(name: string): EmailTemplate {
   const intro = "Hello {{first_name}},\n\n";
   const closing = "\n\nThank you,\n{{hr_name}}\nDaily Joe Careers";
   const bodies: Record<string, string> = {
+    "Application Received":
+      "Thank you for your interest in joining our team. We have received your application ({{application_id}}). Our HR team will review your submitted information and contact you about any next steps. If you need to update anything, simply reply to this email.",
+    Withdrawal:
+      "Thank you for letting us know about your decision. We have recorded the withdrawal of your application ({{application_id}}). We appreciate your interest in Daily Joe Careers and wish you well in your next opportunity.",
     "Initial Interview":
       "Thank you for applying for the {{position}} position. We would like to meet you for an initial interview on {{interview_date}} at {{interview_time}}. Your preferred work location is {{location}}. Please reply to confirm your availability; our HR team will provide the meeting arrangements.",
     "Final Interview":

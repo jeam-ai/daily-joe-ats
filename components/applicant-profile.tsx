@@ -893,7 +893,8 @@ export function ApplicantProfile({ id }: { id: string }) {
                 )}
                 {(!preview || preview.missing.length > 0) && (
                   <div className="warning-banner">
-                    The stage can be saved, but email needs attention:{" "}
+                    Stage progression will wait until this email issue is
+                    resolved:{" "}
                     {preview?.missing.join(", ") ||
                       "configure this stage's template in Settings"}
                     . No incomplete email will be sent.
@@ -939,7 +940,7 @@ export function ApplicantProfile({ id }: { id: string }) {
             </Field>
             <p className="fine-print">
               {decision === "Proceed" && !a.isDemo
-                ? "Confirming saves the stage and queues the email shown above. Delivery status and retries appear in Email history."
+                ? "Confirming queues the email shown above. The stage advances only after Gmail confirms delivery. Failed or uncertain sends remain in Email history for review and retry."
                 : "This saves the application and audit history. No applicant email will be sent."}
             </p>
             {error && (
