@@ -40,7 +40,7 @@ function djcLoadRows(id,tab,cached) {
   return {values:values,groups:grouped};
 }
 function djcDecode(parts) {parts.sort(function(a,b){return a.part-b.part});if(parts.length!==parts[0].parts||parts.some(function(p,i){return p.part!==i+1}))throw Error('integrity');return JSON.parse(parts.map(function(p){return p.json}).join(''));}
-function djcPrivateRow(ref) {const value=JSON.parse(DriveApp.getFileById(ref.fileId).getBlob().getDataAsString());return ref.batchKey&&value.rows?value.rows[ref.batchKey]:value;}
+function djcPrivateRow(ref,cache) {if(!Object.prototype.hasOwnProperty.call(cache,ref.fileId))cache[ref.fileId]=JSON.parse(DriveApp.getFileById(ref.fileId).getBlob().getDataAsString());const value=cache[ref.fileId];if(ref.batchKey&&(!value.rows||!Object.prototype.hasOwnProperty.call(value.rows,ref.batchKey)))throw Error('integrity');return ref.batchKey?value.rows[ref.batchKey]:value;}
 function djcOperation(r,props,snapshot) {
   const id=props.getProperty('DJC_SPREADSHEET_ID'),folderId=props.getProperty('DJC_PRIVATE_FOLDER_ID');
   if(!id||!folderId)throw Error('schema');
@@ -49,16 +49,16 @@ function djcOperation(r,props,snapshot) {
   if(r.operation==='loadMany') {
     if(!Array.isArray(r.queries)||r.queries.length>50||r.queries.some(function(q){return !DJC_TABLES.includes(q.table)}))throw Error('schema');
     const tabs=Array.from(new Set(r.queries.flatMap(function(q){return q.tab?[q.tab]:q.tabs||[]})));
-    const cache={};
+    const cache={},privateCache={};
     if(tabs.length){const result=Sheets.Spreadsheets.Values.batchGet(id,{ranges:tabs.map(function(tab){return "'"+tab.replace(/'/g,"''")+"'!A2:Q"})});tabs.forEach(function(tab,i){cache[tab]=result.valueRanges[i].values||[]});}
-    return {revision:state.revision,results:r.queries.map(function(q){return djcOperation(Object.assign({},q,{operation:'load'}),props,{state:state,manifest:manifest,rows:cache}).rows})};
+    return {revision:state.revision,results:r.queries.map(function(q){return djcOperation(Object.assign({},q,{operation:'load'}),props,{state:state,manifest:manifest,rows:cache,privateRows:privateCache}).rows})};
   }
   if(r.operation==='load') {
     if(!DJC_TABLES.includes(r.table))throw Error('schema');
     const match=function(row){return (!r.collection||row.collection===r.collection)&&(!r.id||String(row.id||row.application_id)===r.id)};
-    let rows=[];
+    let rows=[];const privateCache=snapshot&&snapshot.privateRows||{};
     (r.tab?[r.tab]:r.tabs||[]).forEach(function(tab){const loaded=djcLoadRows(id,tab,snapshot&&snapshot.rows);Object.keys(loaded.groups).forEach(function(key){if(JSON.parse(key)[0]!==r.table)return;const parts=loaded.groups[key];const row=djcDecode(parts);if(match(row))rows.push(row)});});
-    Object.keys(manifest.blobs).forEach(function(key){const ref=manifest.blobs[key];if(ref.table===r.table&&match(ref.metadata)){if(r.metadataOnly)rows.push(ref.metadata);else {const row=djcPrivateRow(ref);if(row)rows.push(row);}}});
+    Object.keys(manifest.blobs).forEach(function(key){const ref=manifest.blobs[key];if(ref.table===r.table&&match(ref.metadata)){if(r.metadataOnly)rows.push(ref.metadata);else {const row=djcPrivateRow(ref,privateCache);if(row)rows.push(row);}}});
     return {revision:state.revision,rows:rows};
   }
   if(r.operation==='commit') {

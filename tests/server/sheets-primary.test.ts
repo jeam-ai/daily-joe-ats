@@ -45,6 +45,7 @@ test("Sheets primary persists transactions, private credentials, rollback, stale
     rows: [] as unknown[][],
   }));
   const files = new Map<string, string>();
+  const fileReads = new Map<string, number>();
   let locks = 0,
     fail = false;
   const props = {
@@ -95,7 +96,12 @@ test("Sheets primary persists transactions, private credentials, rollback, stale
     DriveApp: {
       getFolderById: () => folder,
       getFileById: (id: string) => ({
-        getBlob: () => ({ getDataAsString: () => files.get(id) }),
+        getBlob: () => ({
+          getDataAsString: () => {
+            fileReads.set(id, (fileReads.get(id) || 0) + 1);
+            return files.get(id);
+          },
+        }),
       }),
     },
     ContentService: {
@@ -194,6 +200,7 @@ test("Sheets primary persists transactions, private credentials, rollback, stale
       await putRecord(tx, "config", "one", { value: 1 });
       await putRecord(tx, "config", "two", { value: 2 });
       await putRecord(tx, "secure", "auth", "encrypted-fixture-token");
+      await putRecord(tx, "secure", "second", "encrypted-fixture-second");
     });
     assert.deepEqual(
       await readTransaction((tx) => readRecord(tx, "config", "one")),
@@ -204,6 +211,7 @@ test("Sheets primary persists transactions, private credentials, rollback, stale
       "encrypted-fixture-token",
     );
     assert.ok(!JSON.stringify(tabs).includes("encrypted-fixture-token"));
+    fileReads.clear();
     const batched = await gatewayRequest<{
       results: Record<string, unknown>[][];
     }>("loadMany", {
@@ -221,7 +229,7 @@ test("Sheets primary persists transactions, private credentials, rollback, stale
       ],
     });
     assert.equal(batched.results[0].length, 2);
-    assert.equal(batched.results[1].length, 1);
+    assert.equal(batched.results[1].length, 2);
     assert.equal(batched.results[1][0].id, "auth");
     assert.ok(
       [...files.values()].some((v) => v.includes("encrypted-fixture-token")),
@@ -235,6 +243,14 @@ test("Sheets primary persists transactions, private credentials, rollback, stale
     });
     assert.equal(privateBatches.length, 1);
     assert.ok(privateBatches[0].includes("encrypted-fixture-token"));
+    const batchId = [...files.entries()].find(
+      ([, value]) => value === privateBatches[0],
+    )![0];
+    assert.equal(
+      fileReads.get(batchId),
+      1,
+      "one Drive read serves all records in the private batch",
+    );
     await assert.rejects(
       transaction(async (tx) => {
         await putRecord(tx, "config", "one", { value: 99 });

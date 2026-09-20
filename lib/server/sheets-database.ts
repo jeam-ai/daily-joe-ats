@@ -261,7 +261,9 @@ export async function sheetsTransaction<T>(
               if (s.persistenceProjection) {
                 const pending = workspaceHydrationTables.filter(
                   (table) =>
-                    !current.loaded.has(JSON.stringify([table, "", "", false])),
+                    !current.loaded.has(
+                      JSON.stringify([table, "", "", table === "resumes"]),
+                    ),
                 );
                 if (pending.length) {
                   const batch = await gatewayRequest<{
@@ -271,13 +273,20 @@ export async function sheetsTransaction<T>(
                     queries: pending.map((table) => ({
                       table,
                       tab: tabFor(table),
+                      metadataOnly: table === "resumes",
                     })),
                   });
                   for (let i = 0; i < pending.length; i++)
-                    await load(pending[i], undefined, undefined, false, {
-                      revision: batch.revision,
-                      rows: batch.results[i],
-                    });
+                    await load(
+                      pending[i],
+                      undefined,
+                      undefined,
+                      pending[i] === "resumes",
+                      {
+                        revision: batch.revision,
+                        rows: batch.results[i],
+                      },
+                    );
                 }
                 for (const [key, source] of Object.entries(stateKeys)) {
                   await load(source);
