@@ -1,8 +1,10 @@
 "use client";
+import { clientFetch } from "@/lib/client-request";
 import { useState } from "react";
 import type { Application } from "@/types";
-import { renderTemplate } from "@/lib/recruitment";
+import { emailContext, renderEmail } from "@/lib/email-templates";
 import { useApp } from "./provider";
+import { formatDate, formatTime } from "@/lib/dates";
 import { Button, Card, Field, Input, Select, Modal, Badge } from "./ui";
 export function Communication({
   application: a,
@@ -25,32 +27,30 @@ export function Communication({
       threadId?: string;
     } | null>(null);
   if (!state) return null;
+  if (a.isDemo)
+    return (
+      <Card className="spaced padded">
+        <h2>Applicant communication</h2>
+        <p>
+          DEMO DATA — sending email is disabled for this fictional applicant.
+        </p>
+      </Card>
+    );
   const templates = state.emailTemplates;
   function choose(id: string) {
     setTemplate(id);
     const t = templates.find((t) => t.id === id)!;
-    const interview = a.interviews.at(-1);
-    const values = {
-      applicant_name: a.applicant.name,
-      position: a.position,
-      location: a.location,
-      company_name: "Daily Joe",
-      interview_date: interview
-        ? new Date(interview.scheduledAt).toLocaleDateString()
-        : "[date]",
-      interview_time: interview
-        ? new Date(interview.scheduledAt).toLocaleTimeString()
-        : "[time]",
-    };
-    setSubject(renderTemplate(t.subject, values));
-    setBody(renderTemplate(t.body, values));
+    if (!state?.currentUser) return;
+    const rendered = renderEmail(t, emailContext(a, state, state.currentUser));
+    setSubject(rendered.subject);
+    setBody(rendered.body);
     setDraft(null);
   }
   async function act(action: string) {
     setBusy(true);
     setError("");
     try {
-      const r = await fetch("/api/communications", {
+      const r = await clientFetch("/api/communications", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(

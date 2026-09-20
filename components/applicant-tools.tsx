@@ -2,6 +2,10 @@
 import { useState } from "react";
 import type { Application, ScreeningCriterion } from "@/types";
 import { useApp } from "./provider";
+import { formatDate } from "@/lib/dates";
+import { Sparkles } from "lucide-react";
+import { canManage, canEdit } from "@/lib/data-policy";
+import { ScreeningControls } from "./screening-controls";
 import {
   Badge,
   Button,
@@ -17,7 +21,7 @@ export function ApplicantTools({
 }: {
   application: Application;
 }) {
-  const { state, updateApplication } = useApp();
+  const { state, updateApplication, saving } = useApp();
   const [employment, setEmployment] = useState(false),
     [review, setReview] = useState(false);
   if (!state) return null;
@@ -25,8 +29,8 @@ export function ApplicantTools({
   const directMatches = a.screening.criteria.filter(
     (criterion) => criterion.result === "Met",
   ).length;
-  const needsReview = a.screening.criteria.filter(
-    (criterion) => criterion.result === "Unclear",
+  const needsReview = a.screening.criteria.filter((criterion) =>
+    ["Unclear", "Not Assessed"].includes(criterion.result),
   ).length;
   return (
     <>
@@ -42,6 +46,7 @@ export function ApplicantTools({
           <div className="padded form-stack">
             <Field label="HR interviewer">
               <Select
+                disabled={!canManage(state.currentUser) || saving}
                 value={a.assignedTo || ""}
                 onChange={async (e) => {
                   const value = e.target.value || undefined;
@@ -53,22 +58,37 @@ export function ApplicantTools({
                 }}
               >
                 <option value="">Choose later</option>
-                <option value="HR Queen">HR Queen</option>
-                <option value="HR Jeam">HR Jeam</option>
-                <option value="HR Ellaine">HR Ellaine</option>
+                {state.users
+                  ?.filter((u) => u.active && u.role !== "Viewer")
+                  .map((u) => (
+                    <option key={u.id} value={u.email}>
+                      {u.name || u.email}
+                    </option>
+                  ))}
               </Select>
             </Field>
           </div>
         </Card>
       )}
-      <Card className="spaced">
+      <Card className="spaced system-insight">
         <div className="card-heading">
-          <h2>System Insight</h2>
+          <h2>
+            <Sparkles size={17} /> System Analysis · Insight
+          </h2>
+          <Badge tone="purple">
+            {a.screening.method === "ai"
+              ? "AI-assisted"
+              : a.isDemo
+                ? "Demo evidence"
+                : a.screening.method === "hr"
+                  ? "HR-reviewed"
+                  : "Built-in engine"}
+          </Badge>
         </div>
         <div className="padded">
           <p>
             {a.screening.insight ||
-              "Resume received through Gmail. Review the evidence against the configured qualifications."}
+              "Review the resume against the qualifications configured for this hiring need. Unstated information remains unclear."}
           </p>
           <div className="inline-actions spaced">
             <Badge tone={directMatches ? "green" : "orange"}>
@@ -83,7 +103,25 @@ export function ApplicantTools({
             OCR and text matching are advisory. They do not approve, reject, or
             advance an applicant.
           </p>
-          <Button variant="secondary" onClick={() => setReview(true)}>
+          <details className="evidence-details">
+            <summary>Evidence used</summary>
+            <ul>
+              {a.screening.criteria.map((c) => (
+                <li key={c.id}>
+                  <strong>{c.requirement}</strong>
+                  <p>{c.evidence}</p>
+                </li>
+              ))}
+            </ul>
+          </details>
+          <ScreeningControls application={a} />
+          <Button
+            variant="secondary"
+            disabled={
+              !canManage(state.currentUser) || !a.screening.criteria.length
+            }
+            onClick={() => setReview(true)}
+          >
             Review criteria and evidence
           </Button>
           {need?.questions && (
@@ -102,7 +140,7 @@ export function ApplicantTools({
             <StatusBadge status={a.employment?.status || "Active"} />
           </div>
           <div className="padded">
-            <p>Hired {new Date(a.hiredAt).toLocaleDateString()}</p>
+            <p>Hired {formatDate(a.hiredAt, state.preferences)}</p>
             {a.employment && (
               <p>
                 {a.employment.status} effective {a.employment.date}
@@ -110,14 +148,22 @@ export function ApplicantTools({
                 {a.employment.notes}
               </p>
             )}
-            <Button variant="secondary" onClick={() => setEmployment(true)}>
+            <Button
+              variant="secondary"
+              disabled={!canManage(state.currentUser)}
+              onClick={() => setEmployment(true)}
+            >
               Update employment status
             </Button>
           </div>
         </Card>
       )}
       {review && (
-        <Modal title="HR evidence review" onClose={() => setReview(false)}>
+        <Modal
+          busy={saving}
+          title="HR evidence review"
+          onClose={() => setReview(false)}
+        >
           <form
             className="form-stack"
             onSubmit={async (e) => {
@@ -134,11 +180,13 @@ export function ApplicantTools({
                   (v) => ({
                     ...v,
                     screening: {
+                      method: "hr",
                       criteria,
                       completedAt: new Date().toISOString(),
                       outcome:
-                        criteria.some((c) => c.result === "Unclear") ||
-                        !criteria.length
+                        criteria.some((c) =>
+                          ["Unclear", "Not Assessed"].includes(c.result),
+                        ) || !criteria.length
                           ? "Requires Review"
                           : criteria.some((c) => c.result === "Not Met")
                             ? "Criteria Not Met"
@@ -162,6 +210,7 @@ export function ApplicantTools({
                 <Field label="Result">
                   <Select name={`result-${c.id}`} defaultValue={c.result}>
                     <option>Unclear</option>
+                    <option>Not Assessed</option>
                     <option>Met</option>
                     <option>Not Met</option>
                   </Select>
@@ -181,12 +230,18 @@ export function ApplicantTools({
                 application.
               </p>
             )}
-            <Button type="submit">Confirm HR review</Button>
+            <Button
+              type="submit"
+              disabled={saving || !canManage(state.currentUser)}
+            >
+              {saving ? "Saving…" : "Confirm HR review"}
+            </Button>
           </form>
         </Modal>
       )}
       {employment && (
         <Modal
+          busy={saving}
           title="Confirm employment change"
           onClose={() => setEmployment(false)}
         >
@@ -236,7 +291,12 @@ export function ApplicantTools({
             <Field label="HR notes">
               <textarea name="notes" />
             </Field>
-            <Button type="submit">Confirm employment change</Button>
+            <Button
+              type="submit"
+              disabled={saving || !canManage(state.currentUser)}
+            >
+              {saving ? "Saving…" : "Confirm employment change"}
+            </Button>
           </form>
         </Modal>
       )}

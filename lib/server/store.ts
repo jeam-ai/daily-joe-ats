@@ -1,3 +1,4 @@
+import { writeAudit } from "./audit";
 import "server-only";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
@@ -11,6 +12,7 @@ export interface StoredConnection {
   refreshToken?: string;
   expiresAt: number;
   connectedAt: string;
+  connectedBy?: string;
 }
 export interface IntegrationEvent {
   id: string;
@@ -48,37 +50,36 @@ export function withStore<T>(
   fn: (s: Store) => T | Promise<T>,
   persist = true,
 ): Promise<T> {
-  return transaction(async (tx) => {
-    const encrypted = await readRecord<string>(tx, "secure", "auth");
-    const store = encrypted
-      ? unseal<Store>(encrypted, config().encryptionKey)
-      : process.env.DATABASE_URL
-        ? ({ sessions: {}, events: [], requests: {} } as Store)
-        : await read();
-    const count = store.events.length;
-    const result = await fn(store);
-    if (persist)
-      for (const event of store.events.slice(count))
-        await tx.query(
-          "INSERT INTO audit_logs(id,occurred_at,actor,action,application_id,payload) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(id) DO NOTHING",
-          [
-            event.id,
-            event.timestamp,
+  return transaction(
+    async (tx) => {
+      const encrypted = await readRecord<string>(tx, "secure", "auth");
+      const store = encrypted
+        ? unseal<Store>(encrypted, config().encryptionKey)
+        : process.env.DATABASE_URL
+          ? ({ sessions: {}, events: [], requests: {} } as Store)
+          : await read();
+      const count = store.events.length;
+      const result = await fn(store);
+      if (persist)
+        for (const event of store.events.slice(count))
+          await writeAudit(
+            tx,
             event.user,
             event.action,
-            null,
-            JSON.stringify(event.metadata),
-          ],
+            undefined,
+            event.metadata,
+          );
+      if (persist || (!encrypted && !process.env.DATABASE_URL))
+        await putRecord(
+          tx,
+          "secure",
+          "auth",
+          seal(store, config().encryptionKey),
         );
-    if (persist || !encrypted)
-      await putRecord(
-        tx,
-        "secure",
-        "auth",
-        seal(store, config().encryptionKey),
-      );
-    return result;
-  });
+      return result;
+    },
+    { readOnly: !persist },
+  );
 }
 export function recordEvent(
   store: { events: IntegrationEvent[] },

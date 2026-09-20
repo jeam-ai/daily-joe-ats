@@ -1,166 +1,250 @@
 "use client";
-import { useState, useEffect } from "react";
-import { Button, Card, Badge, Modal } from "./ui";
+import { useState } from "react";
+import { Download, RefreshCw } from "lucide-react";
+import { downloadFile, requestJson } from "@/lib/client-request";
+import { canManage } from "@/lib/data-policy";
+import { Button, Card, Badge, Modal, LoadingSkeleton } from "./ui";
 import { Intake } from "./intake";
 import { useApp } from "./provider";
-export function OfficialIntegration() {
-  const { state, notify } = useApp();
-  const [status, setStatus] = useState<{
-    officialConnected: boolean;
-    intakeAuthorized: boolean;
-    sheetsConfigured: boolean;
-    sheetsConnected: boolean;
-  } | null>(null);
-  const [confirmSync, setConfirmSync] = useState(false);
-  const [syncing, setSyncing] = useState(false);
-  useEffect(() => {
-    fetch("/api/integrations/gmail")
-      .then((r) => r.json())
-      .then(setStatus)
-      .catch(() => {});
-  }, []);
+export interface IntegrationStatus {
+  officialConnected?: boolean;
+  officialError?: string;
+  officialStored?: boolean;
+  requiresReconnect?: boolean;
+  intakeAuthorized?: boolean;
+  sheetsConfigured?: boolean;
+  sheetsConnected?: boolean;
+  aiConfigured?: boolean;
+}
+export function OfficialIntegration({
+  status,
+  loading,
+  refresh,
+}: {
+  status: IntegrationStatus | null;
+  loading: boolean;
+  refresh: () => Promise<void>;
+}) {
+  const { state, notify, dataset } = useApp();
+  const [confirmation, setConfirmation] = useState<
+    "disconnect" | "sync" | null
+  >(null);
+  const [busy, setBusy] = useState(false);
+  const allowed = canManage(state?.currentUser);
+  const real = dataset === "real";
+  async function act() {
+    setBusy(true);
+    try {
+      if (confirmation === "disconnect") {
+        await requestJson("/api/integrations/gmail?kind=official", {
+          method: "DELETE",
+        });
+        notify("Official Gmail disconnected.");
+      } else {
+        const result = await requestJson<{ message: string }>(
+          "/api/integrations/sheets",
+          { method: "POST" },
+        );
+        notify(result.message || "Spreadsheet synchronized.");
+      }
+      setConfirmation(null);
+      await refresh();
+    } catch (error) {
+      notify((error as Error).message, "error");
+    } finally {
+      setBusy(false);
+    }
+  }
   return (
     <>
       <Card>
         <div className="card-heading">
           <div>
-            <h2>Official careers mailbox</h2>
-            <p>careers@daily-joe.com · Talent Acquisition Specialist</p>
+            <h2>Daily Joe Careers</h2>
+            <p>careers@daily-joe.com</p>
           </div>
           <Badge tone={status?.officialConnected ? "green" : "neutral"}>
-            {status?.officialConnected ? "Connected" : "Not connected"}
+            {loading && !status
+              ? "Checking…"
+              : !status
+                ? "Status unavailable"
+                : status.officialConnected
+                  ? "Connected"
+                  : "Not connected"}
           </Badge>
         </div>
         <div className="padded form-stack">
           <p>
-            Applicant intake and applicant communication use this account.
-            Personal Gmail test authorization is separate.
+            Applicant intake and recruitment emails use the official careers
+            account. Personal Gmail testing has a separate connection.
           </p>
-          <div className="inline-actions">
-            <a className="button primary" href="/api/auth/google?flow=official">
-              Connect official Gmail
-            </a>
-            <a className="button secondary" href="/api/auth/google?flow=intake">
-              {status?.intakeAuthorized
-                ? "Renew intake authorization"
-                : "Authorize applicant intake"}
-            </a>
-            {status?.officialConnected && (
+          {loading && !status ? (
+            <LoadingSkeleton />
+          ) : allowed && real ? (
+            <div className="inline-actions">
+              {(!status?.officialStored ||
+                status?.requiresReconnect ||
+                !status?.intakeAuthorized) && (
+                <a
+                  className="button primary"
+                  href="/api/auth/google?flow=official"
+                >
+                  {status?.officialError
+                    ? "Reconnect official Gmail"
+                    : "Connect official Gmail"}
+                </a>
+              )}
               <Button
-                variant="ghost"
-                onClick={async () => {
-                  if (!confirm("Disconnect the official careers mailbox?"))
-                    return;
-                  const r = await fetch(
-                    "/api/integrations/gmail?kind=official",
-                    { method: "DELETE" },
-                  );
-                  if (r.ok)
-                    setStatus({
-                      ...status,
-                      officialConnected: false,
-                      intakeAuthorized: false,
-                    });
-                  else notify((await r.json()).error);
-                }}
+                variant="secondary"
+                disabled={busy || loading}
+                onClick={() => void refresh()}
               >
-                Disconnect
+                Check connection
               </Button>
-            )}
-          </div>
+              {status?.officialStored && (
+                <Button
+                  variant="ghost"
+                  disabled={busy}
+                  onClick={() => setConfirmation("disconnect")}
+                >
+                  Disconnect
+                </Button>
+              )}
+            </div>
+          ) : (
+            <p className="muted">
+              {!real
+                ? "Exit Demo to manage production integrations."
+                : "A recruitment manager can manage this connection."}
+            </p>
+          )}
+          {status?.officialError && (
+            <p className="error-banner" role="alert">
+              {status.officialError}
+            </p>
+          )}
           <p className="fine-print">
-            Connecting requests Gmail send access. Authorizing intake
-            additionally requests Gmail read-only access to preview messages and
-            retrieve resumes. Neither action imports records or sends email.
+            Connecting authorizes read-only intake and sending from this
+            mailbox. Automatic intake reads matching applications after
+            connection. Recruitment emails still require an explicit HR action.
           </p>
         </div>
       </Card>
-      <Intake />
+      {real ? (
+        <Intake
+          authorized={!!status?.intakeAuthorized && !!status.officialConnected}
+        />
+      ) : (
+        <Card className="padded">
+          <h2>Applicant intake</h2>
+          <p>
+            Importing Gmail applications is disabled while viewing demo data.
+          </p>
+        </Card>
+      )}
       <Card className="spaced">
         <div className="card-heading">
           <h2>Excel / Google Sheets</h2>
           <Badge>
             {status?.sheetsConfigured && status.sheetsConnected
-              ? "Configured"
+              ? "Connected"
               : "Excel tracker available"}
           </Badge>
         </div>
         <div className="padded form-stack">
           <p>
-            The Excel tracker reflects every saved ATS change. When a
-            spreadsheet ID and dedicated tab are configured, Google Sheets is
-            exported automatically after each saved workspace change.
+            The tracker includes active real records. Demo and deleted
+            applicants are excluded from all production exports.
           </p>
           <div className="inline-actions">
-            <a className="button secondary" href="/api/tracker">
-              Download Excel tracker
-            </a>
-            <a className="button secondary" href="/api/auth/google?flow=sheets">
-              Authorize Sheets
-            </a>
+            <Button
+              variant="secondary"
+              disabled={busy || !real}
+              onClick={async () => {
+                setBusy(true);
+                try {
+                  await downloadFile(
+                    "/api/tracker",
+                    "Daily-Joe-Careers-Tracker.xlsx",
+                  );
+                  notify("Excel tracker downloaded.");
+                } catch (e) {
+                  notify((e as Error).message, "error");
+                } finally {
+                  setBusy(false);
+                }
+              }}
+            >
+              <Download size={16} />
+              {busy && !confirmation ? "Preparing…" : "Download Excel tracker"}
+            </Button>
+            {allowed && real && (
+              <a
+                className="button secondary"
+                href="/api/auth/google?flow=sheets"
+              >
+                {status?.sheetsConnected
+                  ? "Renew Sheets authorization"
+                  : "Authorize Sheets"}
+              </a>
+            )}
             <Button
               variant="ghost"
-              disabled={syncing}
-              onClick={() => setConfirmSync(true)}
+              disabled={
+                busy ||
+                state?.currentUser?.role !== "Admin" ||
+                !real ||
+                !status?.sheetsConnected ||
+                !status.sheetsConfigured
+              }
+              onClick={() => setConfirmation("sync")}
             >
-              {syncing ? "Syncing tracker…" : "Sync tracker now"}
+              <RefreshCw size={16} />
+              Sync tracker now
             </Button>
           </div>
           <p className="fine-print">
-            Google Sheets requires GOOGLE_SHEETS_ID and a dedicated ATS Tracker
-            tab. AI screening is not configured; evidence review remains with
-            HR.
+            {!real
+              ? "Exit Demo to export real recruitment records."
+              : !status?.sheetsConfigured || !status.sheetsConnected
+                ? "Ask an administrator to configure the tracker destination and authorize Google Sheets to enable synchronization."
+                : "Saved recruitment changes synchronize with the dedicated ATS Tracker tab."}
           </p>
         </div>
       </Card>
-      {confirmSync && (
+      {confirmation && (
         <Modal
-          title="Export ATS tracker?"
-          onClose={() => !syncing && setConfirmSync(false)}
+          busy={busy}
+          title={
+            confirmation === "disconnect"
+              ? "Disconnect official Gmail?"
+              : "Synchronize spreadsheet?"
+          }
+          onClose={() => setConfirmation(null)}
         >
-          <div className="export-confirmation">
-            <div className="export-confirmation-icon" aria-hidden="true">
-              ↗
-            </div>
-            <p>
-              Export the latest saved applications and recruitment updates to
-              the connected ATS Tracker sheet. This is a one-way export; your
-              workspace remains the source of truth.
-            </p>
-            <div className="export-progress" aria-live="polite">
-              <span>
-                {syncing ? "Preparing secure export…" : "Ready to export"}
-              </span>
-              <strong>{state?.applications.length || 0} applications</strong>
-            </div>
-          </div>
+          <p>
+            {confirmation === "disconnect"
+              ? "This removes the saved authorization for the official careers mailbox. Reconnect to resume importing applications and sending recruitment emails."
+              : "Export the latest saved real applications and recruitment updates to the connected ATS Tracker sheet. This is a one-way export; Daily Joe Careers remains the source of truth."}
+          </p>
           <div className="modal-actions">
             <Button
               variant="secondary"
-              disabled={syncing}
-              onClick={() => setConfirmSync(false)}
+              disabled={busy}
+              onClick={() => setConfirmation(null)}
             >
               Cancel
             </Button>
             <Button
-              disabled={syncing}
-              onClick={async () => {
-                setSyncing(true);
-                try {
-                  const r = await fetch("/api/integrations/sheets", {
-                    method: "POST",
-                  });
-                  const d = await r.json();
-                  notify(d.message || d.error);
-                  if (r.ok) setConfirmSync(false);
-                } catch {
-                  notify("Export failed. Your ATS records are still saved.");
-                } finally {
-                  setSyncing(false);
-                }
-              }}
+              variant={confirmation === "disconnect" ? "danger" : "primary"}
+              disabled={busy}
+              onClick={act}
             >
-              {syncing ? "Exporting…" : "Confirm & export"}
+              {busy
+                ? "Working…"
+                : confirmation === "disconnect"
+                  ? "Disconnect Gmail"
+                  : "Confirm & synchronize"}
             </Button>
           </div>
         </Modal>

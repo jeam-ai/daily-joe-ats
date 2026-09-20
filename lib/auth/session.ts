@@ -7,8 +7,8 @@ import { sessionHash } from "./security";
 export const SESSION_COOKIE = "dj_session";
 function fallbackDisplayName(email: string) {
   const normalized = email.toLowerCase();
-  if (normalized === "deveraajeam@gmail.com") return "Jeam";
-  if (normalized === "careers@daily-joe.com") return "Daily Joe Careers";
+  if (normalized === "deveraajeam@gmail.com") return "Jeam A. De Vera";
+  if (normalized === "careers@daily-joe.com") return email;
   return email
     .split("@")[0]
     .split(/[._-]+/)
@@ -26,15 +26,20 @@ export async function currentUser() {
   );
   if (!session || session.expiresAt <= Date.now()) return null;
   const user = await findUser(session.email);
+  const displayName =
+    (session.name &&
+      session.name.toLowerCase() !== user?.email.toLowerCase() &&
+      session.name) ||
+    user?.name ||
+    fallbackDisplayName(session.email);
   return user
     ? {
         ...user,
-        name:
-          (session.name &&
-            session.name.toLowerCase() !== user.email.toLowerCase() &&
-            session.name) ||
-          user.name ||
-          fallbackDisplayName(user.email),
+        name: /^daily(?:\s+joe)?(?:\s+careers|\s+hr)?$/i.test(
+          displayName.trim(),
+        )
+          ? user.email
+          : displayName,
         avatarUrl: session.picture || user.avatarUrl,
       }
     : null;

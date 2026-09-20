@@ -1,8 +1,10 @@
 import "server-only";
 import type { AppState } from "@/types";
 import ExcelJS from "exceljs";
+import { productionState } from "@/lib/data-policy";
 import { trackerHeaders, trackerRows } from "@/lib/tracker";
 export async function buildTracker(state: AppState) {
+  state = productionState(state);
   const book = new ExcelJS.Workbook();
   book.creator = "Daily Joe Careers";
   book.created = new Date();

@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
-import { useState } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
 import {
   Search,
   SlidersHorizontal,
@@ -24,10 +24,20 @@ import {
   LoadingSkeleton,
 } from "./ui";
 import { isActive } from "@/lib/recruitment";
+import type { Application } from "@/types";
+import { canManage, canEdit, activeIntake } from "@/lib/data-policy";
+import { requestJson, downloadFile } from "@/lib/client-request";
+import { ApplicantEditor, DeleteApplicantDialog } from "./applicant-management";
+import { ActionMenu } from "./action-menu";
+import { formatDate, monthKey } from "@/lib/dates";
 export function Applications({ talent = false }: { talent?: boolean }) {
-  const { state } = useApp();
+  const { state, notify, dataset } = useApp();
+  const router = useRouter();
+  const [editing, setEditing] = useState<Application | "new" | null>(null);
+  const [deleting, setDeleting] = useState<Application | null>(null);
   const params = useSearchParams();
   const [q, setQ] = useState(params.get("q") || "");
+  const [needFilter, setNeedFilter] = useState(params.get("need") || "");
   const [status, setStatus] = useState(params.get("status") || "");
   const [stage, setStage] = useState(params.get("stage") || "");
   const [position, setPosition] = useState("");
@@ -38,55 +48,96 @@ export function Applications({ talent = false }: { talent?: boolean }) {
   );
   const [experience, setExperience] = useState("");
   const [tab, setTab] = useState(
-    params.get("view") === "interviews" ? "Interviews" : "All applications",
+    params.get("view") === "interviews" ? "Interviews" : "Active",
   );
   const [page, setPage] = useState(1);
+  const [employmentStatus, setEmploymentStatus] = useState("");
   const [urgency, setUrgency] = useState("");
   const [exporting, setExporting] = useState(false);
+  useEffect(() => {
+    setQ(params.get("q") || "");
+    setNeedFilter(params.get("need") || "");
+    setStatus(params.get("status") || "");
+    setStage(params.get("stage") || "");
+    setPage(1);
+  }, [params]);
+  const [listing, setListing] = useState<{
+      applications: Application[];
+      total: number;
+      page: number;
+    }>(),
+    [listError, setListError] = useState(""),
+    [listLoading, setListLoading] = useState(true),
+    [reload, setReload] = useState(0);
+  const queryParams = new URLSearchParams({
+    q,
+    need: needFilter,
+    status,
+    stage,
+    position,
+    location,
+    screening,
+    experience,
+    urgency,
+    employment: tab === "Hired" ? employmentStatus : "",
+    page: String(page),
+    tab,
+    talent: talent ? "1" : "0",
+    since:
+      date === "week"
+        ? new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10)
+        : date === "month"
+          ? new Date(
+              new Date().getFullYear(),
+              new Date().getMonth(),
+              1,
+            ).toISOString()
+          : "",
+  }).toString();
+  useEffect(() => {
+    const abort = new AbortController();
+    setListLoading(true);
+    setListError("");
+    const timer = setTimeout(() => {
+      requestJson<{ applications: Application[]; total: number; page: number }>(
+        `/api/applications?${queryParams}`,
+        { signal: abort.signal },
+      )
+        .then((r) => {
+          if (!abort.signal.aborted) setListing(r);
+        })
+        .catch((e) => {
+          if (!abort.signal.aborted) setListError(e.message);
+        })
+        .finally(() => {
+          if (!abort.signal.aborted) setListLoading(false);
+        });
+    }, 180);
+    return () => {
+      clearTimeout(timer);
+      abort.abort();
+    };
+  }, [queryParams, dataset, state?.revision, reload]);
   if (!state) return <LoadingSkeleton />;
-  const rows = state.applications.filter(
-    (a) =>
-      (talent ? a.status === "Talent Pool" : true) &&
-      (!q ||
-        `${a.applicant.name} ${a.applicant.email}`
-          .toLowerCase()
-          .includes(q.toLowerCase())) &&
-      (!params.get("need") || a.hiringNeedId === params.get("need")) &&
-      (!urgency ||
-        state.hiringNeeds.find((n) => n.id === a.hiringNeedId)?.urgency ===
-          urgency) &&
-      (!status || a.status === status) &&
-      (!stage || a.stage === stage) &&
-      (!position || a.position === position) &&
-      (!location || a.location === location) &&
-      (!screening || a.screening.outcome === screening) &&
-      (!experience || a.applicant.experience >= Number(experience)) &&
-      (!date ||
-        (date === "month"
-          ? new Date(talent ? a.talentPoolAddedAt || a.appliedAt : a.appliedAt)
-              .toISOString()
-              .slice(0, 7) === new Date().toISOString().slice(0, 7)
-          : Date.now() -
-              new Date(
-                talent ? a.talentPoolAddedAt || a.appliedAt : a.appliedAt,
-              ).getTime() <
-            7 * 86400000)) &&
-      (talent ||
-        tab === "All applications" ||
-        (tab === "Active" && isActive(a)) ||
-        (tab === "Interviews" &&
-          a.stage.includes("Interview") &&
-          isActive(a)) ||
-        (tab === "Pre-employment" && a.stage === "Requirements") ||
-        (tab === "Onboarding" && a.stage === "Onboarding") ||
-        (tab === "Hired" && a.status === "Hired")),
-  );
-  const pageCount = Math.max(1, Math.ceil(rows.length / 20));
-  const currentPage = Math.min(page, pageCount);
-  const visible = rows.slice((currentPage - 1) * 20, currentPage * 20);
-  function exportCsv() {
+  const selectedNeed = state.hiringNeeds.find((need) => need.id === needFilter);
+  const rows = listing?.applications || [],
+    total = listing?.total || 0;
+  const pageCount = Math.max(1, Math.ceil(total / 20)),
+    currentPage = listing?.page || page,
+    visible = rows;
+  async function exportCsv() {
     setExporting(true);
-    window.location.href = "/api/tracker";
+    try {
+      await downloadFile(
+        `/api/tracker${talent ? "?scope=talent" : ""}`,
+        `Daily-Joe-Careers-${talent ? "Talent-Pool" : "Applications"}.xlsx`,
+      );
+      notify("Tracker downloaded. Demo records are excluded.");
+    } catch (error) {
+      notify((error as Error).message, "error");
+    } finally {
+      setExporting(false);
+    }
   }
 
   return (
@@ -103,53 +154,128 @@ export function Applications({ talent = false }: { talent?: boolean }) {
               : "A thoughtful next step for every applicant."}
           </p>
         </div>
-        <Button variant="secondary" onClick={exportCsv} disabled={exporting}>
-          <Download size={16} />
-          {exporting
-            ? "Preparing tracker…"
-            : `Export ${talent ? "talent pool" : "applications"}`}
-        </Button>
+        <div className="button-row">
+          {!talent && dataset === "real" && (
+            <>
+              <a
+                className="button secondary"
+                href="/settings/integrations#intake"
+              >
+                Import Applications
+              </a>
+              <Button
+                disabled={!canManage(state.currentUser)}
+                title={
+                  !canManage(state.currentUser)
+                    ? "Recruitment manager access required"
+                    : undefined
+                }
+                onClick={() => setEditing("new")}
+              >
+                + Add Applicant
+              </Button>
+            </>
+          )}
+          <Button
+            variant="secondary"
+            onClick={() => void exportCsv()}
+            disabled={exporting || dataset === "demo"}
+            title={
+              dataset === "demo"
+                ? "Exit Demo to export real applications"
+                : undefined
+            }
+          >
+            <Download size={16} />
+            {exporting
+              ? "Preparing tracker…"
+              : `Export ${talent ? "talent pool" : "applications"}`}
+          </Button>
+        </div>
       </div>
       <Card className="workspace-card">
         <StageLegend compact />
+        {!talent && dataset === "real" && (
+          <p className="padded fine-print">
+            Latest 100 active applications ·{" "}
+            {state.applications.filter(activeIntake).length} active ·{" "}
+            {state.applications.filter((a) => a.queueState === "Queued").length}{" "}
+            queued. New applications enter the active window; older applications
+            remain available in Queued.
+          </p>
+        )}
         {!talent && (
           <Tabs
             items={[
               "All applications",
               "Active",
+              "Queued",
               "Interviews",
               "Pre-employment",
               "Onboarding",
               "Hired",
             ]}
             value={tab}
-            onChange={setTab}
+            onChange={(value) => {
+              setTab(value);
+              setPage(1);
+            }}
           />
         )}
         <div className="filter-bar">
+          {needFilter && (
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setNeedFilter("");
+                setPage(1);
+              }}
+              title="Remove the hiring need filter"
+            >
+              Hiring need:{" "}
+              {selectedNeed
+                ? `${selectedNeed.position} · ${selectedNeed.location}`
+                : "Selected hiring need"}{" "}
+              ×
+            </Button>
+          )}
           <div className="search-field">
             <Search size={17} />
             <Input
               aria-label="Search applications"
               placeholder="Search name or email"
               value={q}
-              onChange={(e) => setQ(e.target.value)}
+              onChange={(e) => {
+                setQ(e.target.value);
+                setPage(1);
+              }}
             />
           </div>
           <Select
             aria-label="Position"
             value={position}
-            onChange={(e) => setPosition(e.target.value)}
+            onChange={(e) => {
+              setPosition(e.target.value);
+              setPage(1);
+            }}
           >
             <option value="">All positions</option>
-            {["Barista", "Team Leader", "Supervisor"].map((v) => (
+            {Array.from(
+              new Set([
+                ...state.qualifications.map((v) => v.position),
+                ...state.applications.map((v) => v.position),
+              ]),
+            ).map((v) => (
               <option key={v}>{v}</option>
             ))}
           </Select>
           <Select
             aria-label="Location"
             value={location}
-            onChange={(e) => setLocation(e.target.value)}
+            onChange={(e) => {
+              setLocation(e.target.value);
+              setPage(1);
+            }}
           >
             <option value="">All locations</option>
             {(state.locations || [])
@@ -161,7 +287,10 @@ export function Applications({ talent = false }: { talent?: boolean }) {
           <Select
             aria-label="Screening result"
             value={screening}
-            onChange={(e) => setScreening(e.target.value)}
+            onChange={(e) => {
+              setScreening(e.target.value);
+              setPage(1);
+            }}
           >
             <option value="">All screening results</option>
             {["Meets Criteria", "Requires Review", "Criteria Not Met"].map(
@@ -186,12 +315,30 @@ export function Applications({ talent = false }: { talent?: boolean }) {
               <option key={v}>{v}</option>
             ))}
           </Select>
+          {tab === "Hired" && (
+            <Select
+              aria-label="Employment status"
+              value={employmentStatus}
+              onChange={(e) => {
+                setEmploymentStatus(e.target.value);
+                setPage(1);
+              }}
+            >
+              <option value="">All employment statuses</option>
+              {["Active", "Resigned", "Terminated"].map((status) => (
+                <option key={status}>{status}</option>
+              ))}
+            </Select>
+          )}
           {!talent && (
             <>
               <Select
                 aria-label="Status"
                 value={status}
-                onChange={(e) => setStatus(e.target.value)}
+                onChange={(e) => {
+                  setStatus(e.target.value);
+                  setPage(1);
+                }}
               >
                 <option value="">All statuses</option>
                 {[
@@ -211,7 +358,10 @@ export function Applications({ talent = false }: { talent?: boolean }) {
               <Select
                 aria-label="Recruitment stage"
                 value={stage}
-                onChange={(e) => setStage(e.target.value)}
+                onChange={(e) => {
+                  setStage(e.target.value);
+                  setPage(1);
+                }}
               >
                 <option value="">All stages</option>
                 {[
@@ -231,7 +381,10 @@ export function Applications({ talent = false }: { talent?: boolean }) {
             <Select
               aria-label="Experience"
               value={experience}
-              onChange={(e) => setExperience(e.target.value)}
+              onChange={(e) => {
+                setExperience(e.target.value);
+                setPage(1);
+              }}
             >
               <option value="">Any experience</option>
               <option value="2">2+ years</option>
@@ -241,7 +394,10 @@ export function Applications({ talent = false }: { talent?: boolean }) {
           <Select
             aria-label={talent ? "Date added" : "Application date"}
             value={date}
-            onChange={(e) => setDate(e.target.value)}
+            onChange={(e) => {
+              setDate(e.target.value);
+              setPage(1);
+            }}
           >
             <option value="">Any date</option>
             <option value="week">Last 7 days</option>
@@ -251,6 +407,8 @@ export function Applications({ talent = false }: { talent?: boolean }) {
             className="text-link"
             onClick={() => {
               setUrgency("");
+              setNeedFilter("");
+              setTab("All applications");
               setPage(1);
               setQ("");
               setStatus("");
@@ -260,24 +418,39 @@ export function Applications({ talent = false }: { talent?: boolean }) {
               setScreening("");
               setDate("");
               setExperience("");
+              setEmploymentStatus("");
             }}
           >
             Clear filters
           </button>
           <span className="result-count">
-            {rows.length} {talent ? "candidates" : "applications"}
+            {total}{" "}
+            {talent
+              ? total === 1
+                ? "candidate"
+                : "candidates"
+              : total === 1
+                ? "application"
+                : "applications"}
           </span>
         </div>
-        {rows.length ? (
+        {listError ? (
+          <div className="error-banner" role="alert">
+            {listError}
+            <Button variant="secondary" onClick={() => setReload((v) => v + 1)}>
+              Retry
+            </Button>
+          </div>
+        ) : listLoading ? (
+          <LoadingSkeleton />
+        ) : rows.length ? (
           <Table>
             <thead>
               <tr>
                 {[
                   "Applicant",
-                  "Position",
-                  "Location",
-                  talent ? "Date added" : "Applied",
-                  "Screening",
+                  "Role / urgency",
+                  "Qualifications",
                   talent ? "Experience" : "Stage",
                   "Status",
                   tab === "Hired" ? "Hired date" : "Last activity",
@@ -295,14 +468,14 @@ export function Applications({ talent = false }: { talent?: boolean }) {
                       className="applicant-cell"
                       href={`/applications/${a.id}`}
                     >
-                      <ApplicantCard
-                        name={a.applicant.name}
-                        reference={a.applicant.email}
-                      />
+                      <ApplicantCard name={a.applicant.name} reference={a.id} />
                     </Link>
+                    {a.isDemo && <Badge tone="amber">DEMO</Badge>}
+                    {a.queueState === "Queued" && <Badge>Queued</Badge>}
                   </td>
                   <td>
                     {a.position}
+                    <small className="cell-secondary">{a.location}</small>
                     {state.hiringNeeds.find((n) => n.id === a.hiringNeedId)
                       ?.urgency && (
                       <>
@@ -317,17 +490,24 @@ export function Applications({ talent = false }: { talent?: boolean }) {
                       </>
                     )}
                   </td>
-                  <td>{a.location}</td>
                   <td>
-                    {new Date(
-                      talent ? a.talentPoolAddedAt || a.appliedAt : a.appliedAt,
-                    ).toLocaleDateString("en-US", {
-                      month: "short",
-                      day: "numeric",
-                    })}
-                  </td>
-                  <td>
-                    <StatusBadge status={a.screening.outcome} />
+                    <span
+                      className="qualification-summary"
+                      title={a.screening.outcome}
+                    >
+                      {a.screening.criteria.length
+                        ? `${a.screening.criteria.filter((c) => c.result === "Met").length}/${a.screening.criteria.length} met`
+                        : "Not assessed"}
+                    </span>
+                    <small className="cell-secondary">
+                      {a.screening.criteria.length
+                        ? `${
+                            a.screening.criteria.filter(
+                              (c) => c.result === "Unclear",
+                            ).length
+                          } unclear`
+                        : "Qualifications not configured"}
+                    </small>
                   </td>
                   <td>
                     {talent ? (
@@ -337,26 +517,43 @@ export function Applications({ talent = false }: { talent?: boolean }) {
                     )}
                   </td>
                   <td>
-                    <StatusBadge status={a.status} />
+                    <StatusBadge
+                      status={
+                        tab === "Hired"
+                          ? a.employment?.status || "Active"
+                          : a.status
+                      }
+                    />
                   </td>
                   <td>
-                    {new Date(
+                    {formatDate(
                       tab === "Hired"
                         ? a.hiredAt || a.lastActivity
                         : a.lastActivity,
-                    ).toLocaleDateString("en-US", {
-                      month: "short",
-                      day: "numeric",
-                    })}
+                      state.preferences,
+                    )}
                   </td>
                   <td>
-                    <Link
-                      className="icon-button"
-                      aria-label={`Open ${a.applicant.name}`}
-                      href={`/applications/${a.id}`}
-                    >
-                      <ArrowUpRight size={18} />
-                    </Link>
+                    <ActionMenu
+                      label={`Actions for ${a.applicant.name}`}
+                      items={[
+                        {
+                          label: "View Applicant",
+                          onClick: () => router.push(`/applications/${a.id}`),
+                        },
+                        {
+                          label: "Edit Applicant",
+                          onClick: () => setEditing(a),
+                          disabled: !canEdit(state.currentUser, a),
+                        },
+                        {
+                          label: "Delete Applicant",
+                          onClick: () => setDeleting(a),
+                          disabled: !canManage(state.currentUser),
+                          danger: true,
+                        },
+                      ]}
+                    />
                   </td>
                 </tr>
               ))}
@@ -367,40 +564,68 @@ export function Applications({ talent = false }: { talent?: boolean }) {
             title={
               talent ? "No talent pool candidates" : "No applications found"
             }
+            description={
+              talent
+                ? "Candidates you save to the talent pool will appear here for future openings."
+                : state.applications.length
+                  ? "No applicants match these filters. Clear filters to see all applications."
+                  : "Import applications from Daily Joe Careers Gmail or add an applicant manually to get started."
+            }
           />
         )}
         <div className="table-footer">
           <span>
             Showing {rows.length ? (currentPage - 1) * 20 + 1 : 0}–
-            {Math.min(currentPage * 20, rows.length)} of {rows.length}{" "}
-            applicants
+            {Math.min(currentPage * 20, total)} of {total} applicants
           </span>
-          <Button
-            variant="secondary"
-            disabled={currentPage <= 1}
-            onClick={() => setPage(currentPage - 1)}
-          >
-            ← Previous
-          </Button>
-          {Array.from({ length: pageCount }, (_, i) => (
+          <div className="pagination-controls" aria-label="Application pages">
             <Button
-              key={i}
-              variant={currentPage === i + 1 ? "primary" : "ghost"}
-              onClick={() => setPage(i + 1)}
+              variant="secondary"
+              disabled={currentPage <= 1}
+              onClick={() => setPage(currentPage - 1)}
             >
-              {i + 1}
+              ← Previous
             </Button>
-          ))}
-          <Button
-            variant="secondary"
-            disabled={currentPage >= pageCount}
-            onClick={() => setPage(currentPage + 1)}
-          >
-            Next →
-          </Button>
-          <Badge>Live workspace</Badge>
+            {Array.from(
+              { length: Math.min(pageCount, 7) },
+              (_, index) =>
+                Math.max(0, Math.min(currentPage - 4, pageCount - 7)) + index,
+            ).map((i) => (
+              <Button
+                key={i}
+                variant={currentPage === i + 1 ? "primary" : "ghost"}
+                aria-current={currentPage === i + 1 ? "page" : undefined}
+                aria-label={`Page ${i + 1}`}
+                onClick={() => setPage(i + 1)}
+              >
+                {i + 1}
+              </Button>
+            ))}
+            <Button
+              variant="secondary"
+              disabled={currentPage >= pageCount}
+              onClick={() => setPage(currentPage + 1)}
+            >
+              Next →
+            </Button>
+          </div>
+          <Badge>
+            {dataset === "demo" ? "Demo workspace" : "Live workspace"}
+          </Badge>
         </div>
       </Card>
+      {editing && (
+        <ApplicantEditor
+          application={editing === "new" ? undefined : editing}
+          onClose={() => setEditing(null)}
+        />
+      )}
+      {deleting && (
+        <DeleteApplicantDialog
+          application={deleting}
+          onClose={() => setDeleting(null)}
+        />
+      )}
     </>
   );
 }

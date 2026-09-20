@@ -3,6 +3,7 @@ import Link from "next/link";
 import { Bell, CheckCheck, ArrowUpRight } from "lucide-react";
 import type { Notification } from "@/types";
 import { useApp } from "./provider";
+import { formatDate } from "@/lib/dates";
 import { Button, Card, EmptyState, LoadingSkeleton } from "./ui";
 export function NotificationItem({
   item,
@@ -11,6 +12,7 @@ export function NotificationItem({
   item: Notification;
   onRead: () => void;
 }) {
+  const { state } = useApp();
   return (
     <div className={`notification-item ${item.read ? "read" : ""}`}>
       <span className="attention-icon">
@@ -19,7 +21,7 @@ export function NotificationItem({
       <Link href={item.href} onClick={onRead}>
         <strong>{item.title}</strong>
         <p>{item.description}</p>
-        <small>{new Date(item.date).toLocaleDateString()}</small>
+        <small>{formatDate(item.date, state?.preferences, true)}</small>
       </Link>
       {!item.read && (
         <Button
@@ -42,7 +44,7 @@ export function NotificationItem({
   );
 }
 export function Notifications() {
-  const { state, update } = useApp();
+  const { state, update, saving } = useApp();
   if (!state) return <LoadingSkeleton />;
   return (
     <>
@@ -54,10 +56,15 @@ export function Notifications() {
         </div>
         <Button
           variant="secondary"
+          disabled={saving || !state.notifications.some((n) => !n.read)}
           onClick={() =>
             update((s) => ({
               ...s,
-              notifications: s.notifications.map((n) => ({ ...n, read: true })),
+              notifications: s.notifications.map((n) =>
+                state.notifications.some((v) => v.id === n.id)
+                  ? { ...n, read: true }
+                  : n,
+              ),
             }))
           }
         >
@@ -67,20 +74,22 @@ export function Notifications() {
       </div>
       <Card>
         {state.notifications.length ? (
-          state.notifications.map((n) => (
-            <NotificationItem
-              key={n.id}
-              item={n}
-              onRead={() =>
-                update((s) => ({
-                  ...s,
-                  notifications: s.notifications.map((item) =>
-                    item.id === n.id ? { ...item, read: true } : item,
-                  ),
-                }))
-              }
-            />
-          ))
+          [...state.notifications]
+            .sort((a, b) => Date.parse(b.date) - Date.parse(a.date))
+            .map((n) => (
+              <NotificationItem
+                key={n.id}
+                item={n}
+                onRead={() =>
+                  update((s) => ({
+                    ...s,
+                    notifications: s.notifications.map((item) =>
+                      item.id === n.id ? { ...item, read: true } : item,
+                    ),
+                  }))
+                }
+              />
+            ))
         ) : (
           <EmptyState
             title="You're all caught up"

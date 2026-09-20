@@ -6,22 +6,13 @@ const errors: Record<string, string> = {
   state:
     "Your sign-in request expired or could not be verified. Please try again.",
   unauthorized:
-    "This Google account is not authorized. Use the configured Daily Joe account.",
+    "This Google account is not authorized for Daily Joe Careers. Contact your workspace administrator.",
   denied: "Google authorization was canceled. You can try again when ready.",
   scope:
-    "Gmail sending permission was not granted. Please reconnect and allow gmail.send.",
+    "The required Gmail permission was not granted. Reconnect to try again.",
   signin: "Sign in before connecting Gmail.",
-  identity: "Google could not confirm your account identity.",
-  oauth_config:
-    "Google rejected the OAuth client configuration. Confirm the exact callback URL and that this account is a consent-screen test user.",
-  oauth_retry:
-    "Google could not exchange this one-time sign-in request. Start the sign-in again; if it repeats, verify the registered callback URL.",
-  database:
-    "Google approved the sign-in, but the Vercel app cannot access its database. Check the Production DATABASE_URL setting and redeploy.",
-  server_config:
-    "Google approved the sign-in, but a required Vercel production setting is missing or invalid. Check the deployment settings and redeploy.",
   authorization:
-    "Google authorization could not be completed. Check the redirect URI, consent screen, and test-user configuration.",
+    "We couldn’t complete Google sign-in. Please try again or contact your workspace administrator.",
 };
 export default async function Login({
   searchParams,
@@ -36,7 +27,7 @@ export default async function Login({
           <Image
             className="brand-logo"
             src="/daily-joe-logo-blue.png"
-            alt="Daily Joe"
+            alt="Daily Joe Careers"
             width={220}
             height={96}
             priority
@@ -52,12 +43,11 @@ export default async function Login({
           </h1>
           <p>
             A little care can start something wonderful.
-            <br />
-            Let&apos;s find the people who make Daily Joe, Daily Joe.
+            <br />A clear next step for every applicant.
           </p>
           <Coffee size={50} strokeWidth={1} />
         </div>
-        <small>DAILY JOE · PEOPLE & CULTURE</small>
+        <small>DAILY JOE CAREERS · PEOPLE & CULTURE</small>
       </div>
       <div className="login-form">
         <div>

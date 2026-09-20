@@ -4,6 +4,7 @@ import { useSearchParams } from "next/navigation";
 import { Plus, MapPin, CalendarDays, Pencil, UsersRound } from "lucide-react";
 import type { HiringNeed } from "@/types";
 import { useApp } from "./provider";
+import { formatDate } from "@/lib/dates";
 import {
   Badge,
   Button,
@@ -21,8 +22,9 @@ import Link from "next/link";
 import { QualificationEditor } from "./qualification-editor";
 import type { QualificationRule } from "@/types";
 import { isActive } from "@/lib/recruitment";
+import { canManage } from "@/lib/data-policy";
 export function HiringNeeds() {
-  const { state, update, notify } = useApp();
+  const { state, update, notify, saving, dataset } = useApp();
   const params = useSearchParams();
   const [editing, setEditing] = useState<string | null>(
     params.get("new") ? "new" : params.get("edit"),
@@ -39,6 +41,7 @@ export function HiringNeeds() {
     const data = new FormData(e.currentTarget);
     const need: HiringNeed = {
       id: existing?.id || crypto.randomUUID(),
+      isDemo: existing?.isDemo,
       position: String(data.get("position")),
       location: String(data.get("location")),
       slots: Number(data.get("slots")),
@@ -74,6 +77,14 @@ export function HiringNeeds() {
           <p>The right people. The right place. The right time.</p>
         </div>
         <Button
+          disabled={
+            !canManage(state.currentUser) || saving || dataset === "demo"
+          }
+          title={
+            dataset === "demo"
+              ? "Use the generated demo hiring needs, or exit demo to create a real request."
+              : undefined
+          }
           onClick={() => {
             setRules([]);
             setEditing("new");
@@ -102,16 +113,19 @@ export function HiringNeeds() {
               <span className="job-icon">
                 <UsersRound size={24} />
               </span>
-              <StatusBadge status={`${n.urgency} priority`} />
+              <StatusBadge status={n.urgency} />
             </div>
-            <h2>{n.position}</h2>
+            <h2>
+              {n.isDemo ? "DEMO — " : ""}
+              {n.position}
+            </h2>
             <p className="location-line">
               <MapPin size={15} />
               {n.location}
             </p>
             <div className="need-numbers">
               <div>
-                <strong>{n.slots - n.filled}</strong>
+                <strong>{Math.max(0, n.slots - n.filled)}</strong>
                 <span>open slots</span>
               </div>
               <div>
@@ -138,8 +152,7 @@ export function HiringNeeds() {
             <ProgressBar value={(n.filled / n.slots) * 100} />
             <p className="location-line">
               <CalendarDays size={15} />
-              Target:{" "}
-              {new Date(n.targetDate + "T12:00:00").toLocaleDateString()}
+              Target: {formatDate(n.targetDate, state.preferences)}
             </p>
             <ul>
               {n.criteria?.map((r) => (
@@ -153,8 +166,12 @@ export function HiringNeeds() {
             </Link>
             <div className="section-heading">
               <Badge>{n.status}</Badge>
+              {n.id.startsWith("sample-need-") && (
+                <Badge tone="amber">Sample configuration</Badge>
+              )}
               <Button
                 variant="secondary"
+                disabled={!canManage(state.currentUser) || saving}
                 onClick={() => {
                   setRules(n.criteria || []);
                   setEditing(n.id);
@@ -169,12 +186,21 @@ export function HiringNeeds() {
       </div>
       {!rows.length && (
         <EmptyState
-          title="No hiring needs"
-          description="Create a request when your team is ready to grow."
+          title={
+            filter === "All"
+              ? "No hiring needs yet"
+              : `No ${filter.toLowerCase()} hiring needs`
+          }
+          description={
+            state.hiringNeeds.length
+              ? "Choose All to review existing requests and paused sample configurations."
+              : "Create a request when your team is ready to grow."
+          }
         />
       )}
       {editing && (
         <Modal
+          busy={saving}
           title={existing ? "Edit hiring need" : "New hiring need"}
           onClose={() => setEditing(null)}
         >
@@ -275,7 +301,12 @@ export function HiringNeeds() {
               >
                 Cancel
               </Button>
-              <Button type="submit">Save hiring need</Button>
+              <Button
+                type="submit"
+                disabled={saving || !canManage(state.currentUser)}
+              >
+                {saving ? "Saving…" : "Save hiring need"}
+              </Button>
             </div>
           </form>
         </Modal>

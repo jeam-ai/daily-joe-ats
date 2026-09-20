@@ -1,7 +1,10 @@
 "use client";
+import { IntakeSyncStatus } from "./intake-sync";
 import Link from "next/link";
+import { canManage, activeIntake } from "@/lib/data-policy";
+import { DemoControls } from "./system-settings";
 import { usePathname } from "next/navigation";
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   House,
   UsersRound,
@@ -13,18 +16,22 @@ import {
   Search,
   ChevronDown,
   Menu,
-  Coffee,
+  ShieldCheck,
   ArrowUpRight,
   LogOut,
+  Clock3,
+  X,
+  Mail,
 } from "lucide-react";
 import { AppProvider, useApp } from "./provider";
-import { Avatar, Badge } from "./ui";
+import { Avatar, Badge, Button } from "./ui";
 import Image from "next/image";
 const navigation = [
   ["Home", "/", House],
   ["Applications", "/applications", UsersRound],
   ["Hiring Needs", "/hiring-needs", BriefcaseBusiness],
   ["Talent Pool", "/talent-pool", Bookmark],
+  ["Timekeeping", "/timekeeping", Clock3],
   ["Reports", "/reports", ChartNoAxesCombined],
   ["Settings", "/settings", Settings],
 ] as const;
@@ -40,19 +47,93 @@ function Frame({
   demo: boolean;
 }) {
   const path = usePathname();
-  const { state } = useApp();
+  const { state, dataset } = useApp();
   const [open, setOpen] = useState(false);
+  const [mobile, setMobile] = useState(false);
+  useEffect(() => {
+    const media = matchMedia("(max-width: 700px)");
+    const apply = () => {
+      setMobile(media.matches);
+      if (!media.matches) setOpen(false);
+    };
+    apply();
+    media.addEventListener("change", apply);
+    return () => media.removeEventListener("change", apply);
+  }, []);
+  const sidebar = useRef<HTMLElement>(null);
+  const menuButton = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const focusable = () =>
+      Array.from(
+        sidebar.current?.querySelectorAll<HTMLElement>(
+          "a[href], button:not([disabled])",
+        ) || [],
+      ).filter((el) => el.offsetParent !== null);
+    focusable()[0]?.focus();
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const key = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setOpen(false);
+        requestAnimationFrame(() => menuButton.current?.focus());
+      }
+      if (e.key === "Tab") {
+        const items = focusable(),
+          first = items[0],
+          last = items.at(-1);
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last?.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first?.focus();
+        }
+      }
+    };
+    document.addEventListener("keydown", key);
+    return () => {
+      document.removeEventListener("keydown", key);
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [open]);
   const active = navigation.find(([, href]) =>
     href === "/" ? path === "/" : path.startsWith(href),
   );
   return (
     <div className={`app-shell ${state?.preferences.compact ? "compact" : ""}`}>
-      <aside className={`sidebar ${open ? "mobile-open" : ""}`}>
-        <Link href="/" className="brand">
+      {open && (
+        <button
+          className="mobile-backdrop"
+          tabIndex={-1}
+          aria-hidden="true"
+          aria-label="Close navigation"
+          onClick={() => setOpen(false)}
+        />
+      )}
+      <aside
+        ref={sidebar}
+        inert={mobile && !open}
+        aria-hidden={mobile && !open ? true : undefined}
+        aria-label="Workspace navigation"
+        id="workspace-navigation"
+        className={`sidebar ${open ? "mobile-open" : ""}`}
+      >
+        <button
+          className="icon-button sidebar-close"
+          aria-label="Close navigation"
+          onClick={() => {
+            setOpen(false);
+            requestAnimationFrame(() => menuButton.current?.focus());
+          }}
+        >
+          <X size={20} />
+        </button>
+        <Link href="/" className="brand" onClick={() => setOpen(false)}>
           <Image
             className="brand-logo"
             src="/daily-joe-logo-blue.png"
-            alt="Daily Joe"
+            alt="Daily Joe Careers"
             width={170}
             height={74}
             priority
@@ -66,14 +147,15 @@ function Frame({
               href={href}
               key={href}
               onClick={() => setOpen(false)}
+              title={label}
+              aria-current={active?.[1] === href ? "page" : undefined}
               className={active?.[1] === href ? "active" : ""}
             >
               <Icon size={19} />
               <span>{label}</span>
               {label === "Applications" && (
                 <span className="nav-count">
-                  {state?.applications.filter((a) => a.status === "New")
-                    .length || 0}
+                  {state ? state.applications.length : "…"}
                 </span>
               )}
             </Link>
@@ -81,17 +163,9 @@ function Frame({
         </nav>
         <div className="sidebar-bottom">
           <div className="sidebar-note">
-            <Coffee size={22} />
-            <strong>
-              Good people.
-              <br />
-              Great beginnings.
-            </strong>
-            <p>
-              Build the team behind
-              <br />
-              every Daily Joe moment.
-            </p>
+            <ShieldCheck size={22} />
+            <strong>Daily Joe Careers</strong>
+            <p>Recruitment and HR operations.</p>
           </div>
           <Link href="/settings/account" className="sidebar-profile">
             <Avatar
@@ -107,11 +181,14 @@ function Frame({
           </Link>
         </div>
       </aside>
-      <div className="main-shell">
+      <div className="main-shell" inert={open}>
         <header className="topbar">
           <div className="breadcrumbs">
             <button
               className="icon-button menu-toggle"
+              ref={menuButton}
+              aria-expanded={open}
+              aria-controls="workspace-navigation"
               onClick={() => setOpen(!open)}
               aria-label="Toggle navigation"
             >
@@ -132,8 +209,13 @@ function Frame({
               <kbd>↵</kbd>
             </form>
             <Badge tone="blue">
-              Workspace · {state?.applications.length || 0}/
-              {state?.importLimit || 100}
+              {dataset === "demo" ? "DEMO" : "LIVE WORKSPACE"} ·{" "}
+              {!state
+                ? "…"
+                : dataset === "demo"
+                  ? state.applications.length
+                  : state.applications.filter(activeIntake).length}{" "}
+              / 100 active
             </Badge>
             <Link
               className="icon-button notification-button"
@@ -146,14 +228,18 @@ function Frame({
             </Link>
             <Link href="/settings/account" aria-label="Your profile">
               <Avatar
-                name={state?.currentUser?.name || email || "HR"}
+                name={state?.currentUser?.name || name || email || "HR"}
                 imageUrl={state?.currentUser?.avatarUrl}
                 small
               />
             </Link>
           </div>
         </header>
-        <main id="main-content">{children}</main>
+        <main id="main-content">
+          <DemoControls banner />
+          {!path.startsWith("/timekeeping") && <IntakeSyncStatus />}
+          {children}
+        </main>
         <footer className="workspace-footer">
           <span>DAILY JOE CAREERS</span>
           <span>

@@ -1,6 +1,13 @@
 "use client";
 import { useEffect, useRef, useId } from "react";
-import { X, Inbox, ChevronRight } from "lucide-react";
+import {
+  X,
+  Inbox,
+  ChevronRight,
+  CheckCircle2,
+  AlertCircle,
+  Info,
+} from "lucide-react";
 export function Button({
   children,
   variant = "primary",
@@ -9,7 +16,11 @@ export function Button({
   variant?: "primary" | "secondary" | "ghost" | "danger";
 }) {
   return (
-    <button {...props} className={`button ${variant} ${props.className || ""}`}>
+    <button
+      type="button"
+      {...props}
+      className={`button ${variant} ${props.className || ""}`}
+    >
       {children}
     </button>
   );
@@ -48,6 +59,13 @@ export function StatusBadge({ status }: { status: string }) {
     High: "orange",
     Medium: "amber",
     Low: "green",
+    Met: "green",
+    Unclear: "amber",
+    "Not Assessed": "neutral",
+    "Not Met": "red",
+    Active: "green",
+    Resigned: "neutral",
+    Terminated: "red",
   };
   const tone =
     stageTones[status] ||
@@ -196,15 +214,18 @@ export function ProgressBar({ value }: { value: number }) {
 export function EmptyState({
   title,
   description = "Try changing your filters or come back later.",
+  children,
 }: {
   title: string;
   description?: string;
+  children?: React.ReactNode;
 }) {
   return (
     <div className="empty">
       <Inbox size={30} />
       <h3>{title}</h3>
       <p>{description}</p>
+      {children && <div className="empty-actions">{children}</div>}
     </div>
   );
 }
@@ -222,18 +243,24 @@ export function Modal({
   title,
   children,
   onClose,
+  busy = false,
 }: {
   title: string;
   children: React.ReactNode;
   onClose: () => void;
+  busy?: boolean;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const titleId = useId();
   useEffect(() => {
     const previous = document.activeElement as HTMLElement;
-    ref.current?.showModal();
+    const dialog = ref.current;
+    dialog?.showModal();
     return () => {
-      previous?.focus();
+      dialog?.close();
+      requestAnimationFrame(() => {
+        if (previous?.isConnected) previous.focus();
+      });
     };
   }, []);
   return (
@@ -241,9 +268,12 @@ export function Modal({
       aria-labelledby={titleId}
       ref={ref}
       className="modal"
-      onCancel={onClose}
+      onCancel={(e) => {
+        e.preventDefault();
+        if (!busy) onClose();
+      }}
       onClick={(e) => {
-        if (e.target === ref.current) onClose();
+        if (e.target === ref.current && !busy) onClose();
       }}
     >
       <div className="modal-heading">
@@ -252,6 +282,7 @@ export function Modal({
           className="icon-button"
           aria-label="Close dialog"
           onClick={onClose}
+          disabled={busy}
         >
           <X size={20} />
         </button>
@@ -299,16 +330,28 @@ export function MetricCard({
 export function Toast({
   message,
   onClose,
+  tone = "success",
 }: {
   message: string;
   onClose: () => void;
+  tone?: "success" | "error" | "info";
 }) {
   useEffect(() => {
     const timer = setTimeout(onClose, 6000);
     return () => clearTimeout(timer);
   }, [message, onClose]);
   return (
-    <div className="toast" role="status">
+    <div
+      className={`toast ${tone}`}
+      role={tone === "error" ? "alert" : "status"}
+    >
+      {tone === "error" ? (
+        <AlertCircle size={18} />
+      ) : tone === "info" ? (
+        <Info size={18} />
+      ) : (
+        <CheckCircle2 size={18} />
+      )}
       {message}
       <button onClick={onClose} aria-label="Dismiss notification">
         <X size={16} />

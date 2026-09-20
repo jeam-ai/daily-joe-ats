@@ -1,7 +1,10 @@
 "use client";
+import { activeIntake, canManage } from "@/lib/data-policy";
+import { clientFetch } from "@/lib/client-request";
 import { useState } from "react";
 import { FileText, ScanText } from "lucide-react";
 import { useApp } from "./provider";
+import { formatDate } from "@/lib/dates";
 import { Button, Card, Field, Input, Select, Badge, Modal, Table } from "./ui";
 type Row = {
   messageId: string;
@@ -18,7 +21,7 @@ type Preview = {
   issues: { message: string; reason: string }[];
   scanned: number;
 };
-export function Intake() {
+export function Intake({ authorized = false }: { authorized?: boolean }) {
   const { state, refresh, notify } = useApp();
   const [preview, setPreview] = useState<Preview | null>(null),
     [busy, setBusy] = useState(false),
@@ -37,7 +40,7 @@ export function Intake() {
     setBusy(true);
     setError("");
     try {
-      const r = await fetch("/api/intake", {
+      const r = await clientFetch("/api/intake", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(
@@ -79,23 +82,26 @@ export function Intake() {
       }
     } catch (e) {
       setError((e as Error).message);
+      notify((e as Error).message, "error");
     } finally {
       setBusy(false);
     }
   }
   const count = Object.values(selection).filter((v) => v.selected).length;
-  const openNeeds = state.hiringNeeds.filter((n) => n.status === "Open");
+  const openNeeds = state.hiringNeeds.filter(
+    (n) => n.status === "Open" && !n.isDemo,
+  );
   return (
-    <Card className="spaced">
+    <Card className="spaced" id="intake">
       <div className="card-heading">
         <div>
           <h2>Gmail applicant import</h2>
           <p>
-            {state.applications.length} / {state.importLimit || 100} applicants
-            imported
+            {state.applications.filter(activeIntake).length} / 100 active
+            applicants
           </p>
         </div>
-        <Badge>Maximum 10 per batch</Badge>
+        <Badge>Optional manual preview</Badge>
       </div>
       <div className="padded form-stack">
         <p>
@@ -119,23 +125,33 @@ export function Intake() {
           <div className="info-banner" role="status">
             <FileText size={18} aria-hidden="true" />
             <div>
-              <strong>Create an open hiring need before importing.</strong>
+              <strong>
+                Applications can be imported without a Hiring Need.
+              </strong>
               <p>
-                It provides the qualifications that the screening review uses.
+                Assign a Hiring Need later to assess its configured
+                qualifications.
               </p>
             </div>
           </div>
         )}
         <Button
-          disabled={
-            busy ||
-            !openNeeds.length ||
-            state.applications.length >= (state.importLimit || 100)
-          }
+          disabled={busy || !authorized || !canManage(state.currentUser)}
           onClick={() => void request("preview")}
         >
           {busy ? "Reading Gmail…" : "Preview latest eligible applications"}
         </Button>
+        {!authorized && (
+          <p className="fine-print">
+            Authorize the official careers mailbox for intake to enable
+            previews.
+          </p>
+        )}
+        {!canManage(state.currentUser) && (
+          <p className="fine-print">
+            Importing requires recruitment manager access.
+          </p>
+        )}
         {error && (
           <div className="error-banner" role="alert">
             {error}
@@ -193,7 +209,7 @@ export function Intake() {
                       <p>{r.subject}</p>
                     </td>
                     <td>
-                      {new Date(r.receivedAt).toLocaleString()}
+                      {formatDate(r.receivedAt, state?.preferences, true)}
                       <br />
                       <strong>{r.filename}</strong>
                       <br />
@@ -233,9 +249,10 @@ export function Intake() {
             </Table>
             <Button
               disabled={
+                busy ||
                 !count ||
                 Object.values(selection).some(
-                  (v) => v.selected && (!v.name.trim() || !v.hiringNeedId),
+                  (v) => v.selected && !v.name.trim(),
                 )
               }
               onClick={() => setConfirm(true)}
@@ -273,6 +290,7 @@ export function Intake() {
       </div>
       {confirm && (
         <Modal
+          busy={busy}
           title={`Import ${count} applicants?`}
           onClose={() => setConfirm(false)}
         >
@@ -281,7 +299,11 @@ export function Intake() {
             will review every application. No email is sent.
           </p>
           <div className="modal-actions">
-            <Button variant="secondary" onClick={() => setConfirm(false)}>
+            <Button
+              variant="secondary"
+              disabled={busy}
+              onClick={() => setConfirm(false)}
+            >
               Cancel
             </Button>
             <Button disabled={busy} onClick={() => void request("confirm")}>

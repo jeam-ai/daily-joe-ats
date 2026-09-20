@@ -1,4 +1,5 @@
 import type { AppState } from "@/types";
+import { productionState } from "./data-policy";
 export const trackerHeaders = [
   "Applicant ID",
   "Applicant Name",
@@ -26,7 +27,7 @@ export const trackerHeaders = [
   "Assigned HR User",
 ];
 export function trackerRows(state: AppState) {
-  return state.applications.map((a) => {
+  return productionState(state).applications.map((a) => {
     const need = state.hiringNeeds.find((n) => n.id === a.hiringNeedId),
       initial = a.interviews.find((i) => i.stage === "Initial Interview"),
       final = a.interviews.find((i) => i.stage === "Final Interview");

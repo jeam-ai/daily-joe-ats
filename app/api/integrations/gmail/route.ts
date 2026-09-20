@@ -1,3 +1,5 @@
+import { accessToken } from "@/lib/google/gmail/service";
+import { gmail } from "@/lib/google/gmail/intake";
 import { NextResponse } from "next/server";
 import { currentUser, requireUser, requireOrigin } from "@/lib/auth/session";
 import { config, SafeError } from "@/lib/server/config";
@@ -13,24 +15,57 @@ export async function GET() {
         { connected: false, authenticated: false, configured: true },
         { headers: { "Cache-Control": "no-store" } },
       );
+    const official = await withStore((s) => s.officialConnection, false);
+    let verified = false,
+      requiresReconnect = false,
+      officialError = "";
+    if (official) {
+      try {
+        const token = await accessToken(official);
+        const profile = await gmail<{ emailAddress: string }>(token, "profile");
+        verified = profile.emailAddress.toLowerCase() === c.officialEmail;
+        if (!verified)
+          officialError =
+            "The connected mailbox does not match the official account.";
+      } catch (e) {
+        officialError =
+          e instanceof SafeError
+            ? e.message
+            : "Gmail connection could not be checked. Try again.";
+        requiresReconnect =
+          e instanceof SafeError && [401, 403].includes(e.status);
+      }
+    }
     return NextResponse.json(
       await withStore(
         (s) => ({
-          connected: !!s.connection,
-          email: s.connection?.email,
-          connectedAt: s.connection?.connectedAt,
+          connected: s.connection?.email === user.email,
+          email:
+            s.connection?.email === user.email ? s.connection.email : undefined,
+          connectedAt:
+            s.connection?.email === user.email
+              ? s.connection.connectedAt
+              : undefined,
           authenticated: true,
           configured: true,
           testRecipient: user.email,
           officialEmail: c.officialEmail,
-          officialConnected: s.officialConnection?.email === c.officialEmail,
+          officialConnected: verified,
+          officialStored: !!official,
+          requiresReconnect,
+          officialError,
           intakeAuthorized:
             s.officialConnection?.scopes?.includes(
               "https://www.googleapis.com/auth/gmail.readonly",
             ) || false,
           sheetsConfigured: !!process.env.GOOGLE_SHEETS_ID,
           sheetsConnected: !!s.sheetsConnection,
-          events: s.events.slice(-20).reverse(),
+          events: s.events
+            .filter(
+              (event) => event.user === user.email || user.role === "Admin",
+            )
+            .slice(-20)
+            .reverse(),
         }),
         false,
       ),

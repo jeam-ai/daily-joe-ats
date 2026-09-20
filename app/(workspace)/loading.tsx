@@ -6,7 +6,7 @@ export default function Loading() {
       <div className="workspace-loading-card">
         <Image
           src="/daily-joe-logo-blue.png"
-          alt="Daily Joe"
+          alt="Daily Joe Careers"
           width={126}
           height={55}
           priority

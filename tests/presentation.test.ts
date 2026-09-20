@@ -18,8 +18,8 @@ test("the sign-in page is visible before workspace hydration", () => {
   const provider = readFileSync("components/provider.tsx", "utf8");
   assert.ok(!layout.includes("theme-pending"));
   assert.ok(login.includes("Continue with Google"));
-  assert.ok(provider.includes('state?.preferences.theme === "dark"'));
-  assert.ok(!provider.includes("matchMedia"));
+  assert.ok(provider.includes("prefers-color-scheme: dark"));
+  assert.ok(provider.includes("localStorage.setItem"));
 });
 test("screening renders the configured requirement and evidence with a text result", () => {
   const html = renderToStaticMarkup(
@@ -37,7 +37,7 @@ test("screening renders the configured requirement and evidence with a text resu
   assert.ok(html.includes("Availability is not stated."));
   assert.ok(html.includes("Evidence:"));
 });
-test("only deliberate Gmail test API invokes real email sending", () => {
+test("OAuth and pure transitions cannot send; the explicit Gmail test route validates authorization and idempotency", () => {
   const callback = readFileSync("app/api/auth/callback/route.ts", "utf8");
   const transition = readFileSync("lib/recruitment.ts", "utf8");
   assert.ok(!callback.includes("sendEmail"));
@@ -57,6 +57,6 @@ test("credential and token paths are ignored and environment template is blank",
   assert.ok(ignore.includes(".data/"));
   const lines = readFileSync(".env.example", "utf8")
     .split(/\r?\n/)
-    .filter(Boolean);
+    .filter((line) => line.trim() && !line.trim().startsWith("#"));
   assert.ok(lines.every((line) => line.endsWith("=") && !line.split("=")[1]));
 });

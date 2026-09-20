@@ -50,13 +50,13 @@ test("an interview must be passed in a separate HR action before proceeding", ()
   });
   assert.doesNotThrow(() => validateApplicationChange(passed, next, true));
 });
-test("imported identity, source, notes and hired history cannot be erased", () => {
+test("stable applicant IDs, source, notes and hired history cannot be erased", () => {
   const a = createSeed().applications[0];
   assert.throws(
     () =>
       validateApplicationChange(
         a,
-        { ...a, applicant: { ...a.applicant, email: "tampered@example.com" } },
+        { ...a, applicant: { ...a.applicant, id: "replacement-id" } },
         true,
       ),
     /identity/,
@@ -153,7 +153,7 @@ test("notifications derive from actual records and do not change decisions", () 
   assert.ok(notices.some((n) => n.title === "Application needs review"));
   assert.equal(JSON.stringify(a), original);
 });
-test("state schema rejects capacity overflow and malformed users", () => {
+test("state schema enforces the active-window setting and valid users", () => {
   const state = createSeed();
   assert.equal(
     stateSchema.safeParse({ ...state, importLimit: 101 }).success,

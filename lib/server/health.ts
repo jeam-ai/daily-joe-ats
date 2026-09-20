@@ -1,0 +1,420 @@
+import "server-only";
+import { createRequire } from "node:module";
+import type { HealthCheck } from "@/types/operations";
+import type { User } from "@/types";
+import {
+  readTransaction,
+  transaction,
+  readRecord,
+  putRecord,
+} from "./database";
+import { withStore } from "./store";
+import { config } from "./config";
+import { accessToken } from "@/lib/google/gmail/service";
+import { intakeStatus } from "@/lib/google/gmail/sync";
+import { aiConfigured, aiModel, geminiProvider } from "./ai-provider";
+import { aiUsage } from "./ai-assist";
+import { withDeadline } from "./deadline";
+import { writeAudit } from "./audit";
+import {
+  reportIssue,
+  resolveIssue,
+  recordIssue,
+  diagnosticHistory,
+  unresolved,
+} from "./diagnostics";
+import { getState } from "./repository";
+import { pendingFailures, clearBufferedFailure } from "./diagnostic-buffer";
+
+export interface HealthSnapshot {
+  checkedAt?: string;
+  checks: HealthCheck[];
+}
+const displayTime = (value?: string) =>
+  value
+    ? new Date(value).toLocaleString("en-PH", {
+        timeZone: "Asia/Manila",
+        month: "long",
+        day: "numeric",
+        year: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+      })
+    : "Not recorded";
+const definitions = [
+  ["database", "Database"],
+  ["auth", "Google Authentication"],
+  ["gmail", "Gmail Integration"],
+  ["intake", "Gmail Application Sync"],
+  ["sheets", "Spreadsheet Integration"],
+  ["documents", "File / Resume Processing"],
+  ["ocr", "OCR / Document Processing"],
+  ["ai", "Gemini / AI Assist"],
+  ["storage", "Application Storage"],
+  ["jobs", "Background jobs"],
+  ["mail", "Workflow email queue"],
+  ["extraction", "AI Integration extraction"],
+  ["timekeeping", "Timekeeping processing"],
+  ["window", "Application intake window"],
+];
+export async function cachedHealth(): Promise<HealthSnapshot> {
+  return (
+    (await readTransaction((tx) =>
+      readRecord<HealthSnapshot>(tx, "health", "latest"),
+    )) || {
+      checks: definitions.map(([id, service]) => ({
+        id,
+        service,
+        status: "Not Verified",
+        detail: "Select Check Now to verify this service.",
+      })),
+    }
+  );
+}
+let inProgress: Promise<HealthSnapshot> | undefined;
+export async function checkHealth(user: User) {
+  if (inProgress) return inProgress;
+  inProgress = performChecks(user).finally(() => {
+    inProgress = undefined;
+  });
+  return inProgress;
+}
+async function performChecks(user: User): Promise<HealthSnapshot> {
+  // Health is observational. Document issues are recorded at ingestion/reprocessing;
+  // scanning and writing every document here would turn checks into a bulk job.
+  const [known, previous] = await Promise.all([
+    withDeadline(diagnosticHistory(), 8000).catch(() => []),
+    withDeadline(cachedHealth(), 8000).catch(
+      () => ({ checks: [] }) as HealthSnapshot,
+    ),
+  ]);
+  const check = async (
+    id: string,
+    work: () => Promise<Partial<HealthCheck>>,
+  ): Promise<HealthCheck> => {
+    const start = Date.now(),
+      base = {
+        id,
+        service: definitions.find((d) => d[0] === id)![1],
+        checkedAt: new Date().toISOString(),
+        lastSuccess: previous.checks.find((c) => c.id === id)?.lastSuccess,
+      };
+    try {
+      const result = await withDeadline(work(), 15000);
+      return {
+        ...base,
+        status: "Not Verified",
+        detail: "Unable to verify this service right now.",
+        ...result,
+        responseMs: Date.now() - start,
+        ...(result.status === "Healthy" ? { lastSuccess: base.checkedAt } : {}),
+      };
+    } catch {
+      return {
+        ...base,
+        status: "Not Verified",
+        responseMs: Date.now() - start,
+        detail:
+          "Unable to verify this service right now. Retry the check; this result does not confirm an outage.",
+      };
+    }
+  };
+  const checks = await Promise.all([
+    check("database", async () => {
+      try {
+        await withDeadline(
+          readTransaction(async (tx) => {
+            await tx.query("SELECT 1 AS connected");
+            await tx.query("SELECT id FROM audit_logs LIMIT 1");
+            await tx.query("SELECT id FROM records LIMIT 1");
+          }),
+          12000,
+        );
+        return {
+          status: "Healthy",
+          detail:
+            (process.env.DATABASE_URL ? "PostgreSQL" : "Local SQLite") +
+            " connectivity and required table reads verified. No schema changes were performed by this check.",
+        };
+      } catch {
+        await reportIssue("database.unavailable");
+        return {
+          status: "Unavailable",
+          detail:
+            "Database connectivity could not be established. Ask an administrator to verify the service and connection configuration.",
+        };
+      }
+    }),
+    check("auth", async () => {
+      config();
+      const response = await fetch(
+        "https://accounts.google.com/.well-known/openid-configuration",
+        { signal: AbortSignal.timeout(10000) },
+      );
+      if (!response.ok)
+        return {
+          status: "Unavailable",
+          detail: "Google sign-in discovery endpoint returned an error.",
+        };
+      return {
+        status: "Healthy",
+        detail:
+          "Google sign-in discovery is reachable, local OAuth configuration is valid, and this request has an authorized session. A new interactive sign-in is not tested here.",
+      };
+    }),
+    check("gmail", async () => {
+      const c = await withStore(
+        (s) => s.officialConnection || s.connection,
+        false,
+      );
+      if (!c)
+        return {
+          status: "Not Configured",
+          detail: "Connect the authorized careers mailbox.",
+          href: "/settings/integrations",
+          action: "Connect Gmail",
+        };
+      const token = await accessToken(c);
+      const r = await fetch(
+        "https://gmail.googleapis.com/gmail/v1/users/me/profile",
+        {
+          headers: { Authorization: `Bearer ${token}` },
+          signal: AbortSignal.timeout(10000),
+        },
+      );
+      if (!r.ok) {
+        if (r.status === 401 || r.status === 403)
+          await reportIssue("gmail.authorization");
+        return {
+          status: "Attention Needed",
+          detail: "Gmail did not confirm mailbox access. Review authorization.",
+          href: "/settings/integrations",
+          action: "Review Gmail",
+        };
+      }
+      const p = await r.json();
+      return {
+        status: "Healthy",
+        detail: `Mailbox access verified: ${String(p.emailAddress)}.`,
+        href: "/settings/integrations",
+        action: "View Gmail",
+      };
+    }),
+    check("intake", async () => {
+      const j = await intakeStatus();
+      return {
+        status: ["error", "authorization"].includes(j.status)
+          ? "Attention Needed"
+          : j.lastSuccessfulAt
+            ? "Healthy"
+            : "Not Verified",
+        detail: `${j.message} Last attempt: ${displayTime(j.startedAt)}. Last successful sync: ${displayTime(j.lastSuccessfulAt)}. Latest run imported: ${j.imported}. Pending message IDs: ${j.pending.length}.`,
+        href: "/settings/integrations",
+        action: "View intake",
+      };
+    }),
+    check("sheets", async () => {
+      if (!process.env.GOOGLE_SHEETS_ID)
+        return {
+          status: "Not Configured",
+          detail:
+            "A production spreadsheet is not configured. The local Excel tracker remains available.",
+          href: "/settings/integrations",
+          action: "View integration",
+        };
+      const c = await withStore((s) => s.sheetsConnection, false);
+      if (!c)
+        return {
+          status: "Attention Needed",
+          detail: "Spreadsheet authorization is required.",
+          href: "/settings/integrations",
+          action: "Authorize spreadsheet",
+        };
+      const token = await accessToken(c);
+      const r = await fetch(
+        `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(process.env.GOOGLE_SHEETS_ID)}?fields=spreadsheetId`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+          signal: AbortSignal.timeout(10000),
+        },
+      );
+      const sync = await readTransaction((tx) =>
+        readRecord<{ at: string; revision: number }>(tx, "sync", "completed"),
+      );
+      return {
+        status: r.ok ? "Healthy" : "Attention Needed",
+        detail: r.ok
+          ? `Spreadsheet read access verified. Last confirmed sync: ${displayTime(sync?.at)}.`
+          : "Spreadsheet access could not be confirmed.",
+        href: "/settings/integrations",
+        action: "View spreadsheet",
+      };
+    }),
+    check("documents", async () => {
+      const require = createRequire(import.meta.url);
+      require.resolve("pdf-parse");
+      require.resolve("mammoth");
+      return {
+        status: "Healthy",
+        detail:
+          "PDF and DOCX processing libraries are installed. This is a capability check; individual documents can still require review.",
+      };
+    }),
+    check("ocr", async () => {
+      const require = createRequire(import.meta.url);
+      require.resolve("tesseract.js");
+      return {
+        status: "Not Verified",
+        detail:
+          "OCR library is installed. End-to-end OCR is checked during actual document processing; model availability and extraction accuracy are not inferred from installation.",
+      };
+    }),
+    check("ai", async () => {
+      if (!aiConfigured())
+        return {
+          status: "Not Configured",
+          detail: "Gemini is optional. System Analysis remains available.",
+          href: "/settings/ai",
+          action: "View AI Integration",
+        };
+      try {
+        await geminiProvider().check();
+        const generationIssue = known.some(
+          (i) => i.category.startsWith("ai.") && unresolved(i),
+        );
+        return {
+          status: generationIssue ? "Attention Needed" : "Healthy",
+          detail: generationIssue
+            ? `Model access is available for ${aiModel()}, but recorded AI requests have unresolved failures. System Analysis remains available. Review the Error Center; model access alone does not confirm generation is working.`
+            : `Gemini model access verified: ${aiModel()}. No application was analyzed and no generation request was made.`,
+          href: "/settings/ai",
+          action: "View AI Integration",
+        };
+      } catch {
+        return {
+          status: "Attention Needed",
+          detail:
+            "Gemini did not confirm access to the configured model. Verify the server key, model and provider availability.",
+          href: "/settings/ai",
+          action: "Review AI Integration",
+        };
+      }
+    }),
+    check("storage", async () => {
+      await readTransaction((tx) => tx.query("SELECT id FROM resumes LIMIT 1"));
+      return {
+        status: "Healthy",
+        detail:
+          "Application and encrypted document storage can be read. No applicant document content was retrieved by this check.",
+      };
+    }),
+    ...(["mail", "extraction", "timekeeping"] as const).map((id) =>
+      check(id, async () => {
+        const collection =
+          id === "mail"
+            ? "email_index"
+            : id === "extraction"
+              ? "extraction_jobs"
+              : "timekeeping_jobs";
+        const jobs = await readTransaction(async (tx) =>
+          (
+            await tx.query("SELECT payload FROM records WHERE collection=$1", [
+              collection,
+            ])
+          ).map((r) => JSON.parse(String(r.payload))),
+        );
+        const failed = jobs.filter(
+          (j) =>
+            ["Failed", "Unconfirmed"].includes(j.status) ||
+            (j.status === "Running" && j.leaseUntil < Date.now()),
+        ).length;
+        const queued = jobs.filter((j) =>
+          ["Queued", "Running", "Sending"].includes(j.status),
+        ).length;
+        const completed = jobs.filter((j) =>
+          ["Sent", "Completed"].includes(j.status),
+        ).length;
+        return {
+          status: failed
+            ? "Attention Needed"
+            : jobs.length
+              ? "Healthy"
+              : "Not Verified",
+          detail: `${queued} queued or processing · ${completed} completed · ${failed} require review. ${jobs.length ? "Based on persisted delivery and job records." : "No operations have been recorded yet."}`,
+          href:
+            id === "timekeeping"
+              ? "/timekeeping"
+              : id === "extraction"
+                ? "/settings/ai"
+                : "/settings/diagnostics",
+          action: "View details",
+        };
+      }),
+    ),
+    check("window", async () => {
+      const state = await readTransaction(getState);
+      const real = state.applications.filter((a) => !a.isDemo && !a.deletedAt);
+      return {
+        status: "Healthy",
+        detail: `${real.filter((a) => a.queueState === "Active").length} active · ${real.filter((a) => a.queueState === "Queued").length} queued · ${real.filter((a) => a.queueState === "Closed").length} closed. Active membership is ordered by received time and capped at 100.`,
+        href: "/applications",
+        action: "View applications",
+      };
+    }),
+    check("jobs", async () => {
+      const j = await intakeStatus();
+      return {
+        status: ["error", "authorization"].includes(j.status)
+          ? "Attention Needed"
+          : j.lastSuccessfulAt
+            ? "Healthy"
+            : "Not Verified",
+        detail: `Durable Gmail worker: ${j.status}. Email, extraction and timekeeping jobs are shown separately.`,
+        href: "/settings/integrations",
+        action: "View worker",
+      };
+    }),
+  ]);
+  const snapshot = { checkedAt: new Date().toISOString(), checks };
+  await withDeadline(
+    transaction(
+      async (tx) => {
+        await putRecord(tx, "health", "latest", snapshot);
+        await writeAudit(tx, user.email, "health.checked", undefined, {
+          services: checks.map((c) => ({
+            service: c.service,
+            status: c.status,
+          })),
+        });
+      },
+      { lockKey: 812903 },
+    ),
+    10000,
+  );
+  return snapshot;
+}
+// Diagnostic persistence runs after the health response. It cannot hold the
+// health UI behind an unrelated recruitment transaction.
+export async function settleHealthDiagnostics(snapshot: HealthSnapshot) {
+  if (snapshot.checks.find((c) => c.id === "database")?.status !== "Healthy")
+    return;
+  for (const pending of pendingFailures()) {
+    try {
+      await recordIssue(pending.category);
+      clearBufferedFailure(pending.category);
+    } catch {
+      /* Keep the bounded fallback until a later successful check. */
+    }
+  }
+  await resolveIssue("database.unavailable").catch(() => undefined);
+}
+export async function aiIntegration() {
+  const health = await cachedHealth();
+  return {
+    configured: aiConfigured(),
+    provider: "Gemini",
+    model: aiModel(),
+    health: health.checks.find((c) => c.id === "ai"),
+    usage: await aiUsage(),
+  };
+}

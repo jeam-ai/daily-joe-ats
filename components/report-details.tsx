@@ -53,7 +53,9 @@ export function ReportDetails({
         </Card>
         <Card className="padded">
           <h3>Hiring history retained</h3>
-          <h2>{hires.length} hires</h2>
+          <h2>
+            {hires.length} {hires.length === 1 ? "hire" : "hires"}
+          </h2>
           <p>Resignation and termination never erase a hire.</p>
         </Card>
       </div>

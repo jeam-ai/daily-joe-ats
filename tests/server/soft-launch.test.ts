@@ -64,7 +64,7 @@ const user: User = {
 };
 async function reset() {
   const s = initialState();
-  // Boundary tests deliberately exercise the legacy ten-record gate.
+  // Legacy stored workspaces migrate to active capacity automatically.
   s.importLimit = 10;
   s.importValidated = false;
   s.hiringNeeds = [
@@ -123,7 +123,7 @@ async function preview(rows: PreviewRow[]) {
   );
   return id;
 }
-test("transactional soft-launch repository and intake boundaries", async (t) => {
+test("transactional production repository and intake boundaries", async (t) => {
   await t.test(
     "resume insights use direct qualification mentions without automatic rejection",
     () => {
@@ -155,11 +155,11 @@ test("transactional soft-launch repository and intake boundaries", async (t) => 
           "image/jpeg",
           criteria,
         ),
-        /Image OCR extracted.*email address.*phone-number pattern.*experience reference.*1 of 2 configured qualifications.*preliminary signal/i,
+        /configured qualifications.*Barista experience.*Weekend availability.*HR review.*Image OCR/i,
       );
       assert.match(
         resumeScreeningInsight("", "image/png"),
-        /OCR could not extract reliable text.*review the original image/i,
+        /could not be extracted.*review the original document/i,
       );
     },
   );
@@ -195,18 +195,12 @@ test("transactional soft-launch repository and intake boundaries", async (t) => 
     );
   });
   await t.test(
-    "initial expansion requires actual ten-record validation",
+    "legacy intake limit migrates to 100 without an artificial validation gate",
     async () => {
       await reset();
       const s = await publicState(user);
-      await assert.rejects(
-        updateState(
-          { ...s, importLimit: 100, importValidated: true },
-          user,
-          true,
-        ),
-        /first 10/,
-      );
+      assert.equal(s.importLimit, 100);
+      assert.equal(s.importValidated, false);
     },
   );
   await t.test("no import without explicit confirmation", async () => {
@@ -253,38 +247,23 @@ test("transactional soft-launch repository and intake boundaries", async (t) => 
         /used or expired/,
       );
       const more = await preview([row(50)]);
-      await assert.rejects(
-        confirmImport(
-          user,
-          more,
-          [{ messageId: "message-50", name: "Test", hiringNeedId: "need" }],
-          true,
-        ),
-        /limit reached/,
+      const nextBatch = await confirmImport(
+        user,
+        more,
+        [{ messageId: "message-50", name: "Test", hiringNeedId: "need" }],
+        true,
       );
+      assert.equal(nextBatch.imported, 1);
       const tracker = await transaction((tx) =>
         readRecord<{ state: AppState }>(tx, "tracker", "snapshot"),
       );
-      assert.equal(tracker?.state.applications.length, 10);
+      assert.equal(tracker?.state.applications.length, 11);
     },
   );
   await t.test(
-    "validated admin expansion stays explicit and duplicates remain skipped",
+    "production capacity preserves duplicate prevention across batches",
     async () => {
-      let s = await publicState(user);
-      await assert.rejects(
-        updateState(
-          { ...s, importLimit: 100, importValidated: true },
-          user,
-          false,
-        ),
-        /confirm expansion/,
-      );
-      s = await updateState(
-        { ...s, importLimit: 100, importValidated: true },
-        user,
-        true,
-      );
+      const s = await publicState(user);
       assert.equal(s.importLimit, 100);
       const id = await preview([row(10)]);
       const result = await confirmImport(

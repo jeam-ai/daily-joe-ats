@@ -226,7 +226,7 @@ export function createSeed(): AppState {
         preferred: "Hospitality experience\nCustomer service training",
         criteria:
           "Assess only the requirements listed above. Cite resume evidence; mark missing evidence as unclear.",
-        questions: "Why would you like to join Daily Joe?",
+        questions: "Why would you like to join Daily Joe Careers?",
       }),
     ),
     requirementTemplates: defaultRequirements,
@@ -242,7 +242,7 @@ export function createSeed(): AppState {
       id: `template-${i}`,
       name,
       subject: `Daily Joe Careers — ${name}`,
-      body: `Hello {{applicant_name}},\n\nThank you for your interest in the {{position}} role at {{location}}.\n\n${name.includes("Interview") ? "We would like to invite you to an interview on {{interview_date}} at {{interview_time}}." : name === "Rejection" ? "Thank you for taking the time to apply. We will not be proceeding with this application. We appreciate your interest in Daily Joe." : name === "No Response" ? "We are following up on your application. Please let us know if you would like to continue." : "We would like to share the next steps in your application with you."}\n\nWarmly,\nDaily Joe Careers`,
+      body: `Hello {{applicant_name}},\n\nThank you for your interest in the {{position}} role at {{location}}.\n\n${name.includes("Interview") ? "We would like to invite you to an interview on {{interview_date}} at {{interview_time}}." : name === "Rejection" ? "Thank you for taking the time to apply. We will not be proceeding with this application. We appreciate your interest in Daily Joe Careers." : name === "No Response" ? "We are following up on your application. Please let us know if you would like to continue." : "We would like to share the next steps in your application with you."}\n\nWarmly,\nDaily Joe Careers`,
     })),
     notifications: [
       {

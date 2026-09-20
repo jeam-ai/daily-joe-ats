@@ -1,12 +1,17 @@
 import { requireOrigin, requireUser } from "@/lib/auth/session";
 import { config, SafeError } from "@/lib/server/config";
 import { safeError } from "@/lib/server/response";
-import { withStore } from "@/lib/server/store";
 import { transaction, readRecord, putRecord } from "@/lib/server/database";
-import { getState, saveState, audit } from "@/lib/server/repository";
+import { getState, saveState } from "@/lib/server/repository";
 import { validateEmailInput } from "@/lib/google/gmail/payload";
-import { sendEmail } from "@/lib/google/gmail/service";
-import { syncSheets } from "@/lib/google/sheets";
+import { emailContext, renderEmail } from "@/lib/email-templates";
+import {
+  queueEmail,
+  deliverEmail,
+  sourceFingerprint,
+} from "@/lib/server/email-outbox";
+import { seal, unseal } from "@/lib/auth/security";
+import { canManage } from "@/lib/data-policy";
 type Draft = {
   id: string;
   applicationId: string;
@@ -17,18 +22,17 @@ type Draft = {
   templateId: string;
   threadId?: string;
   inReplyTo?: string;
-  revision: number;
+  fingerprint: string;
   expiresAt: number;
-  status: "draft" | "pending" | "sent" | "unconfirmed";
-  messageId?: string;
+  emailId?: string;
 };
 export const runtime = "nodejs";
+export const maxDuration = 60;
 export async function POST(req: Request) {
-  let sending: Draft | undefined;
   try {
     requireOrigin(req);
     const user = await requireUser();
-    if (!["Admin", "Talent Acquisition", "HR Generalist"].includes(user.role))
+    if (!canManage(user))
       throw new SafeError(
         "A recruitment manager must send applicant communications.",
         403,
@@ -36,31 +40,31 @@ export async function POST(req: Request) {
     const raw = await req.text();
     if (raw.length > 16000) throw new SafeError("Message too large.");
     const body = JSON.parse(raw);
-    const connection = await withStore((s) => s.officialConnection, false);
-    if (!connection || connection.email !== config().officialEmail)
-      throw new SafeError(
-        "Connect the official careers Gmail mailbox before preparing applicant email.",
-        409,
-      );
     if (body.action === "preview") {
       const draft = await transaction(async (tx) => {
-        const state = await getState(tx);
-        const a = state.applications.find((a) => a.id === body.applicationId);
-        if (!a) throw new SafeError("Application not found.", 404);
-        if (!state.emailTemplates.some((t) => t.id === body.templateId))
-          throw new SafeError("Select an email template.");
+        const state = await getState(tx),
+          a = state.applications.find(
+            (a) => a.id === body.applicationId && !a.deletedAt && !a.isDemo,
+          );
+        if (!a)
+          throw new SafeError("Email is unavailable for this applicant.", 403);
+        const template = state.emailTemplates.find(
+          (t) => t.id === body.templateId && t.enabled !== false,
+        );
+        if (!template) throw new SafeError("Select an enabled email template.");
         let input;
         try {
           input = validateEmailInput(
             { to: a.applicant.email, subject: body.subject, body: body.body },
             a.applicant.email,
           );
-        } catch (e) {
-          throw new SafeError((e as Error).message);
+        } catch {
+          throw new SafeError("Enter a valid subject and message.");
         }
-        if (/\{\{|\[(?:HR:|date\]|time\])/.test(input.subject + input.body))
+        const rendered = renderEmail(input, emailContext(a, state, user));
+        if (rendered.missing.length)
           throw new SafeError(
-            "Replace all template variables and HR instructions before sending.",
+            `Complete template values: ${rendered.missing.join(", ")}.`,
           );
         const reply =
           body.reply === true &&
@@ -72,15 +76,20 @@ export async function POST(req: Request) {
           applicationId: a.id,
           actor: user.email,
           ...input,
-          subject: reply ? a.originalSubject! : input.subject,
-          templateId: body.templateId,
+          subject: reply ? a.originalSubject! : rendered.subject,
+          body: rendered.body,
+          templateId: template.id,
           threadId: reply ? a.gmailThreadId : undefined,
           inReplyTo: reply ? a.rfcMessageId : undefined,
-          revision: state.revision || 0,
-          expiresAt: Date.now() + 15 * 60000,
-          status: "draft",
+          fingerprint: sourceFingerprint(a),
+          expiresAt: Date.now() + 900000,
         };
-        await putRecord(tx, "email_drafts", draft.id, draft);
+        await putRecord(
+          tx,
+          "communication_previews",
+          draft.id,
+          seal(draft, config().encryptionKey),
+        );
         return draft;
       });
       return Response.json({ draft });
@@ -90,87 +99,66 @@ export async function POST(req: Request) {
       body.confirmed !== true ||
       typeof body.id !== "string"
     )
-      throw new SafeError("Preview the email and explicitly confirm sending.");
-    sending = await transaction(async (tx) => {
-      const draft = await readRecord<Draft>(tx, "email_drafts", body.id),
-        state = await getState(tx);
-      if (
-        !draft ||
-        draft.actor !== user.email ||
-        draft.status !== "draft" ||
-        draft.expiresAt < Date.now()
-      )
+      throw new SafeError("Preview and confirm this email first.");
+    const id = await transaction(async (tx) => {
+      const enc = await readRecord<string>(
+        tx,
+        "communication_previews",
+        body.id,
+      );
+      if (!enc)
+        throw new SafeError("Preview expired. Review a fresh message.", 409);
+      const draft = unseal<Draft>(enc, config().encryptionKey);
+      if (draft.actor !== user.email)
+        throw new SafeError("This preview belongs to another HR user.", 403);
+      if (draft.emailId) return draft.emailId;
+      if (draft.expiresAt < Date.now())
+        throw new SafeError("Preview expired. Review a fresh message.", 409);
+      const state = await getState(tx),
+        a = state.applications.find(
+          (a) => a.id === draft.applicationId && !a.deletedAt && !a.isDemo,
+        );
+      if (!a)
+        throw new SafeError("Email is unavailable for this applicant.", 403);
+      if (sourceFingerprint(a) !== draft.fingerprint)
         throw new SafeError(
-          "Draft was used or expired. Check Sent mail before creating another.",
+          "Applicant information changed. Review a fresh preview.",
           409,
         );
-      if (draft.revision !== state.revision)
-        throw new SafeError(
-          "The workspace changed. Review a fresh email preview.",
-          409,
-        );
-      draft.status = "pending";
-      await putRecord(tx, "email_drafts", draft.id, draft);
-      await audit(tx, user.email, "email.send.requested", draft.applicationId, {
-        draftId: draft.id,
-        to: draft.to,
-      });
-      return draft;
+      const template = state.emailTemplates.find(
+        (t) => t.id === draft.templateId && t.enabled !== false,
+      );
+      if (!template)
+        throw new SafeError("The template is no longer available.");
+      const mail = await queueEmail(
+        tx,
+        state,
+        a,
+        user,
+        template,
+        `manual:${draft.id}`,
+        "HR communication",
+        draft,
+      );
+      draft.emailId = mail.id;
+      await putRecord(
+        tx,
+        "communication_previews",
+        draft.id,
+        seal(draft, config().encryptionKey),
+      );
+      await saveState(tx, state, { sync: false });
+      return mail.id;
     });
-    const sent = await sendEmail(sending, connection);
-    const draft = sending;
-    await transaction(async (tx) => {
-      const state = await getState(tx);
-      const a = state.applications.find((a) => a.id === draft.applicationId)!;
-      const now = new Date().toISOString();
-      a.timeline.push({
-        id: crypto.randomUUID(),
-        timestamp: now,
-        user: user.email,
-        action: "Email sent",
-        applicationId: a.id,
-        metadata: {
-          recipient: draft.to,
-          sender: connection.email,
-          subject: draft.subject,
-          templateId: draft.templateId,
-          messageId: sent.messageId,
-          threadId: sent.threadId || "",
-          communication: "Sent through Gmail",
-        },
-      });
-      a.lastActivity = now;
-      draft.status = "sent";
-      draft.messageId = sent.messageId;
-      await putRecord(tx, "email_drafts", draft.id, draft);
-      await audit(tx, user.email, "email.sent", a.id, {
-        messageId: sent.messageId,
-        threadId: sent.threadId,
-      });
-      await saveState(tx, state);
-    });
+    const mail = await deliverEmail(id, user);
     return Response.json({
-      message: "Email sent successfully.",
-      syncStatus: await syncSheets(),
+      email: mail,
+      message:
+        mail.status === "Sent"
+          ? "Email sent successfully."
+          : `Email ${mail.status.toLowerCase()}. Open Email history for details and recovery.`,
     });
   } catch (e) {
-    if (sending) {
-      const draft = sending;
-      await transaction(async (tx) => {
-        draft.status = "unconfirmed";
-        await putRecord(tx, "email_drafts", draft.id, draft);
-        await audit(
-          tx,
-          draft.actor,
-          "email.delivery.unconfirmed",
-          draft.applicationId,
-          {
-            draftId: draft.id,
-            note: "Check Gmail Sent before attempting another send.",
-          },
-        );
-      }).catch(() => {});
-    }
     return safeError(e);
   }
 }

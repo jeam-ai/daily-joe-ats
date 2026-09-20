@@ -1,5 +1,9 @@
 import type { AppState } from "@/types";
-type Preferences = AppState["preferences"];
+type Preferences = Partial<AppState["preferences"]>;
+function locale(preferences?: Preferences) {
+  // The saved en-PH option represents the UI's explicit day/month/year choice.
+  return preferences?.dateFormat === "en-US" ? "en-US" : "en-GB";
+}
 export function formatDate(
   value: string | number | Date,
   preferences?: Preferences,
@@ -7,12 +11,25 @@ export function formatDate(
 ) {
   const d = new Date(value);
   if (!Number.isFinite(d.getTime())) return "Not set";
-  return d.toLocaleString(preferences?.dateFormat || "en-PH", {
+  return d.toLocaleString(locale(preferences), {
     timeZone: preferences?.timezone || "Asia/Manila",
     year: "numeric",
-    month: "short",
+    month: "long",
     day: "numeric",
     ...(time ? { hour: "2-digit" as const, minute: "2-digit" as const } : {}),
+  });
+}
+export function formatTime(
+  value: string | number | Date,
+  preferences?: Preferences,
+) {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return "Not set";
+  return date.toLocaleTimeString(locale(preferences), {
+    timeZone: preferences?.timezone || "Asia/Manila",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: true,
   });
 }
 export function monthKey(

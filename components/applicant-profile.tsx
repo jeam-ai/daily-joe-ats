@@ -1,6 +1,19 @@
 "use client";
+import { ApplicantInformation } from "./applicant-information";
 import Link from "next/link";
+import { requestJson } from "@/lib/client-request";
+import {
+  emailContext,
+  renderEmail,
+  workflowTemplate,
+} from "@/lib/email-templates";
+import { EmailHistory, ViewEmail } from "./email-history";
 import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { canManage, canEdit } from "@/lib/data-policy";
+import { ApplicantEditor, DeleteApplicantDialog } from "./applicant-management";
+import { ActionMenu } from "./action-menu";
+import { SectionBoundary } from "./section-boundary";
 import {
   ArrowLeft,
   Mail,
@@ -42,19 +55,23 @@ import {
   LoadingSkeleton,
 } from "./ui";
 import { ResumeViewer } from "./resume-viewer";
-import { formatDate, scheduledIso } from "@/lib/dates";
+import { formatDate, formatTime, scheduledIso } from "@/lib/dates";
 import { Communication } from "./communication";
+import { DocumentRecovery } from "./document-recovery";
+import { ApplicationSource } from "./application-source";
+import { AiAssist } from "./ai-assist";
+import { AuditHistory } from "./operations";
 import { ApplicantTools } from "./applicant-tools";
 export function ScreeningCriterion({ criterion: c }: { criterion: Criterion }) {
   return (
     <div className="criterion">
       <div>
         <span
-          className={`criterion-icon ${c.result === "Met" ? "green" : c.result === "Unclear" ? "orange" : "red"}`}
+          className={`criterion-icon ${c.result === "Met" ? "green" : c.result === "Unclear" || c.result === "Not Assessed" ? "orange" : "red"}`}
         >
           {c.result === "Met" ? (
             <Check size={17} />
-          ) : c.result === "Unclear" ? (
+          ) : c.result === "Unclear" || c.result === "Not Assessed" ? (
             <HelpCircle size={17} />
           ) : (
             <X size={17} />
@@ -70,28 +87,47 @@ export function ScreeningCriterion({ criterion: c }: { criterion: Criterion }) {
   );
 }
 export function Timeline({ application }: { application: Application }) {
+  const { state } = useApp();
   return (
     <ol className="timeline">
-      {[...application.timeline].reverse().map((event) => (
-        <li key={event.id}>
-          <span className="timeline-dot" />
-          <div>
-            <strong>{event.action}</strong>
-            <p>
-              {event.user} · {new Date(event.timestamp).toLocaleString()}
-            </p>
-            {event.metadata.note && <p>{event.metadata.note}</p>}
-            {event.metadata.communication && (
-              <small>{event.metadata.communication}</small>
-            )}
-          </div>
-        </li>
-      ))}
+      {[...application.timeline]
+        .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
+        .map((event) => (
+          <li key={event.id}>
+            <span className="timeline-dot" />
+            <div>
+              <strong>{event.action}</strong>
+              <p>
+                {event.user} ·{" "}
+                {formatDate(event.timestamp, state?.preferences, true)}
+              </p>
+              {event.metadata.note && <p>{event.metadata.note}</p>}
+              {event.metadata.emailId && (
+                <ViewEmail
+                  applicationId={application.id}
+                  emailId={event.metadata.emailId}
+                />
+              )}
+              {event.metadata.communication && (
+                <small>{event.metadata.communication}</small>
+              )}
+            </div>
+          </li>
+        ))}
     </ol>
   );
 }
 export function ApplicantProfile({ id }: { id: string }) {
-  const { state, updateApplication, notify } = useApp();
+  const {
+    state,
+    updateApplication,
+    refresh,
+    notify,
+    saving: workspaceSaving,
+  } = useApp();
+  const router = useRouter();
+  const [editing, setEditing] = useState(false),
+    [deleting, setDeleting] = useState(false);
   const [tab, setTab] = useState("Overview");
   const [decision, setDecision] = useState<Decision | null>(null);
   const [note, setNote] = useState("");
@@ -101,6 +137,10 @@ export function ApplicantProfile({ id }: { id: string }) {
   const [templateId, setTemplateId] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [pendingChange, setPendingChange] = useState<{
+    action: string;
+    value: Application;
+  } | null>(null);
   if (!state) return <LoadingSkeleton />;
   const a = state.applications.find((a) => a.id === id);
   if (!a)
@@ -111,34 +151,43 @@ export function ApplicantProfile({ id }: { id: string }) {
       />
     );
   const app = a;
+  const editable = canEdit(state.currentUser, a);
+  const manager = canManage(state.currentUser);
   const actorEmail = state.currentUser?.email;
   const next = nextStage(a);
   const template =
-    state.emailTemplates.find((t) => t.id === templateId) ||
-    state.emailTemplates.find((t) => t.name === next) ||
-    state.emailTemplates[0];
-  const values = {
-    company_name: "Daily Joe",
-    applicant_name: a.applicant.name,
-    position: a.position,
-    location: a.location,
-    interview_date: scheduled
-      ? new Date(scheduled).toLocaleDateString()
-      : "[date]",
-    interview_time: scheduled
-      ? new Date(scheduled).toLocaleTimeString([], {
-          hour: "2-digit",
-          minute: "2-digit",
-        })
-      : "[time]",
+    state.emailTemplates.find(
+      (t) => t.id === templateId && t.enabled !== false,
+    ) || workflowTemplate(state, next);
+  const previewApplication = {
+    ...a,
+    stage: next,
+    interviews: scheduled
+      ? [
+          ...a.interviews,
+          {
+            id: "preview",
+            stage: next as Interview["stage"],
+            scheduledAt: scheduledIso(scheduled, state.preferences.timezone),
+            status: "Scheduled" as const,
+            notes: "",
+          },
+        ]
+      : a.interviews,
   };
+  const preview =
+    template && state.currentUser
+      ? renderEmail(
+          template,
+          emailContext(previewApplication, state, state.currentUser),
+        )
+      : null;
   async function change(action: string, fn: (a: Application) => Application) {
-    if (
-      !/note/i.test(action) &&
-      !window.confirm(`${action} for ${app.applicant.name}?`)
-    )
-      return;
-    await updateApplication(
+    if (!/note/i.test(action)) {
+      setPendingChange({ action, value: fn(app) });
+      return false;
+    }
+    return await updateApplication(
       id,
       (a) => ({
         ...fn(a),
@@ -158,7 +207,7 @@ export function ApplicantProfile({ id }: { id: string }) {
       true,
     );
   }
-  function RequirementList({ compact = false }: { compact?: boolean }) {
+  function requirementList({ compact = false }: { compact?: boolean }) {
     return (
       <div className={`requirement-checklist ${compact ? "compact" : ""}`}>
         {app.requirements.map((requirement) => {
@@ -169,6 +218,7 @@ export function ApplicantProfile({ id }: { id: string }) {
                 <input
                   type="checkbox"
                   checked={checked}
+                  disabled={!editable || workspaceSaving}
                   onChange={(e) =>
                     void change("Requirement verified", (current) => ({
                       ...current,
@@ -195,6 +245,7 @@ export function ApplicantProfile({ id }: { id: string }) {
               {requirement.notes && <small>{requirement.notes}</small>}
               {!compact && (
                 <Input
+                  disabled={!editable || workspaceSaving}
                   aria-label={`${requirement.name} verification notes`}
                   placeholder="Verification notes (optional)"
                   defaultValue={requirement.notes}
@@ -225,6 +276,32 @@ export function ApplicantProfile({ id }: { id: string }) {
     );
     setSaving(true);
     try {
+      if (decision === "Proceed") {
+        const result = await requestJson<{ message: string }>(
+          `/api/applicants/${id}/proceed`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              expectedStage: app.stage,
+              confirmed: true,
+              scheduledAt: selectedDate
+                ? scheduledIso(selectedDate, state?.preferences.timezone)
+                : undefined,
+              note: decisionNote,
+              interviewer: String(
+                new FormData(e.currentTarget).get("interviewer") || "",
+              ),
+              templateId: template?.id,
+            }),
+          },
+        );
+        await refresh();
+        setDecision(null);
+        setDecisionNote("");
+        notify(result.message);
+        return;
+      }
       const result = transition(app, decision, {
         confirmed: true,
         scheduledAt: selectedDate
@@ -263,9 +340,10 @@ export function ApplicantProfile({ id }: { id: string }) {
           <div className="profile-name">
             <h1>{a.applicant.name}</h1>
             <StatusBadge status={a.status} />
+            {a.isDemo && <Badge tone="amber">DEMO DATA</Badge>}
           </div>
           <p>
-            {a.position} <span>·</span> {a.location}
+            {a.id} <span>·</span> {a.position} <span>·</span> {a.location}
           </p>
           <div className="profile-contact">
             <span>
@@ -283,6 +361,8 @@ export function ApplicantProfile({ id }: { id: string }) {
           </div>
         </div>
       </div>
+      <ApplicationSource application={a} />
+      <DocumentRecovery application={a} />
       <div className="stage-track">
         {[
           "Screening",
@@ -314,20 +394,29 @@ export function ApplicantProfile({ id }: { id: string }) {
         <div>
           {tab === "Overview" && (
             <>
+              <ApplicantInformation application={a} />
               <Card>
                 <div className="card-heading">
                   <div>
                     <h2>Resume</h2>
                     <p>The person behind the application.</p>
                   </div>
-                  <Badge>Imported document</Badge>
+                  <Badge>
+                    {a.isDemo
+                      ? "Demo evidence"
+                      : a.resumeId
+                        ? "Resume attached"
+                        : "No resume yet"}
+                  </Badge>
                 </div>
-                <ResumeViewer application={a} />
+                <SectionBoundary name="Resume">
+                  <ResumeViewer application={a} />
+                </SectionBoundary>
               </Card>
               <Card className="spaced">
                 <div className="card-heading">
                   <div>
-                    <h2>Screening analysis</h2>
+                    <h2>Qualification dashboard</h2>
                     <p>HR evidence review against configured requirements.</p>
                   </div>
                   <StatusBadge status={a.screening.outcome} />
@@ -335,17 +424,17 @@ export function ApplicantProfile({ id }: { id: string }) {
                 {a.screening.criteria.map((c) => (
                   <ScreeningCriterion key={c.id} criterion={c} />
                 ))}
-                {a.screening.insight && (
-                  <div className="insight-banner">
-                    <strong>System insight</strong>
-                    <p>{a.screening.insight}</p>
-                  </div>
-                )}
                 <div className="info-banner">
                   Screening is advisory. Missing evidence requires HR review;
                   the final decision belongs to HR.
                 </div>
               </Card>
+            </>
+          )}
+          {tab === "Overview" && (
+            <>
+              <AiAssist id={a.id} />
+              <EmailHistory applicationId={a.id} />
             </>
           )}
           {tab === "Interviews" && (
@@ -373,6 +462,7 @@ export function ApplicantProfile({ id }: { id: string }) {
                     </p>
                     <Field label="Interview result">
                       <Select
+                        disabled={!editable || workspaceSaving}
                         value={interview.status}
                         onChange={(e) =>
                           change("Interview result updated", (a) => ({
@@ -403,6 +493,7 @@ export function ApplicantProfile({ id }: { id: string }) {
                     </Field>
                     <Field label="Interview notes">
                       <textarea
+                        disabled={!editable || workspaceSaving}
                         defaultValue={interview.notes}
                         key={interview.id}
                         onBlur={(e) => {
@@ -444,7 +535,7 @@ export function ApplicantProfile({ id }: { id: string }) {
                 </div>
                 <FileCheck2 size={22} />
               </div>
-              <RequirementList />
+              {requirementList({})}
             </Card>
           )}
           {tab === "Onboarding" && (
@@ -528,11 +619,13 @@ export function ApplicantProfile({ id }: { id: string }) {
                     status={`${a.requirements.filter((r) => r.status === "Complete").length}/${a.requirements.length} complete`}
                   />
                 </div>
-                <RequirementList compact />
+                {requirementList({ compact: true })}
                 <Field label="HR notes">
                   <textarea name="notes" />
                 </Field>
-                <Button type="submit">Save onboarding</Button>
+                <Button type="submit" disabled={!editable || workspaceSaving}>
+                  Save onboarding
+                </Button>
               </form>
             </Card>
           )}
@@ -542,12 +635,15 @@ export function ApplicantProfile({ id }: { id: string }) {
                 <h2>Application timeline</h2>
               </div>
               <Timeline application={a} />
+              <AuditHistory applicant={a.id} />
             </Card>
           )}
         </div>
         <aside>
           <ApplicantTools application={a} />
-          <Communication application={a} />
+          <SectionBoundary name="Communication">
+            <Communication application={a} />
+          </SectionBoundary>
           <Card className="decision-card">
             <div className="card-heading">
               <div>
@@ -566,7 +662,7 @@ export function ApplicantProfile({ id }: { id: string }) {
               </div>
               <div className="decision-actions">
                 <Button
-                  disabled={!isActive(a)}
+                  disabled={!manager || !isActive(a) || workspaceSaving}
                   onClick={() => {
                     setError("");
                     setDecision("Proceed");
@@ -574,50 +670,54 @@ export function ApplicantProfile({ id }: { id: string }) {
                 >
                   Proceed <ArrowRight size={16} />
                 </Button>
-                <Button
-                  variant="secondary"
-                  disabled={!isActive(a)}
-                  onClick={() => {
-                    setError("");
-                    setDecision("Review");
-                  }}
-                >
-                  Review
-                </Button>
-                <Button
-                  variant="danger"
-                  disabled={!isActive(a)}
-                  onClick={() => {
-                    setError("");
-                    setDecision("Reject");
-                  }}
-                >
-                  Reject
-                </Button>
-              </div>
-              <div className="minor-actions">
-                <button
-                  disabled={!isActive(a)}
-                  onClick={() => {
-                    setError("");
-                    setDecision("Talent Pool");
-                  }}
-                >
-                  Add to talent pool
-                </button>
-                <button
-                  disabled={!isActive(a)}
-                  onClick={() => {
-                    setError("");
-                    setDecision("Withdraw");
-                  }}
-                >
-                  Mark withdrawn
-                </button>
+                <ActionMenu
+                  items={[
+                    {
+                      label: "Edit Applicant",
+                      onClick: () => setEditing(true),
+                      disabled: !editable,
+                    },
+                    {
+                      label: "Add Note",
+                      onClick: () =>
+                        document
+                          .querySelector<HTMLTextAreaElement>(
+                            '[aria-label="HR Notes"]',
+                          )
+                          ?.focus(),
+                      disabled: !editable,
+                    },
+                    ...(
+                      [
+                        "Review",
+                        "Reject",
+                        "Withdraw",
+                        "Talent Pool",
+                      ] as Decision[]
+                    ).map((action) => ({
+                      label:
+                        action === "Talent Pool"
+                          ? "Move to Talent Pool"
+                          : action,
+                      onClick: () => {
+                        setError("");
+                        setDecision(action);
+                      },
+                      disabled: !manager || !isActive(a),
+                      danger: action === "Reject",
+                    })),
+                    {
+                      label: "Delete Applicant",
+                      onClick: () => setDeleting(true),
+                      disabled: !manager,
+                      danger: true,
+                    },
+                  ]}
+                />
               </div>
               <p className="fine-print">
-                Decisions require confirmation. Applicant communication is
-                preview-only in this phase.
+                Decisions require confirmation. Emails are previewed and sent
+                separately.
               </p>
             </div>
           </Card>
@@ -627,14 +727,14 @@ export function ApplicantProfile({ id }: { id: string }) {
             </div>
             <form
               className="padded"
-              onSubmit={(e) => {
+              onSubmit={async (e) => {
                 e.preventDefault();
                 if (!note.trim()) return;
-                change("HR note added", (a) => ({
+                const saved = await change("HR note added", (a) => ({
                   ...a,
                   notes: [...a.notes, note.trim()],
                 }));
-                setNote("");
+                if (saved) setNote("");
               }}
             >
               <textarea
@@ -643,7 +743,11 @@ export function ApplicantProfile({ id }: { id: string }) {
                 value={note}
                 onChange={(e) => setNote(e.target.value)}
               />
-              <Button variant="secondary" type="submit" disabled={!note.trim()}>
+              <Button
+                variant="secondary"
+                type="submit"
+                disabled={!note.trim() || !editable || workspaceSaving}
+              >
                 <Plus size={15} />
                 Add note
               </Button>
@@ -666,6 +770,48 @@ export function ApplicantProfile({ id }: { id: string }) {
           )}
         </aside>
       </div>
+      {pendingChange && (
+        <Modal
+          busy={workspaceSaving}
+          title="Confirm applicant update"
+          onClose={() => setPendingChange(null)}
+        >
+          <p>
+            <strong>{pendingChange.action}</strong> for {a.applicant.name}?
+          </p>
+          <p>This saves the update and audit history. No email will be sent.</p>
+          <div className="modal-actions">
+            <Button
+              disabled={workspaceSaving}
+              variant="secondary"
+              onClick={() => setPendingChange(null)}
+            >
+              Cancel
+            </Button>
+            <Button
+              disabled={workspaceSaving}
+              onClick={async () => {
+                if (
+                  await updateApplication(id, () => pendingChange.value, true)
+                )
+                  setPendingChange(null);
+              }}
+            >
+              {workspaceSaving ? "Saving…" : "Confirm update"}
+            </Button>
+          </div>
+        </Modal>
+      )}
+      {editing && (
+        <ApplicantEditor application={a} onClose={() => setEditing(false)} />
+      )}
+      {deleting && (
+        <DeleteApplicantDialog
+          application={a}
+          onClose={() => setDeleting(false)}
+          onDeleted={() => router.push("/applications")}
+        />
+      )}
       {decision && (
         <Modal
           title={
@@ -681,6 +827,7 @@ export function ApplicantProfile({ id }: { id: string }) {
                     ? "Mark application as withdrawn?"
                     : "Add to talent pool?"
           }
+          busy={saving || workspaceSaving}
           onClose={() => setDecision(null)}
         >
           <form onSubmit={confirm} className="form-stack">
@@ -722,32 +869,37 @@ export function ApplicantProfile({ id }: { id: string }) {
                 <Field label="Interviewer">
                   <Input name="interviewer" placeholder="HR interviewer name" />
                 </Field>
-                <Field label="Email template">
-                  <Select
-                    value={template.id}
-                    onChange={(e) => setTemplateId(e.target.value)}
-                  >
-                    {state.emailTemplates.map((t) => (
-                      <option value={t.id} key={t.id}>
-                        {t.name}
-                      </option>
-                    ))}
-                  </Select>
-                </Field>
-                <div className="email-preview">
-                  <div className="section-heading">
-                    <h3>Communication</h3>
-                    <Badge>Preview · send separately</Badge>
-                  </div>
-                  <p>
-                    <b>Recipient:</b> {a.applicant.email}
-                  </p>
-                  <p>
-                    <b>Subject:</b> {renderTemplate(template.subject, values)}
-                  </p>
-                  <pre>{renderTemplate(template.body, values)}</pre>
-                </div>
               </>
+            )}
+            {decision === "Proceed" && !a.isDemo && (
+              <div className="email-preview">
+                <div className="section-heading">
+                  <h3>Configured workflow email</h3>
+                  <Badge>Queued on confirmation</Badge>
+                </div>
+                <p>
+                  <b>Recipient:</b> {a.applicant.email}
+                </p>
+                <p>
+                  <b>Template:</b> {template?.name || "Not configured"}
+                </p>
+                {preview && (
+                  <>
+                    <p>
+                      <b>Subject:</b> {preview.subject}
+                    </p>
+                    <pre>{preview.body}</pre>
+                  </>
+                )}
+                {(!preview || preview.missing.length > 0) && (
+                  <div className="warning-banner">
+                    The stage can be saved, but email needs attention:{" "}
+                    {preview?.missing.join(", ") ||
+                      "configure this stage's template in Settings"}
+                    . No incomplete email will be sent.
+                  </div>
+                )}
+              </div>
             )}
             {(decision === "Reject" || decision === "Withdraw") && (
               <Field label="Reason (optional)">
@@ -786,8 +938,9 @@ export function ApplicantProfile({ id }: { id: string }) {
               />
             </Field>
             <p className="fine-print">
-              This saves the application and audit history. No applicant email
-              will be sent.
+              {decision === "Proceed" && !a.isDemo
+                ? "Confirming saves the stage and queues the email shown above. Delivery status and retries appear in Email history."
+                : "This saves the application and audit history. No applicant email will be sent."}
             </p>
             {error && (
               <div className="error-banner" role="alert">
@@ -796,6 +949,7 @@ export function ApplicantProfile({ id }: { id: string }) {
             )}
             <div className="modal-actions">
               <Button
+                disabled={saving || workspaceSaving}
                 type="button"
                 variant="secondary"
                 onClick={() => setDecision(null)}

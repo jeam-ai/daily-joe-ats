@@ -8,7 +8,7 @@ export default function NotFound() {
         <div className="status-brand">
           <Image
             src="/daily-joe-logo-blue.png"
-            alt="Daily Joe"
+            alt="Daily Joe Careers"
             width={180}
             height={79}
             priority

@@ -83,8 +83,7 @@ export function config() {
 }
 export function demoEnabled() {
   return (
-    process.env.NODE_ENV !== "production" &&
-    process.env.SOFT_LAUNCH_MODE !== "true" &&
-    process.env.DEMO_MODE === "true"
+    process.env.NODE_ENV !== "production" ||
+    process.env.ENABLE_DEMO_DATA === "true"
   );
 }

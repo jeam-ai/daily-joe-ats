@@ -1,4 +1,5 @@
 "use client";
+import { clientFetch } from "@/lib/client-request";
 import { useEffect, useState } from "react";
 import {
   Mail,
@@ -20,8 +21,15 @@ import {
   Modal,
   StatusBadge,
 } from "./ui";
-import { OfficialIntegration } from "./official-integration";
-interface Connection {
+import { useApp } from "./provider";
+import { formatDate } from "@/lib/dates";
+import { canManage } from "@/lib/data-policy";
+import { Sparkles, Sheet } from "lucide-react";
+import {
+  OfficialIntegration,
+  type IntegrationStatus,
+} from "./official-integration";
+interface Connection extends IntegrationStatus {
   connected: boolean;
   authenticated: boolean;
   email?: string;
@@ -34,8 +42,11 @@ interface Connection {
   }[];
 }
 export function GmailSettings() {
+  const { state, dataset, notify } = useApp();
+  const allowed = canManage(state?.currentUser) && dataset === "real";
   const [connection, setConnection] = useState<Connection | null>(null);
   const [recipient, setRecipient] = useState("");
+  const [controlledTest, setControlledTest] = useState(false);
   const [subject, setSubject] = useState(DEFAULT_SUBJECT);
   const [body, setBody] = useState(DEFAULT_BODY);
   const [error, setError] = useState("");
@@ -45,8 +56,9 @@ export function GmailSettings() {
   const [disconnect, setDisconnect] = useState(false);
   async function refresh() {
     setLoading(true);
+    setError("");
     try {
-      const response = await fetch("/api/integrations/gmail", {
+      const response = await clientFetch("/api/integrations/gmail", {
         cache: "no-store",
       });
       const value = await response.json();
@@ -69,13 +81,13 @@ export function GmailSettings() {
     setError("");
     setSuccess("");
     try {
-      const response = await fetch("/api/integrations/gmail/test", {
+      const response = await clientFetch("/api/integrations/gmail/test", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           "Idempotency-Key": crypto.randomUUID(),
         },
-        body: JSON.stringify({ to: recipient, subject, body }),
+        body: JSON.stringify({ to: recipient, subject, body, controlledTest }),
       });
       const result = await response.json();
       if (!response.ok)
@@ -83,6 +95,7 @@ export function GmailSettings() {
       setSuccess(
         "Test email sent successfully. Check the recipient inbox to verify delivery.",
       );
+      notify("Test email sent successfully.");
       await refresh();
     } catch (e) {
       setError(
@@ -90,7 +103,6 @@ export function GmailSettings() {
           ? e.message
           : "Network error. Check Sent mail before retrying.",
       );
-      await refresh();
     } finally {
       setSending(false);
     }
@@ -99,13 +111,14 @@ export function GmailSettings() {
     setSending(true);
     setError("");
     try {
-      const response = await fetch("/api/integrations/gmail", {
+      const response = await clientFetch("/api/integrations/gmail", {
         method: "DELETE",
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error);
       setDisconnect(false);
-      setSuccess("Gmail disconnected from this application.");
+      setSuccess("Gmail disconnected from Daily Joe Careers.");
+      notify("Gmail disconnected successfully.");
       await refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Unable to disconnect.");
@@ -115,7 +128,19 @@ export function GmailSettings() {
   }
   return (
     <div className="form-stack">
-      <OfficialIntegration />
+      <OfficialIntegration
+        status={connection}
+        loading={loading}
+        refresh={refresh}
+      />
+      {error && (
+        <div className="error-banner" role="alert">
+          {error}
+          <Button variant="secondary" disabled={loading} onClick={refresh}>
+            Try Again
+          </Button>
+        </div>
+      )}
       <Card>
         <div className="card-heading">
           <div className="integration-title">
@@ -147,7 +172,13 @@ export function GmailSettings() {
                 <span>Send email only</span>
               </div>
               <div className="inline-actions">
-                {connection?.connected ? (
+                {!allowed ? (
+                  <p className="muted">
+                    {dataset === "demo"
+                      ? "Exit Demo to manage or test Gmail."
+                      : "A recruitment manager can connect and test Gmail."}
+                  </p>
+                ) : connection?.connected ? (
                   <>
                     <Button
                       variant="secondary"
@@ -197,6 +228,28 @@ export function GmailSettings() {
           <Badge tone="orange">Manual test only</Badge>
         </div>
         <form onSubmit={send} className="padded form-stack">
+          {state?.currentUser?.role === "Admin" && (
+            <label className="checkbox-row">
+              <input
+                type="checkbox"
+                checked={controlledTest}
+                disabled={sending}
+                onChange={(e) => {
+                  setControlledTest(e.target.checked);
+                  if (e.target.checked) setRecipient("deveraajeam@gmail.com");
+                }}
+              />
+              Use the official mailbox for the controlled TEST / DEMO applicant
+            </label>
+          )}
+          {controlledTest && (
+            <p className="info-banner">
+              Sends only to deveraajeam@gmail.com from the official careers
+              mailbox and links the returned Gmail thread to the isolated test
+              record. Create that record under System / Demo first.
+            </p>
+          )}
+
           <Field label="Test recipient email">
             <Input
               type="email"
@@ -250,7 +303,14 @@ export function GmailSettings() {
           )}
           <div className="inline-actions">
             <Button
-              disabled={!connection?.connected || sending || loading}
+              disabled={
+                !allowed ||
+                !(controlledTest
+                  ? connection?.officialConnected
+                  : connection?.connected) ||
+                sending ||
+                loading
+              }
               type="submit"
             >
               <Send size={16} />
@@ -275,7 +335,9 @@ export function GmailSettings() {
               <div className="integration-event" key={e.id}>
                 <div>
                   <strong>{e.action.replaceAll(".", " · ")}</strong>
-                  <small>{new Date(e.timestamp).toLocaleString()}</small>
+                  <small>
+                    {formatDate(e.timestamp, state?.preferences, true)}
+                  </small>
                 </div>
                 <span>{e.metadata.recipient || e.metadata.note || ""}</span>
               </div>
@@ -287,7 +349,9 @@ export function GmailSettings() {
       </Card>
       <div className="future-integrations">
         <Card>
-          <div className="integration-icon sheets-icon">S</div>
+          <div className="integration-icon sheets-icon">
+            <Sheet size={24} />
+          </div>
           <h3>Google Sheets</h3>
           <Badge>Available when configured</Badge>
           <p>
@@ -295,21 +359,23 @@ export function GmailSettings() {
             above.
           </p>
         </Card>
-        <Card>
-          <div className="integration-icon ai-icon">✧</div>
-          <h3>AI Screening</h3>
-          <Badge>Not configured</Badge>
-          <p>Future evidence-based assistance, guided by HR qualifications.</p>
-        </Card>
       </div>
       {disconnect && (
-        <Modal title="Disconnect Gmail?" onClose={() => setDisconnect(false)}>
+        <Modal
+          busy={sending}
+          title="Disconnect Gmail?"
+          onClose={() => setDisconnect(false)}
+        >
           <p>
             This removes stored Gmail tokens from this application. Your Google
             account grant can also be revoked in Google account settings.
           </p>
           <div className="modal-actions">
-            <Button variant="secondary" onClick={() => setDisconnect(false)}>
+            <Button
+              variant="secondary"
+              disabled={sending}
+              onClick={() => setDisconnect(false)}
+            >
               Cancel
             </Button>
             <Button variant="danger" onClick={remove} disabled={sending}>

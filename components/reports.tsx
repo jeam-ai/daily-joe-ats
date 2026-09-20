@@ -10,8 +10,9 @@ import {
 import { useApp } from "./provider";
 import { Button, Card, Select, Badge, EmptyState, LoadingSkeleton } from "./ui";
 import { ReportDetails } from "./report-details";
+import { monthKey } from "@/lib/dates";
 export function Reports() {
-  const { state } = useApp();
+  const { state, dataset, notify } = useApp();
   const [range, setRange] = useState("all");
   if (!state) return <LoadingSkeleton />;
   const apps = state.applications.filter(
@@ -34,23 +35,37 @@ export function Reports() {
       ),
     ];
     const text = rows
-      .map((r) => r.map((v) => `"${v.replaceAll('"', '""')}"`).join(","))
+      .map((r) =>
+        r
+          .map(
+            (v) =>
+              `"${(/^[=+@\-\t\r]/.test(v) ? "\u0027" + v : v).replaceAll('"', '""')}"`,
+          )
+          .join(","),
+      )
       .join("\r\n");
     const url = URL.createObjectURL(new Blob([text], { type: "text/csv" }));
     const a = document.createElement("a");
     a.href = url;
-    a.download = "daily-joe-recruitment-report.csv";
+    a.download = "Daily-Joe-Careers-Recruitment-Report.csv";
+    document.body.appendChild(a);
     a.click();
-    URL.revokeObjectURL(url);
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    notify("Recruitment report downloaded.");
   }
   const months = Array.from({ length: 6 }, (_, i) => {
-    const date = new Date();
-    date.setDate(1);
-    date.setMonth(date.getMonth() - 5 + i);
+    const currentMonth = monthKey(Date.now(), state.preferences.timezone);
+    const date = new Date(`${currentMonth}-15T12:00:00Z`);
+    date.setUTCMonth(date.getUTCMonth() - 5 + i);
+    const key = date.toISOString().slice(0, 7);
     return {
-      label: date.toLocaleDateString("en-US", { month: "short" }),
+      label: date.toLocaleDateString("en-US", {
+        timeZone: "UTC",
+        month: "long",
+      }),
       count: apps.filter(
-        (a) => a.appliedAt.slice(0, 7) === date.toISOString().slice(0, 7),
+        (a) => monthKey(a.appliedAt, state.preferences.timezone) === key,
       ).length,
     };
   });
@@ -72,7 +87,16 @@ export function Reports() {
             <option value="30">Last 30 days</option>
             <option value="7">Last 7 days</option>
           </Select>
-          <Button variant="secondary" onClick={exportReport}>
+          <Button
+            variant="secondary"
+            disabled={dataset === "demo" || !apps.length}
+            title={
+              dataset === "demo"
+                ? "Exit Demo to export production reports"
+                : undefined
+            }
+            onClick={exportReport}
+          >
             <Download size={16} />
             Export report
           </Button>
@@ -118,7 +142,9 @@ export function Reports() {
             <Card className="padded">
               <div className="section-heading">
                 <h2>Applications by month</h2>
-                <Badge>Imported records</Badge>
+                <Badge>
+                  {dataset === "demo" ? "Demo records" : "Saved applications"}
+                </Badge>
               </div>
               <div
                 className="bar-chart"

@@ -24,11 +24,16 @@ export interface Applicant {
   phone: string;
   location: string;
   experience: number;
+  availability?: string;
+  education?: string;
+  experienceDetails?: string;
+  skills?: string;
+  certifications?: string;
 }
 export interface ScreeningCriterion {
   id: string;
   requirement: string;
-  result: "Met" | "Unclear" | "Not Met";
+  result: "Met" | "Unclear" | "Not Met" | "Not Assessed";
   evidence: string;
 }
 export interface ScreeningResult {
@@ -36,6 +41,8 @@ export interface ScreeningResult {
   criteria: ScreeningCriterion[];
   completedAt: string;
   insight?: string;
+  method?: "rules" | "ai" | "hr" | "demo";
+  evidence?: string[];
 }
 export interface Interview {
   id: string;
@@ -64,6 +71,30 @@ export interface ApplicationTimelineEvent {
   metadata: Record<string, string>;
 }
 export interface Application {
+  queueState?: "Active" | "Queued" | "Closed";
+  information?: {
+    fields: Record<
+      string,
+      {
+        source: string;
+        evidence: string;
+        confidence: "Confident" | "Uncertain" | "Missing";
+        verifiedBy?: string;
+      }
+    >;
+    conflicts: string[];
+  };
+  isDemo?: boolean;
+  deletedAt?: string;
+  deletedBy?: string;
+  deletionReason?: string;
+  extraction?: {
+    method: "text" | "ocr" | "mixed";
+    confidence?: number;
+    pages?: number;
+    textVersion?: string;
+    warnings: string[];
+  };
   hiringNeedId?: string;
   resumeId?: string;
   resumeHash?: string;
@@ -101,6 +132,7 @@ export interface Application {
   onboardingStatus: "Pending Orientation" | "Scheduled" | "Completed";
 }
 export interface HiringNeed {
+  isDemo?: boolean;
   id: string;
   position: string;
   location: string;
@@ -123,6 +155,7 @@ export interface QualificationTemplate {
   questions: string;
 }
 export interface Notification {
+  isDemo?: boolean;
   id: string;
   title: string;
   description: string;
@@ -135,6 +168,8 @@ export interface EmailTemplate {
   name: string;
   subject: string;
   body: string;
+  stage?: Stage;
+  enabled?: boolean;
 }
 export interface User {
   id: string;
@@ -170,6 +205,7 @@ export interface IntegrationConnection {
   connectedAt?: string;
 }
 export interface AppState {
+  demoAvailable?: boolean;
   revision?: number;
   users?: User[];
   currentUser?: User;

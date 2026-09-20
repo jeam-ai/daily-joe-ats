@@ -7,9 +7,11 @@ import {
   useState,
   useCallback,
   useRef,
+  useMemo,
 } from "react";
 import type { AppState, Application } from "@/types";
 import { Toast, Button } from "./ui";
+import { clientFetch } from "@/lib/client-request";
 type Context = {
   state: AppState | null;
   update: (
@@ -21,66 +23,136 @@ type Context = {
     fn: (a: Application) => Application,
     confirmed?: boolean,
   ) => Promise<boolean>;
-  notify: (message: string) => void;
+  notify: (message: string, tone?: "success" | "error" | "info") => void;
   refresh: () => Promise<void>;
   saving: boolean;
+  dataset: "real" | "demo";
+  setDataset: (value: "real" | "demo") => void;
+  demoCount: number;
+  hasDemo: boolean;
 };
 const AppContext = createContext<Context | null>(null);
 export function AppProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<AppState | null>(null),
-    [toast, setToast] = useState(""),
+    [toast, setToast] = useState<{
+      message: string;
+      tone: "success" | "error" | "info";
+    } | null>(null),
     [error, setError] = useState(""),
     [saving, setSaving] = useState(false);
   const ref = useRef<AppState | null>(null);
-  const busy = useRef(false);
-  const refresh = useCallback(async () => {
+  const [dataset, setDataset] = useState<"real" | "demo">("real");
+  useEffect(() => {
     try {
-      const r = await fetch("/api/workspace", { cache: "no-store" });
+      if (sessionStorage.getItem("djc-dataset") === "demo") setDataset("demo");
+    } catch {}
+  }, []);
+  function switchDataset(value: "real" | "demo") {
+    if (value !== dataset)
+      void clientFetch("/api/demo/view", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dataset: value }),
+      }).catch(() => {});
+    setDataset(value);
+    try {
+      sessionStorage.setItem("djc-dataset", value);
+    } catch {}
+  }
+  const hasDemo =
+    !!state?.hiringNeeds.some((n) => n.isDemo) ||
+    !!state?.applications.some((a) => a.isDemo);
+  const viewState = useMemo(
+    () =>
+      state
+        ? {
+            ...state,
+            applications: state.applications.filter(
+              (a) => !!a.isDemo === (dataset === "demo"),
+            ),
+            hiringNeeds: state.hiringNeeds.filter(
+              (n) => !!n.isDemo === (dataset === "demo"),
+            ),
+            notifications: state.notifications.filter(
+              (n) => !!n.isDemo === (dataset === "demo"),
+            ),
+          }
+        : null,
+    [state, dataset],
+  );
+  const busy = useRef(false);
+  const generation = useRef(0);
+  const notify = useCallback(
+    (message: string, tone: "success" | "error" | "info" = "success") =>
+      setToast({ message, tone }),
+    [],
+  );
+  const refresh = useCallback(async () => {
+    const request = ++generation.current;
+    try {
+      const r = await clientFetch("/api/workspace", { cache: "no-store" });
       const data = await r.json();
       if (!r.ok) throw Error(data.error);
+      if (request !== generation.current) return;
       ref.current = data;
       setState(data);
       setError("");
     } catch (e) {
-      setError((e as Error).message);
+      if (request === generation.current) setError((e as Error).message);
     }
   }, []);
   useLayoutEffect(() => {
     void refresh();
   }, [refresh]);
   useEffect(() => {
-    // Keep the workspace light by default. Legacy "system" preferences must
-    // not make the app unexpectedly switch to a device's dark appearance.
-    document.documentElement.dataset.theme =
-      state?.preferences.theme === "dark" ? "dark" : "light";
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    const apply = () => {
+      let cached = "light";
+      try {
+        cached = localStorage.getItem("djc-theme") || "light";
+      } catch {}
+      const theme = state?.preferences.theme || cached;
+      document.documentElement.dataset.theme =
+        theme === "system" ? (media.matches ? "dark" : "light") : theme;
+      if (state) {
+        try {
+          localStorage.setItem("djc-theme", theme);
+        } catch {}
+      }
+    };
+    apply();
+    media.addEventListener("change", apply);
+    return () => media.removeEventListener("change", apply);
   }, [state?.preferences.theme]);
   const update = useCallback(
     async (fn: (s: AppState) => AppState, confirmed = false) => {
       if (!ref.current || busy.current) {
-        setToast("Wait for the current save to finish.");
+        notify("Wait for the current save to finish.", "info");
         return false;
       }
       busy.current = true;
       setSaving(true);
+      ++generation.current;
       try {
         const next = fn(structuredClone(ref.current));
-        const r = await fetch("/api/workspace", {
+        const r = await clientFetch("/api/workspace", {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ state: next, confirmed }),
+          body: JSON.stringify({ state: next, confirmed, dataset }),
         });
         const data = await r.json();
         if (!r.ok) throw Error(data.error);
         ref.current = data;
         setState(data);
-        setToast(
+        notify(
           data.syncStatus?.startsWith("Failed")
             ? `Saved. ${data.syncStatus}`
-            : "Saved to the recruitment workspace.",
+            : "Changes saved.",
+          data.syncStatus?.startsWith("Failed") ? "error" : "success",
         );
         return true;
       } catch (e) {
-        setToast((e as Error).message);
+        notify((e as Error).message, "error");
         await refresh();
         return false;
       } finally {
@@ -88,7 +160,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         setSaving(false);
       }
     },
-    [refresh],
+    [refresh, notify, dataset],
   );
   const updateApplication = useCallback(
     (id: string, fn: (a: Application) => Application, confirmed = false) =>
@@ -104,27 +176,36 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   return (
     <AppContext.Provider
       value={{
-        state,
+        state: viewState,
         update,
         updateApplication,
-        notify: setToast,
+        notify,
         refresh,
         saving,
+        dataset,
+        setDataset: switchDataset,
+        hasDemo,
+        demoCount: state?.applications.filter((a) => a.isDemo).length || 0,
       }}
     >
-      {error ? (
+      {error && (
         <div className="error-banner" role="alert">
           {error} <Button onClick={() => void refresh()}>Retry</Button>
         </div>
-      ) : (
-        children
       )}
+      {(!error || state) && children}
       {saving && (
         <div className="save-status" role="status">
           Saving…
         </div>
       )}
-      {toast && <Toast message={toast} onClose={() => setToast("")} />}
+      {toast && (
+        <Toast
+          message={toast.message}
+          tone={toast.tone}
+          onClose={() => setToast(null)}
+        />
+      )}
     </AppContext.Provider>
   );
 }

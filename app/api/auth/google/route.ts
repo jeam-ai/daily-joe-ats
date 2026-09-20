@@ -30,12 +30,13 @@ export async function GET(request: Request) {
         kind === "sheets"
           ? "openid email profile https://www.googleapis.com/auth/spreadsheets"
           : gmail
-            ? `openid email profile ${gmailScope}${kind === "intake" ? " https://www.googleapis.com/auth/gmail.readonly" : ""}`
+            ? `openid email profile ${gmailScope}${["intake", "official"].includes(kind) ? " https://www.googleapis.com/auth/gmail.readonly" : ""}`
             : "openid email profile",
       state,
       nonce,
       code_challenge: createHash("sha256").update(verifier).digest("base64url"),
       code_challenge_method: "S256",
+      include_granted_scopes: "true",
       access_type: gmail ? "offline" : "online",
       prompt: gmail ? "consent" : "select_account",
       login_hint: ["intake", "official"].includes(kind)

@@ -1,3 +1,4 @@
+import { defaultEmailTemplate } from "@/lib/email-templates";
 import type { AppState, User } from "@/types";
 export function initialState(): AppState {
   const owner = process.env.GOOGLE_ALLOWED_EMAIL?.toLowerCase();
@@ -10,9 +11,9 @@ export function initialState(): AppState {
     email,
     name:
       email === "deveraajeam@gmail.com"
-        ? "Jeam"
+        ? "Jeam A. De Vera"
         : email === official
-          ? "Daily Joe Careers"
+          ? ""
           : "",
     role: email === owner ? "Admin" : "Talent Acquisition",
     title:
@@ -68,21 +69,12 @@ export function initialState(): AppState {
       "Initial Interview",
       "Final Interview",
       "Requirements",
-      "Follow-up",
-      "Rejection",
-      "No Response",
       "Onboarding",
-    ].map((name) => ({
-      id: name,
-      name,
-      subject: `Daily Joe Careers — ${name}`,
-      body:
-        name === "Rejection"
-          ? "Hello {{applicant_name}},\n\nThank you for your interest in the {{position}} position at {{company_name}}. After careful consideration, we will not be progressing your application on this occasion. Thank you for your time and interest.\n\nDaily Joe Careers"
-          : name.includes("Interview")
-            ? "Hello {{applicant_name}},\n\nWe invite you to an interview for {{position}} at {{location}} on {{interview_date}} at {{interview_time}}. Please reply to confirm your availability.\n\nDaily Joe Careers"
-            : "Hello {{applicant_name}},\n\nRegarding your application for {{position}} at {{location}}:\n\n[HR: enter your message before sending.]\n\nDaily Joe Careers",
-    })),
+      "Hired",
+      "Rejection",
+      "Follow-up",
+      "No Response",
+    ].map(defaultEmailTemplate),
     preferences: {
       compact: false,
       weekStartsMonday: true,

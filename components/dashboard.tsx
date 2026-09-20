@@ -1,5 +1,6 @@
 "use client";
 import Link from "next/link";
+import { greetingName } from "@/lib/identity";
 import {
   ArrowUpRight,
   ArrowRight,
@@ -15,6 +16,8 @@ import {
   MapPin,
   Plus,
   ChevronRight,
+  TriangleAlert,
+  Sun,
 } from "lucide-react";
 import { useApp } from "./provider";
 import {
@@ -29,11 +32,19 @@ import {
   EmptyState,
 } from "./ui";
 import { isActive } from "@/lib/recruitment";
-import { monthKey } from "@/lib/dates";
+import { formatDate, formatTime, monthKey } from "@/lib/dates";
 export function Dashboard() {
   const { state } = useApp();
   if (!state) return <LoadingSkeleton />;
   const now = new Date();
+  const timezone = state.preferences.timezone || "Asia/Manila";
+  const hour = Number(
+    new Intl.DateTimeFormat("en-GB", {
+      timeZone: timezone,
+      hour: "numeric",
+      hourCycle: "h23",
+    }).format(now),
+  );
   const apps = state.applications;
   const monthly = apps.filter(
     (a) =>
@@ -149,32 +160,27 @@ export function Dashboard() {
     <>
       <div className="page-heading">
         <div>
-          <div className="eyebrow">A LITTLE CARE. A LOT OF POSSIBILITY.</div>
+          <div className="eyebrow">RECRUITMENT WORKSPACE</div>
           <h1>
-            Good{" "}
-            {new Date().getHours() < 12
-              ? "morning"
-              : new Date().getHours() < 18
-                ? "afternoon"
-                : "evening"}
-            , {state.currentUser?.name.split(" ")[0] || "there"}{" "}
-            <span className="sun">☀</span>
+            Good {hour < 12 ? "morning" : hour < 18 ? "afternoon" : "evening"},{" "}
+            {greetingName(state.currentUser?.name)}{" "}
+            <Sun className="sun" size={24} aria-hidden="true" />
           </h1>
           <p>Here&apos;s what&apos;s happening with recruitment today.</p>
         </div>
         <div className="date-label">
           <CalendarDays size={17} />
-          {now.toLocaleDateString("en-US", {
-            month: "long",
-            day: "numeric",
-            year: "numeric",
-          })}
+          {formatDate(now, state.preferences)}
         </div>
       </div>
       <div className="section-heading">
         <h2>Recruitment at a glance</h2>
         <span className="muted">
-          {now.toLocaleDateString("en-US", { month: "long", year: "numeric" })}
+          {now.toLocaleDateString("en-US", {
+            timeZone: timezone,
+            month: "long",
+            year: "numeric",
+          })}
         </span>
       </div>
       <div className="metrics-grid">
@@ -291,8 +297,11 @@ export function Dashboard() {
           <Card className="attention-card">
             <div className="card-heading">
               <div>
-                <h2>⚠ Needs your attention</h2>
-                <p>The small steps that make a difference.</p>
+                <h2>
+                  <TriangleAlert size={18} aria-hidden="true" /> Needs your
+                  attention
+                </h2>
+                <p>Follow-ups and outstanding requirements.</p>
               </div>
               <Badge tone="orange">
                 {attention.reduce((total, item) => total + item.count, 0)}{" "}
@@ -351,10 +360,16 @@ export function Dashboard() {
                   <div className="calendar-tile">
                     <span>
                       {new Date(i.scheduledAt).toLocaleDateString("en-US", {
-                        month: "short",
+                        timeZone: timezone,
+                        month: "long",
                       })}
                     </span>
-                    <strong>{new Date(i.scheduledAt).getDate()}</strong>
+                    <strong>
+                      {new Date(i.scheduledAt).toLocaleDateString("en-US", {
+                        timeZone: timezone,
+                        day: "numeric",
+                      })}
+                    </strong>
                   </div>
                   <div>
                     <strong>{a.applicant.name}</strong>
@@ -362,10 +377,7 @@ export function Dashboard() {
                       {i.stage} · {a.position}
                     </span>
                     <small>
-                      {new Date(i.scheduledAt).toLocaleTimeString("en-US", {
-                        hour: "numeric",
-                        minute: "2-digit",
-                      })}
+                      {formatTime(i.scheduledAt, state.preferences)}
                     </small>
                   </div>
                   <ChevronRight size={15} />

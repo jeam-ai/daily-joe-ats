@@ -1,3 +1,4 @@
+import { bufferFailure, isDatabaseFailure } from "./diagnostic-buffer";
 import "server-only";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
@@ -13,15 +14,21 @@ const globalDb = globalThis as typeof globalThis & {
   djSqlite?: DatabaseSync;
   djPool?: Pool;
   djDbQueue?: Promise<unknown>;
+  djSchemaReady?: Promise<void>;
 };
 const schema = [
   "CREATE TABLE IF NOT EXISTS records (collection TEXT NOT NULL, id TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(collection,id))",
   "CREATE TABLE IF NOT EXISTS audit_logs (id TEXT PRIMARY KEY, occurred_at TEXT NOT NULL, actor TEXT NOT NULL, action TEXT NOT NULL, application_id TEXT, payload TEXT NOT NULL)",
+  "CREATE INDEX IF NOT EXISTS audit_time_idx ON audit_logs(occurred_at)",
+  "CREATE INDEX IF NOT EXISTS audit_entity_time_idx ON audit_logs(application_id,occurred_at)",
+  "CREATE INDEX IF NOT EXISTS audit_action_time_idx ON audit_logs(action,occurred_at)",
   "CREATE TABLE IF NOT EXISTS resumes (id TEXT PRIMARY KEY, sha256 TEXT NOT NULL UNIQUE, filename TEXT NOT NULL, mime TEXT NOT NULL, content TEXT NOT NULL, extracted_text TEXT NOT NULL)",
   "CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE, role TEXT NOT NULL, active INTEGER NOT NULL, payload TEXT NOT NULL)",
   "CREATE TABLE IF NOT EXISTS applicants (id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE, payload TEXT NOT NULL)",
   "CREATE TABLE IF NOT EXISTS hiring_needs (id TEXT PRIMARY KEY, payload TEXT NOT NULL)",
   "CREATE TABLE IF NOT EXISTS applications (id TEXT PRIMARY KEY, applicant_id TEXT NOT NULL REFERENCES applicants(id), hiring_need_id TEXT REFERENCES hiring_needs(id), resume_id TEXT REFERENCES resumes(id), gmail_message_id TEXT UNIQUE, gmail_thread_id TEXT UNIQUE, stage TEXT NOT NULL, status TEXT NOT NULL, payload TEXT NOT NULL)",
+  "CREATE TABLE IF NOT EXISTS intake_window (application_id TEXT PRIMARY KEY REFERENCES applications(id), state TEXT NOT NULL, received_at TEXT NOT NULL)",
+  "CREATE INDEX IF NOT EXISTS intake_window_order ON intake_window(state,received_at,application_id)",
   "CREATE TABLE IF NOT EXISTS interviews (id TEXT PRIMARY KEY, application_id TEXT NOT NULL REFERENCES applications(id), payload TEXT NOT NULL)",
   "CREATE TABLE IF NOT EXISTS application_requirements (id TEXT NOT NULL, application_id TEXT NOT NULL REFERENCES applications(id), payload TEXT NOT NULL, PRIMARY KEY(id,application_id))",
   "CREATE TABLE IF NOT EXISTS screening_results (application_id TEXT PRIMARY KEY REFERENCES applications(id), payload TEXT NOT NULL)",
@@ -39,19 +46,48 @@ const schema = [
   ),
 ];
 // SQLite is durable on this local host. Serverless deployments MUST use PostgreSQL.
-export async function transaction<T>(
+async function databaseTransaction<T>(
   fn: (tx: Transaction) => Promise<T>,
+  options: { readOnly?: boolean; lockKey?: number } = {},
 ): Promise<T> {
   if (process.env.DATABASE_URL) {
     globalDb.djPool ||= new Pool({
       connectionString: process.env.DATABASE_URL,
       max: 5,
+      connectionTimeoutMillis: 10000,
+      statement_timeout: 30000,
+      query_timeout: 35000,
+      idle_in_transaction_session_timeout: 60000,
     });
+    // Existing deployments need a catalog read, not DDL locks on every cold
+    // start. CREATE ... IF NOT EXISTS still takes relation locks in PostgreSQL.
+    globalDb.djSchemaReady ||= (async () => {
+      const names = schema.map(
+        (sql) => sql.match(/CREATE (?:TABLE|INDEX) IF NOT EXISTS (\w+)/)![1],
+      );
+      const present = await globalDb.djPool!.query(
+        "SELECT " +
+          names.map((_, i) => `to_regclass($${i + 1}) AS r${i}`).join(","),
+        names,
+      );
+      if (!Object.values(present.rows[0]).every(Boolean))
+        await globalDb.djPool!.query(schema.join("; "));
+    })().catch((error) => {
+      globalDb.djSchemaReady = undefined;
+      throw error;
+    });
+    await globalDb.djSchemaReady;
     const client = await globalDb.djPool.connect();
     try {
-      await client.query("BEGIN");
-      await client.query("SELECT pg_advisory_xact_lock(812901)");
-      for (const sql of schema) await client.query(sql);
+      await client.query(
+        options.readOnly
+          ? "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY"
+          : "BEGIN",
+      );
+      if (!options.readOnly)
+        await client.query("SELECT pg_advisory_xact_lock($1)", [
+          options.lockKey ?? 812901,
+        ]);
       const result = await fn({
         query: async (sql, values = []) =>
           (await client.query(sql, values)).rows,
@@ -112,6 +148,22 @@ export async function transaction<T>(
   });
   globalDb.djDbQueue = run.catch(() => undefined);
   return run;
+}
+export async function transaction<T>(
+  fn: (tx: Transaction) => Promise<T>,
+  options: { readOnly?: boolean; lockKey?: number } = {},
+) {
+  try {
+    return await databaseTransaction(fn, options);
+  } catch (error) {
+    if (isDatabaseFailure(error)) bufferFailure("database.unavailable");
+    throw error;
+  }
+}
+// MVCC readers do not wait behind recruitment imports. Mutations retain the
+// shared advisory lock and commit the workspace and relational tables together.
+export function readTransaction<T>(fn: (tx: Transaction) => Promise<T>) {
+  return transaction(fn, { readOnly: true });
 }
 export async function readRecord<T>(
   tx: Transaction,

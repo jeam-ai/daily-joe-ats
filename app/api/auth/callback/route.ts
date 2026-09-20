@@ -1,3 +1,5 @@
+import { after } from "next/server";
+import { syncIntake } from "@/lib/google/gmail/sync";
 import { NextRequest, NextResponse } from "next/server";
 import { config, gmailScope, SafeError } from "@/lib/server/config";
 import {
@@ -10,6 +12,7 @@ import { SESSION_COOKIE, currentUser } from "@/lib/auth/session";
 import { createGoogleClient } from "@/lib/google/gmail/service";
 import { recordEvent, withStore } from "@/lib/server/store";
 import { findUser } from "@/lib/server/repository";
+import { withDeadline } from "@/lib/server/deadline";
 
 function providerFailure(error: unknown) {
   if (!error || typeof error !== "object") return "authorization";
@@ -42,6 +45,7 @@ function callbackFailure(error: unknown) {
   return providerFailure(error);
 }
 
+export const maxDuration = 240;
 export async function GET(request: NextRequest) {
   let origin = process.env.APP_ORIGIN || "http://localhost:3000";
   try {
@@ -81,16 +85,22 @@ export async function GET(request: NextRequest) {
     )
       throw new SafeError("signin");
     const client = createGoogleClient();
-    const { tokens } = await client.getToken({
-      code,
-      codeVerifier: flow.verifier,
-      redirect_uri: c.redirectUri,
-    });
+    const { tokens } = await withDeadline(
+      client.getToken({
+        code,
+        codeVerifier: flow.verifier,
+        redirect_uri: c.redirectUri,
+      }),
+      20000,
+    );
     if (!tokens.id_token) throw new SafeError("identity");
-    const ticket = await client.verifyIdToken({
-      idToken: tokens.id_token,
-      audience: c.clientId,
-    });
+    const ticket = await withDeadline(
+      client.verifyIdToken({
+        idToken: tokens.id_token,
+        audience: c.clientId,
+      }),
+      15000,
+    );
     const payload = ticket.getPayload();
     const email = payload?.email?.toLowerCase();
     const picture =
@@ -124,7 +134,7 @@ export async function GET(request: NextRequest) {
     )
       throw new SafeError("scope");
     if (
-      flow.kind === "intake" &&
+      ["intake", "official"].includes(flow.kind || "") &&
       !tokens.scope
         ?.split(" ")
         .includes("https://www.googleapis.com/auth/gmail.readonly")
@@ -166,6 +176,7 @@ export async function GET(request: NextRequest) {
             scopes: tokens.scope?.split(" "),
             expiresAt: tokens.expiry_date || Date.now() + 3500000,
             connectedAt: new Date().toISOString(),
+            connectedBy: initiator!.email,
           };
           recordEvent(s, email, "gmail.connected");
         }
@@ -185,6 +196,7 @@ export async function GET(request: NextRequest) {
       maxAge: 8 * 3600,
     });
     response.cookies.set("dj_oauth", "", { path: "/api/auth", maxAge: 0 });
+    after(() => syncIntake(flow.gmail ? initiator! : registeredUser, true));
     return response;
   } catch (e) {
     const code = callbackFailure(e);

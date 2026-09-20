@@ -3,10 +3,24 @@
   "framework": "nextjs",
   "buildCommand": "npm run build",
   "installCommand": "npm ci",
-  "regions": ["sin1"],
+  "regions": [
+    "sin1"
+  ],
   "functions": {
-    "app/api/intake/route.ts": { "maxDuration": 300 },
-    "app/api/communications/route.ts": { "maxDuration": 60 },
-    "app/api/workspace/route.ts": { "maxDuration": 60 }
-  }
+    "app/api/intake/route.ts": {
+      "maxDuration": 300
+    },
+    "app/api/communications/route.ts": {
+      "maxDuration": 60
+    },
+    "app/api/workspace/route.ts": {
+      "maxDuration": 240
+    }
+  },
+  "crons": [
+    {
+      "path": "/api/cron/intake",
+      "schedule": "0 0 * * *"
+    }
+  ]
 }

@@ -1,3 +1,5 @@
+import { after } from "next/server";
+import { runExtractionJobs } from "@/lib/server/ai-extraction";
 import { z } from "zod";
 import { requireOrigin, requireUser } from "@/lib/auth/session";
 import { previewImport, confirmImport } from "@/lib/google/gmail/intake";
@@ -37,6 +39,7 @@ export async function POST(req: Request) {
       parsed.data.selections,
       true,
     );
+    after(() => runExtractionJobs());
     return Response.json({ ...result, syncStatus: await syncSheets() });
   } catch (e) {
     return safeError(e);

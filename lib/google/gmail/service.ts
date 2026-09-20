@@ -3,8 +3,18 @@ import { initializeGoogleClient } from "../client";
 import { config, SafeError, gmailScope } from "@/lib/server/config";
 import { withStore, type StoredConnection } from "@/lib/server/store";
 import { buildEmailPayload } from "./payload";
+import { withDeadline } from "@/lib/server/deadline";
 export function createGoogleClient() {
   return initializeGoogleClient(config());
+}
+export class GmailSendError extends SafeError {
+  constructor(
+    message: string,
+    status: number,
+    public definitelyNotSent: boolean,
+  ) {
+    super(message, status);
+  }
 }
 export async function accessToken(connection: StoredConnection) {
   let accessToken = connection.accessToken;
@@ -17,7 +27,10 @@ export async function accessToken(connection: StoredConnection) {
     const client = createGoogleClient();
     client.setCredentials({ refresh_token: connection.refreshToken });
     try {
-      const { credentials } = await client.refreshAccessToken();
+      const { credentials } = await withDeadline(
+        client.refreshAccessToken(),
+        20000,
+      );
       if (!credentials.access_token) throw new Error();
       accessToken = credentials.access_token;
       await withStore((s) => {
@@ -36,10 +49,17 @@ export async function accessToken(connection: StoredConnection) {
           }
         }
       });
-    } catch {
+    } catch (error) {
+      const code = (error as { response?: { data?: { error?: string } } })
+        .response?.data?.error;
+      if (code === "invalid_grant")
+        throw new SafeError(
+          "Gmail authorization was revoked or expired. Reconnect the official mailbox.",
+          401,
+        );
       throw new SafeError(
-        "Gmail authorization expired or was revoked. Reconnect Gmail.",
-        401,
+        "Gmail could not refresh the connection. Try again; your saved authorization has been retained.",
+        502,
       );
     }
   }
@@ -52,10 +72,22 @@ export async function sendEmail(
     body: string;
     threadId?: string;
     inReplyTo?: string;
+    messageId?: string;
   },
   connection: StoredConnection,
 ) {
-  const token = await accessToken(connection);
+  let token: string;
+  try {
+    token = await accessToken(connection);
+  } catch (e) {
+    throw new GmailSendError(
+      e instanceof SafeError
+        ? e.message
+        : "Gmail authorization could not be checked.",
+      e instanceof SafeError ? e.status : 502,
+      true,
+    );
+  }
   let response: Response;
   try {
     response = await fetch(
@@ -66,28 +98,37 @@ export async function sendEmail(
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(buildEmailPayload(input)),
+        body: JSON.stringify(
+          buildEmailPayload({ ...input, from: connection.email }),
+        ),
         signal: AbortSignal.timeout(20000),
       },
     );
   } catch {
-    throw new SafeError(
+    throw new GmailSendError(
       "Gmail did not return a confirmation. Check Sent mail before trying again; the message may have been sent.",
       502,
+      false,
     );
   }
   if (!response.ok) {
     if (response.status === 401)
-      throw new SafeError("Gmail authorization expired. Reconnect Gmail.", 401);
+      throw new GmailSendError(
+        "Gmail authorization expired. Reconnect Gmail.",
+        401,
+        true,
+      );
     if (response.status === 403)
-      throw new SafeError(
+      throw new GmailSendError(
         "Gmail denied sending. Enable Gmail API and grant the gmail.send permission, then reconnect.",
         403,
+        true,
       );
     if (response.status === 429)
-      throw new SafeError(
+      throw new GmailSendError(
         "Gmail is rate limiting requests. Wait before trying again.",
         429,
+        true,
       );
     throw new SafeError(
       "Gmail could not confirm sending. Check Sent mail before retrying.",
@@ -105,6 +146,5 @@ export async function sendEmail(
     threadId: result.threadId ? String(result.threadId) : undefined,
   };
 }
-// Future: read/search/thread/attachment/reply/label services require a separately
-// reviewed scope upgrade. No intake service or background email job exists here.
+// Only explicit HR actions call sendEmail; intake jobs never send messages.
 export { gmailScope };

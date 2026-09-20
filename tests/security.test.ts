@@ -93,4 +93,27 @@ test("MIME payload preserves UTF-8 text and uses base64url transport", () => {
     Buffer.from(encodedBody, "base64").toString().replaceAll("\r\n", "\n"),
     DEFAULT_BODY,
   );
+  const branded = Buffer.from(
+    buildEmailPayload({
+      from: "careers@example.invalid",
+      to: "test@example.com",
+      subject: "Test",
+      body: "Test",
+    }).raw,
+    "base64url",
+  ).toString();
+  assert.match(
+    branded,
+    /^From: Daily Joe Careers <careers@example\.invalid>\r\n/,
+  );
+  assert.throws(
+    () =>
+      buildEmailPayload({
+        from: "bad\r\nBcc: person@example.com",
+        to: "test@example.com",
+        subject: "Test",
+        body: "Test",
+      }),
+    /Invalid email headers/,
+  );
 });

@@ -1,3 +1,9 @@
+import { queueExtraction } from "@/lib/server/ai-extraction";
+import { evidenceInformation } from "@/lib/applicant-information";
+import { recordIssue } from "@/lib/server/diagnostics";
+import { intakeEvidence, messageBody } from "@/lib/intake-evidence";
+import { matchHiringNeed, senderName } from "@/lib/intake-matching";
+import { activeIntake } from "@/lib/data-policy";
 import "server-only";
 import { createHash } from "node:crypto";
 import { PDFParse } from "pdf-parse";
@@ -6,168 +12,38 @@ import { accessToken } from "./service";
 import { validEmail } from "./payload";
 import { config, SafeError } from "@/lib/server/config";
 import { withStore } from "@/lib/server/store";
-import { transaction, putRecord, readRecord } from "@/lib/server/database";
+import {
+  transaction,
+  readTransaction,
+  putRecord,
+  readRecord,
+} from "@/lib/server/database";
 import { getState, saveState, audit } from "@/lib/server/repository";
 import { seal, unseal } from "@/lib/auth/security";
 import type { Application, QualificationRule, User } from "@/types";
 
-const MAX_RESUME_TEXT_LENGTH = 100_000;
 const MAX_PREVIEW_MESSAGES = 40;
-const OCR_BATCH_TIMEOUT_MS = 75_000;
-const OCR_STARTUP_TIMEOUT_MS = 20_000;
-const OCR_IMAGE_TIMEOUT_MS = 12_000;
-type OcrWorker = {
-  recognize: (image: Buffer) => Promise<{ data: { text: string } }>;
-  terminate: () => Promise<unknown>;
-};
-
-function hasPrefix(bytes: Buffer, prefix: number[]) {
-  return prefix.every((value, index) => bytes[index] === value);
-}
-
-function limitOcr<T>(work: Promise<T>, timeoutMs: number) {
-  let timeout: ReturnType<typeof setTimeout> | undefined;
-  return new Promise<T>((resolve, reject) => {
-    timeout = setTimeout(() => reject(new Error("OCR timed out.")), timeoutMs);
-    work.then(
-      (value) => {
-        if (timeout) clearTimeout(timeout);
-        resolve(value);
-      },
-      (error: unknown) => {
-        if (timeout) clearTimeout(timeout);
-        reject(error);
-      },
-    );
-  });
-}
-
-function createImageTextExtractor() {
-  let pendingWorker: Promise<OcrWorker> | undefined;
-  let worker: OcrWorker | undefined;
-  let closed = false;
-  let unavailable = false;
-  const deadline = Date.now() + OCR_BATCH_TIMEOUT_MS;
-
-  function timeout(limit: number) {
-    const remaining = deadline - Date.now();
-    if (remaining <= 0) throw new Error("OCR batch timed out.");
-    return Math.min(limit, remaining);
-  }
-
-  async function startWorker() {
-    if (closed || unavailable) throw new Error("OCR session is unavailable.");
-    if (!pendingWorker) {
-      // Use no persistent language-data cache: Vercel filesystems are read-only.
-      // The initialized worker is reused for every image in this import batch.
-      const { createWorker } = await import("tesseract.js");
-      pendingWorker = createWorker("eng", undefined, {
-        cacheMethod: "none",
-        logger: () => undefined,
-        errorHandler: () => undefined,
-      });
-    }
-    worker = await limitOcr(pendingWorker, timeout(OCR_STARTUP_TIMEOUT_MS));
-    return worker;
-  }
-
-  return {
-    async extract(bytes: Buffer) {
-      try {
-        const activeWorker = await startWorker();
-        const result = await limitOcr(
-          activeWorker.recognize(bytes),
-          timeout(OCR_IMAGE_TIMEOUT_MS),
-        );
-        return result.data.text.replaceAll("\0", "").trim();
-      } catch {
-        unavailable = true;
-        if (worker) {
-          await worker.terminate().catch(() => undefined);
-          worker = undefined;
-        }
-        return "";
-      }
-    },
-    async close() {
-      closed = true;
-      if (worker) await worker.terminate().catch(() => undefined);
-      else if (pendingWorker)
-        void pendingWorker
-          .then((lateWorker) => lateWorker.terminate())
-          .catch(() => undefined);
-    },
-  };
-}
-
-function escapedExpression(value: string) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-export function screenResumeAgainstCriteria(
-  text: string,
-  criteria: QualificationRule[],
-) {
-  return criteria.map((criterion) => {
-    const label = criterion.label.trim().replace(/\s+/g, " ");
-    const expression = label
-      .split(/\s+/)
-      .filter(Boolean)
-      .map(escapedExpression)
-      .join("\\s+");
-    const match = expression ? new RegExp(expression, "i").exec(text) : null;
-    if (match) {
-      const start = Math.max(0, match.index - 70);
-      const end = Math.min(text.length, match.index + match[0].length + 70);
-      const excerpt = text.slice(start, end).replace(/\s+/g, " ").trim();
-      return {
-        id: criterion.id,
-        requirement: criterion.label,
-        result: "Met" as const,
-        evidence: `Direct resume mention detected: “${excerpt}”. HR must verify it in the original resume.`,
-      };
-    }
-    return {
-      id: criterion.id,
-      requirement: criterion.label,
-      result: "Unclear" as const,
-      evidence:
-        "No direct text match was detected. Missing OCR or resume text is not a failed qualification; HR must review the original resume.",
-    };
-  });
-}
-
+export { screenResumeAgainstCriteria } from "@/lib/screening";
+import { screenResumeAgainstCriteria, buildInsight } from "@/lib/screening";
+import { extractResume } from "@/lib/server/documents";
+import { withDeadline } from "@/lib/server/deadline";
 export function resumeScreeningInsight(
   text: string,
   mime: string,
   criteria: QualificationRule[] = [],
 ) {
-  const extracted = text.trim();
-  const image = mime.startsWith("image/");
-  if (!extracted)
-    return image
-      ? "Image resume received, but OCR could not extract reliable text. HR must review the original image and record evidence manually."
-      : "Resume text could not be extracted. HR must review the original document and record evidence manually.";
-
-  const signals: string[] = [];
-  if (/\b[\w.+-]+@[\w.-]+\.[a-z]{2,}\b/i.test(extracted))
-    signals.push("an email address");
-  if (/(?:\+?63|0)?9\d{9}\b|\b\d{3}[\s.-]?\d{3}[\s.-]?\d{4}\b/.test(extracted))
-    signals.push("a phone-number pattern");
-  if (/\b\d{1,2}\+?\s*(?:years?|yrs?)\b|\bexperience\b/i.test(extracted))
-    signals.push("an experience reference");
-
-  const source = image ? "Image OCR" : "Resume text";
-  const observed = signals.length
-    ? ` It also detected ${signals.join(", ")}.`
-    : "";
-  const matches = screenResumeAgainstCriteria(extracted, criteria).filter(
-    (criterion) => criterion.result === "Met",
-  ).length;
-  const qualificationSummary = criteria.length
-    ? ` ${matches} of ${criteria.length} configured qualifications had a direct text match.`
-    : " No hiring-need qualifications are configured yet.";
-  return `${source} extracted ${extracted.length.toLocaleString()} characters.${observed}${qualificationSummary} This is a preliminary signal only; HR must verify it against the original resume and configured criteria.`;
+  if (!text.trim())
+    return "Resume text could not be extracted. HR must review the original document and record evidence manually.";
+  return (
+    buildInsight(
+      screenResumeAgainstCriteria(text, criteria),
+      "the assigned position",
+      "the selected location",
+    ) +
+    (mime.startsWith("image/")
+      ? " Image OCR was used; verify the original image."
+      : "")
+  );
 }
 
 type Part = {
@@ -195,6 +71,14 @@ export type PreviewRow = {
   text: string;
   subject: string;
   rfcId: string;
+  extraction?: Application["extraction"];
+  emailBody?: string;
+  sender?: string;
+  appliedPosition?: string;
+  appliedLocation?: string;
+  residence?: string;
+  processingNote?: string;
+  evidence?: ReturnType<typeof intakeEvidence>;
 };
 type Preview = {
   actor: string;
@@ -203,7 +87,7 @@ type Preview = {
   issues: { message: string; reason: string }[];
   used?: boolean;
 };
-async function official() {
+export async function official() {
   const c = await withStore((s) => s.officialConnection, false);
   if (!c || c.email !== config().officialEmail)
     throw new SafeError("Connect the official careers mailbox first.", 409);
@@ -214,7 +98,7 @@ async function official() {
     );
   return c;
 }
-async function gmail<T>(token: string, url: string): Promise<T> {
+export async function gmail<T>(token: string, url: string): Promise<T> {
   const r = await fetch(
     `https://gmail.googleapis.com/gmail/v1/users/me/${url}`,
     {
@@ -234,30 +118,35 @@ async function gmail<T>(token: string, url: string): Promise<T> {
 function parts(p: Part): Part[] {
   return [p, ...(p.parts || []).flatMap(parts)];
 }
-export async function previewImport(user: User) {
+export async function previewImport(
+  user: User,
+  options: { ids?: string[]; deadline?: number; automatic?: boolean } = {},
+) {
   if (!["Admin", "Talent Acquisition", "HR Generalist"].includes(user.role))
     throw new SafeError("Recruitment manager access required.", 403);
-  const state = await transaction(getState);
-  if (state.applications.length >= (state.importLimit || 100))
-    throw new SafeError("Applicant import limit reached.", 409);
+  const state = await readTransaction(getState);
+  const deadline = options.deadline || Date.now() + 150000;
+  const realApps = state.applications.filter(activeIntake);
+  const realCount = realApps.filter((a) => a.source === "Gmail").length;
   if (!state.intakeQuery?.trim())
     throw new SafeError(
       "Configure the application email filter in Settings first.",
     );
   const token = await accessToken(await official());
   let page: string | undefined;
-  const ids: string[] = [];
-  do {
-    const data = await gmail<{
-      messages?: { id: string }[];
-      nextPageToken?: string;
-    }>(
-      token,
-      `messages?maxResults=${MAX_PREVIEW_MESSAGES}&q=${encodeURIComponent(state.intakeQuery)}${page ? `&pageToken=${encodeURIComponent(page)}` : ""}`,
-    );
-    ids.push(...(data.messages || []).map((m) => m.id));
-    page = data.nextPageToken;
-  } while (page && ids.length < MAX_PREVIEW_MESSAGES);
+  const ids: string[] = [...(options.ids || [])];
+  if (!options.ids)
+    do {
+      const data = await gmail<{
+        messages?: { id: string }[];
+        nextPageToken?: string;
+      }>(
+        token,
+        `messages?maxResults=${MAX_PREVIEW_MESSAGES}&q=${encodeURIComponent(state.intakeQuery)}${page ? `&pageToken=${encodeURIComponent(page)}` : ""}`,
+      );
+      ids.push(...(data.messages || []).map((m) => m.id));
+      page = data.nextPageToken;
+    } while (page && ids.length < MAX_PREVIEW_MESSAGES);
   const messages: Message[] = [];
   const issues: Preview["issues"] = [];
   for (let n = 0; n < ids.length; n += 8) {
@@ -281,20 +170,24 @@ export async function previewImport(user: User) {
   }
   messages.sort((a, b) => Number(b.internalDate) - Number(a.internalDate));
   const rows: PreviewRow[] = [];
-  const imageText = createImageTextExtractor();
+
   const emails = new Set(
       state.applications.map((a) => a.applicant.email.toLowerCase()),
     ),
     hashes = new Set(state.applications.map((a) => a.resumeHash)),
     threads = new Set(state.applications.map((a) => a.gmailThreadId)),
     seen = new Set(state.applications.map((a) => a.gmailMessageId));
-  try {
+  {
     for (const message of messages) {
-      if (
-        rows.length >=
-        Math.min(10, (state.importLimit || 100) - state.applications.length)
-      )
+      if (Date.now() >= deadline) {
+        issues.push({
+          message: "Import preview",
+          reason:
+            "Preview time limit reached. Import the ready records, then retry to continue.",
+        });
         break;
+      }
+      if (rows.length >= 10) break;
       const header = (name: string) =>
         message.payload.headers.find((h) => h.name.toLowerCase() === name)
           ?.value || "";
@@ -352,55 +245,37 @@ export async function previewImport(user: User) {
           skip("Duplicate resume.");
           continue;
         }
-        let extracted = "",
-          mime = "text/plain",
-          isImage = false;
-        if (/\.pdf$/i.test(p.filename!)) {
-          if (bytes.subarray(0, 5).toString() !== "%PDF-") throw Error();
-          mime = "application/pdf";
-          const parser = new PDFParse({ data: bytes });
-          try {
-            extracted = (await parser.getText()).text;
-          } finally {
-            await parser.destroy();
-          }
-        } else if (/\.docx$/i.test(p.filename!)) {
-          mime =
-            "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-          extracted = (await mammoth.extractRawText({ buffer: bytes })).value;
-        } else if (/\.jpe?g$/i.test(p.filename!)) {
-          if (!hasPrefix(bytes, [0xff, 0xd8, 0xff])) throw Error();
-          mime = "image/jpeg";
-          isImage = true;
-          extracted = await imageText.extract(bytes);
-        } else if (/\.png$/i.test(p.filename!)) {
-          if (
-            !hasPrefix(bytes, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
-          )
-            throw Error();
-          mime = "image/png";
-          isImage = true;
-          extracted = await imageText.extract(bytes);
-        } else extracted = bytes.toString("utf8");
-        if (!extracted.trim() && !isImage) {
-          skip(
-            "Unreadable or scanned resume. Use PDF/DOCX text or upload the original image for HR review.",
-          );
-          continue;
-        }
+        const document = await withDeadline(
+          extractResume(bytes, p.filename!),
+          Math.max(1, deadline - Date.now()),
+        );
+        const { text: extracted, mime, extraction } = document;
+        const emailBody = messageBody(message.payload);
+        const evidence = intakeEvidence({
+          subject,
+          body: emailBody,
+          resume: extracted,
+          filename: p.filename,
+          from,
+        });
         rows.push({
           messageId: message.id,
           threadId: message.threadId,
-          name: from.includes("<")
-            ? from.split("<")[0].trim().replace(/^"|"$/g, "")
-            : email.split("@")[0],
+          name: evidence.name,
+          evidence,
+          emailBody,
+          sender: from,
+          appliedPosition: evidence.position,
+          appliedLocation: evidence.location,
+          residence: evidence.residence,
           email,
           receivedAt: new Date(Number(message.internalDate)).toISOString(),
           filename: p.filename!,
           mime,
           hash,
           data: bytes.toString("base64"),
-          text: extracted.slice(0, MAX_RESUME_TEXT_LENGTH),
+          text: extracted,
+          extraction,
           subject: subject.slice(0, 200),
           rfcId: /^<[^<>\s]+@[^<>\s]+>$/.test(header("message-id"))
             ? header("message-id")
@@ -410,11 +285,11 @@ export async function previewImport(user: User) {
         hashes.add(hash);
         threads.add(message.threadId);
       } catch {
-        skip("Failed to read resume. Check the attachment and retry.");
+        skip(
+          "Failed to read resume. Check for a damaged or password-protected attachment and retry with an unlocked copy.",
+        );
       }
     }
-  } finally {
-    await imageText.close();
   }
   const id = crypto.randomUUID();
   await transaction(async (tx) => {
@@ -434,7 +309,7 @@ export async function previewImport(user: User) {
   });
   return {
     id,
-    rows: rows.map(({ data, text, ...r }) => r),
+    rows: rows.map(({ data, text, emailBody, sender, ...r }) => r),
     issues,
     scanned: messages.length,
   };
@@ -444,6 +319,7 @@ export async function confirmImport(
   id: string,
   selections: { messageId: string; name: string; hiringNeedId: string }[],
   confirmed: boolean,
+  automatic = false,
 ) {
   if (!confirmed) throw new SafeError("Confirm the import first.");
   if (!["Admin", "Talent Acquisition", "HR Generalist"].includes(user.role))
@@ -469,21 +345,22 @@ export async function confirmImport(
       new Set(selections.map((s) => s.messageId)).size !== selections.length
     )
       throw new SafeError("Select between 1 and 10 unique applications.");
-    if (
-      state.applications.length + selections.length >
-      (state.importLimit || 100)
-    )
-      throw new SafeError("Applicant import limit reached.", 409);
     let imported = 0;
     const issues = [...preview.issues];
     for (const selection of selections) {
       const r = preview.rows.find((r) => r.messageId === selection.messageId),
         need = state.hiringNeeds.find(
-          (n) => n.id === selection.hiringNeedId && n.status === "Open",
+          (n) =>
+            n.id === selection.hiringNeedId && n.status === "Open" && !n.isDemo,
         );
-      if (!r || !need || !selection.name.trim() || selection.name.length > 200)
+      if (
+        !r ||
+        (!need && !!selection.hiringNeedId) ||
+        !selection.name.trim() ||
+        selection.name.length > 200
+      )
         throw new SafeError(
-          "Map every selected applicant to an active hiring need and verify their name.",
+          "Choose a valid hiring need or leave it unassigned, and verify the applicant name.",
         );
       if (
         state.applications.some(
@@ -491,7 +368,8 @@ export async function confirmImport(
             a.gmailMessageId === r.messageId ||
             a.gmailThreadId === r.threadId ||
             a.resumeHash === r.hash ||
-            a.applicant.email === r.email,
+            (!a.isDemo &&
+              a.applicant.email.toLowerCase() === r.email.toLowerCase()),
         )
       ) {
         issues.push({
@@ -500,6 +378,9 @@ export async function confirmImport(
         });
         continue;
       }
+      const position = r.appliedPosition || "Position requires review";
+      const location = r.appliedLocation || "Location requires review";
+      const rules = need?.criteria || [];
       const now = new Date().toISOString();
       const sequence =
         ((await readRecord<number>(tx, "sequence", "applicant")) || 0) + 1;
@@ -517,30 +398,65 @@ export async function confirmImport(
           seal(r.text, config().encryptionKey),
         ],
       );
+      const extracted =
+        r.evidence ||
+        intakeEvidence({
+          subject: r.subject,
+          body: r.emailBody || "",
+          resume: r.text,
+          filename: r.filename,
+          from: r.sender || "",
+        });
       const a: Application = {
         id: applicationId,
+        information: evidenceInformation(extracted),
         applicant: {
           id: crypto.randomUUID(),
           name: selection.name.trim(),
           email: r.email,
-          phone: "",
-          location: "Not verified",
+          phone:
+            r.text.match(/(?:\+63|0)9\d{2}[ -]?\d{3}[ -]?\d{4}/)?.[0] || "",
+          location: r.residence || "Not verified",
           experience: 0,
+          education: extracted.education,
+          availability: extracted.availability,
+          experienceDetails: extracted.experienceDetails,
         },
-        position: need.position,
-        location: need.location,
-        hiringNeedId: need.id,
+        position,
+        location,
+        hiringNeedId: need?.id,
         appliedAt: r.receivedAt,
         stage: "Screening",
         status: "New",
         screening: {
           outcome: "Requires Review",
           completedAt: "",
-          insight: resumeScreeningInsight(r.text, r.mime, need.criteria || []),
-          criteria: screenResumeAgainstCriteria(r.text, need.criteria || []),
+          insight: buildInsight(
+            screenResumeAgainstCriteria(
+              r.text,
+              rules,
+              !r.extraction?.warnings.length,
+            ),
+            position,
+            location,
+            !!r.text.trim(),
+          ),
+          method: "rules",
+          criteria: screenResumeAgainstCriteria(
+            r.text,
+            rules,
+            !r.extraction?.warnings.length,
+          ),
         },
         lastActivity: now,
-        notes: [],
+        notes: [
+          ...(need
+            ? []
+            : [
+                "Hiring need could not be matched confidently. Confirm position and location before screening.",
+              ]),
+          ...(r.processingNote ? [r.processingNote] : []),
+        ],
         interviews: [],
         requirements: state.requirementTemplates.map((r) => ({
           ...r,
@@ -566,11 +482,41 @@ export async function confirmImport(
         originalSubject: r.subject,
         resumeId,
         resumeHash: r.hash,
+        extraction: r.extraction,
         source: "Gmail",
         assignedTo: user.email,
         onboardingStatus: "Pending Orientation",
       };
+      if (!automatic && selection.name.trim() !== extracted.name) {
+        a.information!.fields.name = {
+          source: "HR edit",
+          confidence: "Confident",
+          evidence: "Name corrected during import review.",
+          verifiedBy: user.email,
+        };
+      }
       state.applications.push(a);
+      await putRecord(
+        tx,
+        "application_sources",
+        a.id,
+        seal(
+          {
+            subject: r.subject,
+            body: r.emailBody || "",
+            from: r.sender || "",
+            filename: r.filename,
+          },
+          config().encryptionKey,
+        ),
+      );
+      await queueExtraction(tx, a, user.email);
+      if (a.extraction?.warnings.length)
+        await recordIssue(
+          "documents.extraction",
+          { entityId: a.id, user: user.email },
+          tx,
+        );
       await audit(tx, user.email, "application.imported", a.id, {
         messageId: r.messageId,
         threadId: r.threadId,

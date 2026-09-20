@@ -8,7 +8,9 @@ export async function POST(req: Request) {
     const u = await requireUser();
     if (u.role !== "Admin")
       throw new SafeError("Administrator access required.", 403);
-    return Response.json({ message: await syncSheets() });
+    const message = await syncSheets();
+    if (message.startsWith("Failed")) throw new SafeError(message, 502);
+    return Response.json({ message });
   } catch (e) {
     return safeError(e);
   }

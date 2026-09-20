@@ -36,13 +36,19 @@ export function validateEmailInput(
   return { to: to.trim().toLowerCase(), subject: subject.trim(), body };
 }
 export function buildEmailPayload(input: {
+  from?: string;
+  messageId?: string;
   to: string;
   subject: string;
   body: string;
   threadId?: string;
   inReplyTo?: string;
 }) {
-  if (!validEmail(input.to) || /[\r\n]/.test(input.subject))
+  if (
+    !validEmail(input.to) ||
+    (input.from && !validEmail(input.from)) ||
+    /[\r\n]/.test(input.subject)
+  )
     throw new Error("Invalid email headers.");
   if (
     input.inReplyTo &&
@@ -51,12 +57,19 @@ export function buildEmailPayload(input: {
   )
     throw new Error("Invalid reply headers.");
   const subject = Buffer.from(input.subject).toString("base64");
+  if (
+    input.messageId &&
+    !/^<[-a-zA-Z0-9.]+@[-a-zA-Z0-9.]+>$/.test(input.messageId)
+  )
+    throw new Error("Invalid message identity.");
   const body =
     Buffer.from(input.body.replace(/\r?\n/g, "\r\n"))
       .toString("base64")
       .match(/.{1,76}/g)
       ?.join("\r\n") || "";
   const mime = [
+    ...(input.messageId ? [`Message-ID: ${input.messageId}`] : []),
+    ...(input.from ? [`From: Daily Joe Careers <${input.from}>`] : []),
     `To: ${input.to}`,
     `Subject: =?UTF-8?B?${subject}?=`,
     ...(input.inReplyTo

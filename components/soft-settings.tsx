@@ -1,11 +1,13 @@
 "use client";
+import { activeIntake } from "@/lib/data-policy";
+import { clientFetch, requestJson } from "@/lib/client-request";
 import { useState } from "react";
 import type { User, Location, QualificationRule } from "@/types";
 import { useApp } from "./provider";
 import { Button, Card, Field, Input, Select, Modal, Badge } from "./ui";
 import { QualificationEditor } from "./qualification-editor";
 export function UsersSettings() {
-  const { state, update } = useApp();
+  const { state, update, saving } = useApp();
   const [editing, setEditing] = useState<User | null>(null);
   if (!state) return null;
   return (
@@ -13,7 +15,7 @@ export function UsersSettings() {
       <div className="card-heading">
         <h2>Users & Permissions</h2>
         <Button
-          disabled={state.currentUser?.role !== "Admin"}
+          disabled={saving || state.currentUser?.role !== "Admin"}
           onClick={() =>
             setEditing({
               id: crypto.randomUUID(),
@@ -30,8 +32,9 @@ export function UsersSettings() {
       </div>
       <div className="padded">
         <p>
-          Job titles are displayed on profiles. Permission roles control what an
-          account can do. Google verifies identity at sign-in.
+          Only administrators can change users, locations, and recruitment
+          templates. Job titles are displayed on profiles. Permission roles
+          control what an account can do. Google verifies identity at sign-in.
         </p>
         {state.users?.map((u) => (
           <div className="permission-row" key={u.id}>
@@ -46,7 +49,7 @@ export function UsersSettings() {
             </div>
             <Button
               variant="secondary"
-              disabled={state.currentUser?.role !== "Admin"}
+              disabled={saving || state.currentUser?.role !== "Admin"}
               onClick={() => setEditing(u)}
             >
               Edit access
@@ -78,6 +81,7 @@ export function UsersSettings() {
       </div>
       {editing && (
         <Modal
+          busy={saving}
           title="Confirm authorized user access"
           onClose={() => setEditing(null)}
         >
@@ -142,7 +146,9 @@ export function UsersSettings() {
             <p>
               Confirming changes this account’s access to applicant information.
             </p>
-            <Button type="submit">Confirm access changes</Button>
+            <Button type="submit" disabled={saving}>
+              Confirm access changes
+            </Button>
           </form>
         </Modal>
       )}
@@ -150,7 +156,7 @@ export function UsersSettings() {
   );
 }
 export function LocationsSettings() {
-  const { state, update } = useApp();
+  const { state, update, saving } = useApp();
   const [editing, setEditing] = useState<Location | null>(null);
   if (!state) return null;
   return (
@@ -158,6 +164,7 @@ export function LocationsSettings() {
       <div className="card-heading">
         <h2>Locations</h2>
         <Button
+          disabled={saving || state.currentUser?.role !== "Admin"}
           onClick={() =>
             setEditing({
               id: crypto.randomUUID(),
@@ -180,14 +187,22 @@ export function LocationsSettings() {
                 {l.city} · {l.province} · {l.active ? "Active" : "Inactive"}
               </p>
             </div>
-            <Button variant="secondary" onClick={() => setEditing(l)}>
+            <Button
+              variant="secondary"
+              disabled={saving || state.currentUser?.role !== "Admin"}
+              onClick={() => setEditing(l)}
+            >
               Edit
             </Button>
           </div>
         ))}
       </div>
       {editing && (
-        <Modal title="Branch / location" onClose={() => setEditing(null)}>
+        <Modal
+          busy={saving}
+          title="Branch / location"
+          onClose={() => setEditing(null)}
+        >
           <form
             className="form-stack"
             onSubmit={async (e) => {
@@ -230,7 +245,9 @@ export function LocationsSettings() {
               />
               Active location
             </label>
-            <Button type="submit">Save location</Button>
+            <Button type="submit" disabled={saving}>
+              Save location
+            </Button>
           </form>
         </Modal>
       )}
@@ -238,7 +255,7 @@ export function LocationsSettings() {
   );
 }
 export function QualificationsSettings() {
-  const { state, update } = useApp();
+  const { state, update, saving } = useApp();
   const [editing, setEditing] = useState<string | null>(null),
     [rules, setRules] = useState<QualificationRule[]>([]);
   if (!state) return null;
@@ -268,6 +285,7 @@ export function QualificationsSettings() {
             </div>
             <Button
               variant="secondary"
+              disabled={saving || state.currentUser?.role !== "Admin"}
               onClick={() => {
                 setEditing(q.id);
                 setRules(q.rules || []);
@@ -280,6 +298,7 @@ export function QualificationsSettings() {
       </div>
       {q && (
         <Modal
+          busy={saving}
           title={`${q.position} qualifications`}
           onClose={() => setEditing(null)}
         >
@@ -309,7 +328,9 @@ export function QualificationsSettings() {
               HR records actual interview answers. The system does not infer
               answers from resumes.
             </p>
-            <Button type="submit">Save template</Button>
+            <Button type="submit" disabled={saving}>
+              Save template
+            </Button>
           </form>
         </Modal>
       )}
@@ -317,7 +338,9 @@ export function QualificationsSettings() {
   );
 }
 export function PreferencesSettings() {
-  const { state, update } = useApp();
+  const { state, refresh, notify, dataset } = useApp();
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
   if (!state) return null;
   return (
     <>
@@ -331,24 +354,44 @@ export function PreferencesSettings() {
           onSubmit={async (e) => {
             e.preventDefault();
             const f = new FormData(e.currentTarget);
-            await update((s) => ({
-              ...s,
-              intakeQuery: String(f.get("query")),
-              preferences: {
-                ...s.preferences,
-                compact: f.get("compact") === "on",
-                theme: f.get("theme") as "light" | "dark",
-                timezone: String(f.get("timezone")),
-                dateFormat: String(f.get("dateFormat")),
-                notifications: f.get("notifications") === "on",
-              },
-            }));
+            setSaving(true);
+            setError("");
+            try {
+              await requestJson("/api/workspace", {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  dataset,
+                  intakeQuery:
+                    state.currentUser?.role === "Admin" && dataset === "real"
+                      ? String(f.get("query"))
+                      : undefined,
+                  preferences: {
+                    ...state.preferences,
+                    compact: f.get("compact") === "on",
+                    theme: f.get("theme") as "light" | "dark" | "system",
+                    timezone: String(f.get("timezone")),
+                    dateFormat: String(f.get("dateFormat")),
+                    notifications: f.get("notifications") === "on",
+                  },
+                }),
+              });
+              await refresh();
+              notify("Preferences saved.");
+            } catch (e) {
+              const message = (e as Error).message;
+              setError(message);
+              notify(message, "error");
+            } finally {
+              setSaving(false);
+            }
           }}
         >
           <Field label="Theme">
             <Select name="theme" defaultValue={state.preferences.theme}>
               <option value="light">Light</option>
               <option value="dark">Dark</option>
+              <option value="system">System</option>
             </Select>
           </Field>
           <Field label="Timezone">
@@ -384,78 +427,35 @@ export function PreferencesSettings() {
             Show notification indicators
           </label>
           <Field label="Gmail application search filter (Admin)">
-            <Input name="query" defaultValue={state.intakeQuery} />
+            <Input
+              disabled={
+                state.currentUser?.role !== "Admin" || dataset === "demo"
+              }
+              name="query"
+              defaultValue={state.intakeQuery}
+            />
           </Field>
           <p>
             Only matching messages are previewed. Use Gmail subject, attachment,
             or date filters to keep intake relevant.
           </p>
-          <Button type="submit">Save preferences</Button>
+          <Button type="submit" disabled={saving}>
+            {saving ? "Saving preferences…" : "Save preferences"}
+          </Button>
+          {error && (
+            <p role="alert" className="error-message">
+              {error}
+            </p>
+          )}
           <div className="info-banner">
             <h3>Import policy</h3>
             <p>
-              {state.applications.length} / {state.importLimit || 100}{" "}
-              applicants imported. Applications display 20 records per page.
+              {state.applications.filter(activeIntake).length} / 100 active
+              applicants. Applications display 20 records per page.
             </p>
           </div>
         </form>
       </Card>
-      {process.env.NODE_ENV !== "production" && <DemoDataSettings />}
     </>
-  );
-}
-
-function DemoDataSettings() {
-  const { state, refresh, notify } = useApp();
-  const [busy, setBusy] = useState(false);
-  async function run(method: "POST" | "DELETE") {
-    setBusy(true);
-    try {
-      const response = await fetch("/api/demo", { method });
-      const data = await response.json();
-      if (!response.ok)
-        throw Error(data.error || "Unable to update demo data.");
-      await refresh();
-      notify(
-        method === "POST"
-          ? `Added ${data.imported} fictional demo applications.`
-          : `Removed ${data.removed} demo applications.`,
-      );
-    } catch (error) {
-      notify(
-        error instanceof Error ? error.message : "Unable to update demo data.",
-      );
-    } finally {
-      setBusy(false);
-    }
-  }
-  const count =
-    state?.applications.filter((a) => a.source === "Demo").length || 0;
-  return (
-    <Card className="padded demo-data-card">
-      <div className="card-heading">
-        <div>
-          <h2>Local demo data</h2>
-          <p>
-            Load ten fictional applications to walk through every workflow. Demo
-            records are never enabled on production.
-          </p>
-        </div>
-        <Badge>Development only</Badge>
-      </div>
-      <p className="muted">{count} demo applications currently loaded.</p>
-      <div className="button-row">
-        <Button disabled={busy} onClick={() => void run("POST")}>
-          {busy ? "Working…" : "Load 10 demo records"}
-        </Button>
-        <Button
-          variant="secondary"
-          disabled={busy || count === 0}
-          onClick={() => void run("DELETE")}
-        >
-          Clear demo records
-        </Button>
-      </div>
-    </Card>
   );
 }

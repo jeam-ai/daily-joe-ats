@@ -13,8 +13,10 @@ export async function GET(
     await requireUser();
     const { id } = await params;
     return await transaction(async (tx) => {
-      if (!(await getState(tx)).applications.some((a) => a.resumeId === id))
-        throw new SafeError("Resume not found.", 404);
+      const application = (await getState(tx)).applications.find(
+        (a) => a.resumeId === id && !a.deletedAt,
+      );
+      if (!application) throw new SafeError("Resume not found.", 404);
       const rows = await tx.query("SELECT * FROM resumes WHERE id=$1", [id]);
       const row = rows[0];
       if (!row) throw new SafeError("Resume not found.", 404);
@@ -27,6 +29,7 @@ export async function GET(
             ),
             filename: row.filename,
             mime: row.mime,
+            extraction: application.extraction,
           },
           { headers: { "Cache-Control": "no-store" } },
         );

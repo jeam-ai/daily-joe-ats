@@ -1,0 +1,289 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { transaction, putRecord } from "../../lib/server/database";
+import {
+  getState,
+  saveState,
+  updatePreferences,
+} from "../../lib/server/repository";
+import { initialState } from "../../lib/server/initial-state";
+import { withStore } from "../../lib/server/store";
+import { syncIntake, intakeStatus } from "../../lib/google/gmail/sync";
+import { activeIntake } from "../../lib/data-policy";
+import { matchHiringNeed, senderName } from "../../lib/intake-matching";
+delete process.env.DATABASE_URL;
+delete process.env.VERCEL;
+delete process.env.OPENAI_API_KEY;
+delete process.env.GOOGLE_SHEETS_ID;
+Object.assign(process.env, {
+  GOOGLE_ALLOWED_EMAIL: "admin@example.invalid",
+  OFFICIAL_CAREERS_EMAIL: "careers@example.invalid",
+  GOOGLE_CLIENT_ID: "test",
+  GOOGLE_CLIENT_SECRET: "test",
+  GOOGLE_REDIRECT_URI: "http://localhost:3000/api/auth/callback",
+  APP_ORIGIN: "http://localhost:3000",
+  SESSION_SECRET: "s".repeat(32),
+  TOKEN_ENCRYPTION_KEY: "a".repeat(64),
+});
+process.chdir(mkdtempSync(path.join(tmpdir(), "djc-production-intake-")));
+test("automatic intake resumes beyond ten, maintains latest 100 with an older queue, preserves rejected history and never sends mail", async () => {
+  const initial = initialState();
+  initial.qualifications.push({
+    id: "unassigned-test",
+    position: "Barista",
+    minimum: "Unassigned template must not be assessed",
+    preferred: "",
+    criteria: "",
+    questions: "",
+    rules: [
+      {
+        id: "sample-rule",
+        label: "Customer service experience",
+        kind: "Minimum",
+        absenceFails: false,
+      },
+    ],
+  });
+  await transaction((tx) => putRecord(tx, "workspace", "main", initial));
+  await withStore((s) => {
+    s.officialConnection = {
+      email: "careers@example.invalid",
+      accessToken: "fixture",
+      refreshToken: "fixture-refresh",
+      expiresAt: Date.now() + 600000,
+      connectedAt: new Date().toISOString(),
+      scopes: ["https://www.googleapis.com/auth/gmail.readonly"],
+    };
+  });
+  const original = globalThis.fetch;
+  let sends = 0;
+  globalThis.fetch = async (input) => {
+    const url = String(input);
+    if (url.includes("/send")) {
+      sends++;
+      throw Error("No sending permitted");
+    }
+    if (url.endsWith("/profile"))
+      return Response.json({ emailAddress: "careers@example.invalid" });
+    if (url.includes("messages?")) {
+      const second = url.includes("pageToken=next");
+      return Response.json({
+        messages: Array.from({ length: second ? 5 : 100 }, (_, i) => ({
+          id: String(i + (second ? 100 : 0)),
+        })),
+        nextPageToken: second ? undefined : "next",
+      });
+    }
+    const id = url.match(/messages\/(\d+)/)?.[1];
+    assert.ok(id);
+    return Response.json({
+      id,
+      threadId: `thread-${id}`,
+      internalDate: String(Date.now()),
+      payload: {
+        headers: [
+          {
+            name: "From",
+            value: `DEMO Candidate ${id} <candidate${id}@example.invalid>`,
+          },
+          { name: "Subject", value: "Application for Barista" },
+        ],
+        parts: [
+          {
+            filename: "resume.txt",
+            body: {
+              data: Buffer.from(
+                `Fictional QA resume ${id}. Customer service experience. Phone 0912 345 6789.`,
+              ).toString("base64url"),
+            },
+          },
+        ],
+      },
+    });
+  };
+  try {
+    await Promise.all([
+      syncIntake(undefined, true),
+      syncIntake(undefined, true),
+    ]);
+    let s = await transaction(getState);
+    assert.equal(
+      s.applications.length,
+      5,
+      "lease prevents concurrent duplicate batches",
+    );
+    for (let i = 0; i < 19; i++) await syncIntake(undefined, true);
+    s = await transaction(getState);
+    assert.equal(s.applications.filter(activeIntake).length, 100);
+    assert.equal(
+      s.notifications.filter((n) => n.id.startsWith("new-")).length,
+      100,
+    );
+    assert.ok(
+      s.notifications
+        .filter((n) => n.id.startsWith("new-"))
+        .every((n) =>
+          n.description.includes(
+            "Assign a hiring need to review qualifications",
+          ),
+        ),
+    );
+    assert.ok(
+      s.applications.every((a) => !a.hiringNeedId && a.status === "New"),
+    );
+    assert.ok(s.applications.every((a) => a.screening.criteria.length === 0));
+    await syncIntake(undefined, true);
+    assert.equal((await intakeStatus()).status, "complete");
+    s = await transaction(getState);
+    assert.equal(s.applications.length, 105);
+    assert.equal(
+      s.applications.filter((a) => a.queueState === "Queued").length,
+      5,
+    );
+    s.applications[0].status = "Rejected";
+    await transaction((tx) => saveState(tx, s));
+    await syncIntake();
+    s = await transaction(getState);
+    assert.equal(s.applications.length, 105);
+    assert.equal(s.applications.filter(activeIntake).length, 100);
+    assert.equal(s.applications[0].status, "Rejected");
+    assert.equal(
+      new Set(s.applications.map((a) => a.gmailMessageId)).size,
+      105,
+    );
+    assert.equal(sends, 0);
+    assert.ok(
+      (await withStore((s) => s.officialConnection, false))?.refreshToken,
+    );
+    const saved = await updatePreferences(
+      { ...initial.preferences, theme: "dark" },
+      initial.users![0],
+    );
+    assert.equal(saved.preferences.theme, "dark");
+    assert.equal(
+      saved.applications.length,
+      105,
+      "a preference save from an old form preserves imported applicants",
+    );
+    assert.equal(saved.applications[0].status, "Rejected");
+    await assert.rejects(
+      updatePreferences(
+        saved.preferences,
+        { ...initial.users![0], role: "Viewer" },
+        "has:attachment",
+      ),
+    );
+    await assert.rejects(
+      updatePreferences(
+        saved.preferences,
+        initial.users![0],
+        "has:attachment",
+        "demo",
+      ),
+    );
+    await assert.rejects(
+      updatePreferences(
+        { ...saved.preferences, theme: "invalid" },
+        initial.users![0],
+      ),
+    );
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+test("matching needs evidence of both position and location; sender addresses are never fabricated names", () => {
+  assert.equal(senderName("unknown@example.invalid"), "Name requires review");
+  const need = {
+    id: "n",
+    position: "Barista",
+    location: "Naga City",
+    status: "Open",
+    criteria: [],
+  } as never;
+  assert.equal(matchHiringNeed("Barista", [need]), undefined);
+  assert.equal(
+    matchHiringNeed("Application Barista — Naga City", [need])?.id,
+    "n",
+  );
+  assert.equal(
+    matchHiringNeed("Application Barista — Naga City", [need, need]),
+    undefined,
+  );
+});
+test("unreadable attachments do not pause all intake after the bounded retry limit", async () => {
+  const state = await transaction(getState);
+  await transaction((tx) =>
+    putRecord(tx, "jobs", "gmail", {
+      status: "error",
+      message: "Prior attachment failure",
+      pending: ["broken"],
+      issues: [],
+      imported: 0,
+      checked: 0,
+      failures: 2,
+      consecutiveFailures: 2,
+      retryAt: 0,
+      headCheckedAt: Date.now(),
+      query: state.intakeQuery,
+    }),
+  );
+  const original = globalThis.fetch;
+  globalThis.fetch = async (input) => {
+    const url = String(input);
+    if (url.endsWith("/profile"))
+      return Response.json({ emailAddress: "careers@example.invalid" });
+    assert.ok(url.includes("messages/broken"));
+    return Response.json({
+      id: "broken",
+      threadId: "broken-thread",
+      internalDate: String(Date.now()),
+      payload: {
+        headers: [
+          { name: "From", value: "Fictional Broken <broken@example.invalid>" },
+          { name: "Subject", value: "Application with damaged DOCX" },
+        ],
+        parts: [
+          {
+            filename: "resume.docx",
+            body: {
+              data: Buffer.from([0x50, 0x4b, 0x03, 0x04, 0, 0]).toString(
+                "base64url",
+              ),
+            },
+          },
+        ],
+      },
+    });
+  };
+  try {
+    await syncIntake();
+    const job = await intakeStatus();
+    assert.equal(job.status, "complete");
+    assert.equal(job.consecutiveFailures, 0);
+    assert.equal(job.pending.length, 0);
+    assert.ok(job.issues.some((i) => /Failed to read/.test(i.reason)));
+    assert.match(job.message, /continue importing/);
+    assert.ok(job.seenIds?.includes("broken"));
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("expired job leases become an actionable retry state", async () => {
+  await transaction((tx) =>
+    putRecord(tx, "jobs", "gmail", {
+      status: "processing",
+      message: "old",
+      leaseUntil: Date.now() - 1,
+      runId: "stale",
+      pending: [],
+      issues: [],
+      imported: 0,
+      checked: 0,
+    }),
+  );
+  assert.equal((await intakeStatus()).status, "error");
+});

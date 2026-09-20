@@ -16,6 +16,13 @@ for (const path of [
   "/settings/email-templates",
   "/settings/users",
   "/settings/preferences",
+  "/timekeeping",
+  "/settings/system",
+  "/settings/health",
+  "/settings/diagnostics",
+  "/settings/audit",
+  "/settings/ai",
+  "/settings/timekeeping",
   "/login",
 ]) {
   const response = await fetch(base + path, { redirect: "manual" });
@@ -65,14 +72,36 @@ console.log(
 );
 
 for (const path of [
+  "/api/system?section=health",
+  "/api/system?section=diagnostics",
+  "/api/system?section=audit",
+  "/api/system?section=ai",
+  "/api/applicants/not-authorized/ai",
   "/api/workspace",
+  "/api/applicants",
+  "/api/timekeeping",
+  "/api/applications",
+  "/api/system/extraction",
+  "/api/applicants/not-authorized/emails",
+  "/api/intake/sync",
+  "/api/applicants/not-authorized/resume",
   "/api/tracker",
   "/api/resumes/not-authorized",
 ]) {
   assert.equal((await fetch(base + path)).status, 401);
 }
 for (const path of [
+  "/api/system",
+  "/api/applicants/not-authorized/ai",
+  "/api/applicants/not-authorized/activity",
+  "/api/applicants/not-authorized/processing",
+  "/api/demo/view",
   "/api/intake",
+  "/api/demo",
+  "/api/timekeeping",
+  "/api/intake/sync",
+  "/api/applicants",
+  "/api/applicants/not-authorized/resume",
   "/api/communications",
   "/api/integrations/sheets",
 ]) {
@@ -87,4 +116,7 @@ for (const path of [
     401,
   );
 }
-console.log("PASS soft-launch API access boundaries");
+console.log("PASS production API access boundaries");
+
+assert.equal((await fetch(base + "/api/cron/intake")).status, 401);
+console.log("PASS background intake requires a scheduler secret");
