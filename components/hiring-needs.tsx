@@ -1,7 +1,16 @@
 "use client";
 import { useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { Plus, MapPin, CalendarDays, Pencil, UsersRound } from "lucide-react";
+import {
+  Plus,
+  MapPin,
+  CalendarDays,
+  Pencil,
+  UsersRound,
+  BriefcaseBusiness,
+  UserCheck,
+  ListFilter,
+} from "lucide-react";
 import type { HiringNeed } from "@/types";
 import { useApp } from "./provider";
 import { formatDate } from "@/lib/dates";
@@ -17,6 +26,7 @@ import {
   StatusBadge,
   LoadingSkeleton,
   EmptyState,
+  MetricCard,
 } from "./ui";
 import Link from "next/link";
 import { QualificationEditor } from "./qualification-editor";
@@ -36,6 +46,23 @@ export function HiringNeeds() {
   const rows = state.hiringNeeds.filter(
     (n) => filter === "All" || n.status === filter,
   );
+  const openNeeds = state.hiringNeeds.filter((n) => n.status === "Open");
+  const vacancies = openNeeds.reduce(
+    (total, need) => total + Math.max(0, need.slots - need.filled),
+    0,
+  );
+  const hires = state.hiringNeeds.reduce(
+    (total, need) => total + need.filled,
+    0,
+  );
+  const requested = state.hiringNeeds
+    .filter((n) => n.status !== "Closed")
+    .reduce((total, need) => total + need.slots, 0);
+  const pipeline = state.applications.filter(
+    (application) =>
+      isActive(application) &&
+      openNeeds.some((need) => need.id === application.hiringNeedId),
+  ).length;
   async function save(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const data = new FormData(e.currentTarget);
@@ -93,6 +120,40 @@ export function HiringNeeds() {
           <Plus size={17} />
           New Hiring Need
         </Button>
+      </div>
+      <div className="metrics-grid vacancy-metrics" aria-label="Vacancy report">
+        <MetricCard
+          label="Open vacancies"
+          value={vacancies}
+          note="Remaining across open hiring needs"
+          icon={<BriefcaseBusiness size={20} />}
+          href="/hiring-needs"
+          tone="featured"
+        />
+        <MetricCard
+          label="Hiring requests"
+          value={openNeeds.length}
+          note={`${requested} approved slots in active requests`}
+          icon={<ListFilter size={20} />}
+          href="/hiring-needs"
+          tone="metric-review"
+        />
+        <MetricCard
+          label="Hires recorded"
+          value={hires}
+          note="Filled slots across hiring needs"
+          icon={<UserCheck size={20} />}
+          href="/applications?status=Hired"
+          tone="hired"
+        />
+        <MetricCard
+          label="In pipeline"
+          value={pipeline}
+          note="Active applicants assigned to open needs"
+          icon={<UsersRound size={20} />}
+          href="/applications"
+          tone="metric-interviews"
+        />
       </div>
       <div className="section-heading">
         <h2>{rows.length} hiring requests</h2>

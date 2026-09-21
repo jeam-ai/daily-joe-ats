@@ -134,7 +134,7 @@ Each analysis stores encrypted source copies and results, SHA-256 fingerprints, 
 
 ## Production workspace
 
-There is no ten-applicant validation gate. Server-side transactions maintain the newest 100 active records and retain older records in Queued across creation, imports, restoration and reactivation. Deployment readiness still depends on validating configured external services; a successful local build does not certify live deployment. Demo Mode ON/OFF only controls the separate fictional dataset. HR retains final responsibility for recruitment and payroll review.
+There is no ten-applicant validation gate. Server-side transactions maintain the newest 100 active records and retain up to 500 eligible records across the active workspace and Queued intake, ordered newest first. Closed records remain in history and do not consume intake capacity. Deployment readiness still depends on validating configured external services; a successful local build does not certify live deployment. Demo Mode ON/OFF only controls the separate fictional dataset. HR retains final responsibility for recruitment and payroll review.
 
 ## Branding and themes
 

@@ -3,6 +3,7 @@ import { DatabaseSync } from "node:sqlite";
 import {
   entitySheets,
   collectionSheets,
+  databaseColumns,
   databaseTables,
   sheetEntity,
   sheetCells,
@@ -194,7 +195,10 @@ export async function sheetsTransaction<T>(
         const beforeLoad = entities(db);
         for (const row of result.rows) {
           const columns = Object.keys(row);
-          if (columns.some((c) => !/^[a-z_]+$/.test(c)))
+          const invalidColumn = columns.find(
+            (column) => !databaseColumns[table].includes(column),
+          );
+          if (invalidColumn)
             throw new SafeError(
               "Spreadsheet record structure needs review.",
               503,

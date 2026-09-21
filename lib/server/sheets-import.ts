@@ -26,6 +26,7 @@ import { applicationSchema, stateSchema, userSchema } from "@/lib/domain";
 import { seal, unseal } from "@/lib/auth/security";
 import { SafeError, config } from "./config";
 import type { User, AppState } from "@/types";
+import { INTAKE_QUEUE_LIMIT } from "@/lib/data-policy";
 type Preview = {
   id: string;
   actor: string;
@@ -244,10 +245,10 @@ export async function confirmSpreadsheetImport(user: User, id: string) {
           !a.isDemo &&
           !a.deletedAt &&
           !["Hired", "Rejected", "Withdrawn", "Talent Pool"].includes(a.status),
-      ).length > 1000
+      ).length > INTAKE_QUEUE_LIMIT
     )
       throw new SafeError(
-        "This import exceeds the 1,000 eligible application capacity.",
+        `This import exceeds the ${INTAKE_QUEUE_LIMIT} eligible application capacity.`,
       );
     await saveState(tx, parsed);
     p.used = true;

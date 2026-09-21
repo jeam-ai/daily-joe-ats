@@ -102,7 +102,7 @@ html[data-theme="dark"] .login-logo {
   background: transparent;
   padding: 0;
   border-radius: 0;
-  filter: brightness(1.5);
+  filter: none;
 }
 body {
   font-family: "Segoe UI", Arial, sans-serif;
@@ -316,8 +316,9 @@ input[type="radio"] {
   color: var(--text-primary);
 }
 .brand-logo {
-  aspect-ratio: 2129 / 739;
+  aspect-ratio: auto;
   object-fit: contain;
+  background: transparent;
 }
 .brand-careers {
   color: var(--info);

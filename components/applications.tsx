@@ -25,7 +25,12 @@ import {
 } from "./ui";
 import { isActive } from "@/lib/recruitment";
 import type { Application } from "@/types";
-import { canManage, canEdit, activeIntake } from "@/lib/data-policy";
+import {
+  canManage,
+  canEdit,
+  activeIntake,
+  INTAKE_QUEUE_LIMIT,
+} from "@/lib/data-policy";
 import { requestJson, downloadFile } from "@/lib/client-request";
 import { ApplicantEditor, DeleteApplicantDialog } from "./applicant-management";
 import { ActionMenu } from "./action-menu";
@@ -208,8 +213,9 @@ export function Applications({ talent = false }: { talent?: boolean }) {
             {state.applications.filter(activeIntake).length} active ·{" "}
             {state.applications.filter((a) => a.queueState === "Queued").length}{" "}
             queued. New applications enter the active window; older applications
-            remain available in Queued. Intake retains up to 1,000 eligible
-            applications; closed records remain in history.
+            remain available in Queued. Intake retains up to{" "}
+            {INTAKE_QUEUE_LIMIT} eligible applications; closed records remain in
+            history.
           </p>
         )}
         {!talent && (

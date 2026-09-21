@@ -5,11 +5,16 @@ import {
   intakeCapacity,
   balanceIntakeWindow,
   eligibleIntake,
+  INTAKE_QUEUE_LIMIT,
 } from "../lib/data-policy";
 import { extractionReasons } from "../lib/applicant-information";
 import { analyzeOdoo, defaultOdooRules, type OdooReports } from "../lib/odoo";
 import type { Application } from "../types";
-import { positionSheetName, positionViewFormula } from "../lib/sheets-schema";
+import {
+  databaseColumns,
+  positionSheetName,
+  positionViewFormula,
+} from "../lib/sheets-schema";
 
 test("custom position views retain distinct names and escape spreadsheet formula literals", () => {
   assert.equal(positionSheetName("Barista"), "Barista Applications");
@@ -24,9 +29,13 @@ test("custom position views retain distinct names and escape spreadsheet formula
   assert.ok(positionSheetName("X".repeat(100)).length <= 100);
   assert.ok(positionViewFormula('Role "A"').includes('Role ""A""'));
 });
-test("100 active / 1000 retained boundaries promote the next newest eligible record without deleting history", () => {
+test("Sheets storage accepts the resume checksum field while rejecting unknown record fields", () => {
+  assert.ok(databaseColumns.resumes.includes("sha256"));
+  assert.ok(!databaseColumns.resumes.includes("unexpected_field"));
+});
+test("100 active / 500 retained boundaries promote the next newest eligible record without deleting history", () => {
   const applications = Array.from(
-    { length: 1000 },
+    { length: INTAKE_QUEUE_LIMIT },
     (_, i) =>
       ({
         id: String(i),
@@ -43,12 +52,12 @@ test("100 active / 1000 retained boundaries promote the next newest eligible rec
     applications.filter((a) => a.queueState === "Active").length,
     100,
   );
-  assert.equal(applications[899].queueState, "Queued");
-  applications[999].status = "Rejected";
+  assert.equal(applications[399].queueState, "Queued");
+  applications[499].status = "Rejected";
   balanceIntakeWindow(applications);
-  assert.equal(applications[899].queueState, "Active");
+  assert.equal(applications[399].queueState, "Active");
   assert.equal(intakeCapacity(applications).available, 1);
-  assert.equal(applications.length, 1000);
+  assert.equal(applications.length, INTAKE_QUEUE_LIMIT);
 });
 test("professional name formatting preserves initials, accents and compound surnames without guessing ambiguous order", () => {
   assert.equal(formalName("JESSA D. BABILONIA"), "Jessa D. Babilonia");

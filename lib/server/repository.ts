@@ -1,5 +1,5 @@
 import { formalName } from "@/lib/names";
-import { intakeCapacity } from "@/lib/data-policy";
+import { intakeCapacity, INTAKE_QUEUE_LIMIT } from "@/lib/data-policy";
 import { defaultEmailTemplate } from "@/lib/email-templates";
 import { unresolved } from "./diagnostics";
 import type { DiagnosticIssue } from "@/types/operations";
@@ -537,10 +537,13 @@ export async function updateState(
         validateApplicationChange(b, a, confirmed);
         if (
           intakeCapacity(next.applications).retained >
-          Math.max(1000, intakeCapacity(before.applications).retained)
+          Math.max(
+            INTAKE_QUEUE_LIMIT,
+            intakeCapacity(before.applications).retained,
+          )
         )
           throw new DomainError(
-            "Intake capacity is full (1,000 eligible applications).",
+            `Intake capacity is full (${INTAKE_QUEUE_LIMIT} eligible applications).`,
           );
         if (
           changed(b.applicant, a.applicant) ||

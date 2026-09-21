@@ -123,6 +123,52 @@ export const databaseTables = [
   "locations",
   "notifications",
 ];
+// These are the only database fields the Sheets gateway may hydrate into the
+// local relational adapter. Keeping this allowlist separate from display-sheet
+// columns means a malformed workbook row cannot become SQL structure.
+export const databaseColumns: Record<string, readonly string[]> = {
+  records: ["collection", "id", "payload"],
+  audit_logs: [
+    "id",
+    "occurred_at",
+    "actor",
+    "action",
+    "application_id",
+    "payload",
+  ],
+  resumes: ["id", "sha256", "filename", "mime", "content", "extracted_text"],
+  users: ["id", "email", "role", "active", "payload"],
+  applicants: ["id", "email", "payload"],
+  hiring_needs: ["id", "payload"],
+  applications: [
+    "id",
+    "applicant_id",
+    "hiring_need_id",
+    "resume_id",
+    "gmail_message_id",
+    "gmail_thread_id",
+    "stage",
+    "status",
+    "payload",
+  ],
+  intake_window: ["application_id", "state", "received_at"],
+  interviews: ["id", "application_id", "payload"],
+  application_requirements: ["id", "application_id", "payload"],
+  screening_results: ["application_id", "payload"],
+  employment_records: ["application_id", "hired_at", "payload"],
+  application_events: [
+    "id",
+    "application_id",
+    "occurred_at",
+    "actor",
+    "payload",
+  ],
+  qualification_templates: ["id", "payload"],
+  requirements: ["id", "payload"],
+  email_templates: ["id", "payload"],
+  locations: ["id", "payload"],
+  notifications: ["id", "payload"],
+};
 export function recordKey(table: string, row: DatabaseRow) {
   if (table === "records")
     return JSON.stringify([table, row.collection, row.id]);

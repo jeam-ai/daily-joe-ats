@@ -14,7 +14,11 @@ import {
   putRecord,
 } from "@/lib/server/database";
 import { getState } from "@/lib/server/repository";
-import { intakeCapacity, canManage } from "@/lib/data-policy";
+import {
+  intakeCapacity,
+  canManage,
+  INTAKE_QUEUE_LIMIT,
+} from "@/lib/data-policy";
 import { SafeError } from "@/lib/server/config";
 import { syncSheets } from "@/lib/google/sheets";
 import type { User } from "@/types";
@@ -174,10 +178,9 @@ export async function syncIntake(
     // Continue checking new message IDs, but do not read documents or consume
     // the historical cursor while retained eligible intake is at capacity.
     if (intakeCapacity((await readTransaction(getState)).applications).full) {
-      job.pending = job.pending.slice(0, 1000);
+      job.pending = job.pending.slice(0, INTAKE_QUEUE_LIMIT);
       job.status = "capacity";
-      job.message =
-        "Intake capacity is full: 1,000 eligible applications retained, with 100 active. Gmail monitoring continues. Close an application to make room; unimported messages remain in Gmail.";
+      job.message = `Intake capacity is full: ${INTAKE_QUEUE_LIMIT} eligible applications retained, with 100 active. Gmail monitoring continues. Close an application to make room; unimported messages remain in Gmail.`;
       return;
     }
     if (!job.pending.length) {
@@ -237,8 +240,7 @@ export async function syncIntake(
     ).full;
     if (full) {
       job.status = "capacity";
-      job.message =
-        "Intake capacity reached (1,000). Remaining messages are retained in Gmail and will be retried when space becomes available.";
+      job.message = `Intake capacity reached (${INTAKE_QUEUE_LIMIT}). Remaining messages are retained in Gmail and will be retried when space becomes available.`;
       if (job.imported) await syncSheets();
       return;
     }

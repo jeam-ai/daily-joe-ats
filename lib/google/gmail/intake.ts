@@ -3,7 +3,11 @@ import { evidenceInformation } from "@/lib/applicant-information";
 import { recordIssue } from "@/lib/server/diagnostics";
 import { intakeEvidence, messageBody } from "@/lib/intake-evidence";
 import { matchHiringNeed, senderName } from "@/lib/intake-matching";
-import { activeIntake, intakeCapacity } from "@/lib/data-policy";
+import {
+  activeIntake,
+  intakeCapacity,
+  INTAKE_QUEUE_LIMIT,
+} from "@/lib/data-policy";
 import "server-only";
 import { createHash } from "node:crypto";
 import mammoth from "mammoth";
@@ -383,8 +387,7 @@ export async function confirmImport(
       if (intakeCapacity(state.applications).full) {
         issues.push({
           message: r.subject,
-          reason:
-            "Intake capacity is full (1,000 eligible applications). This message remains in Gmail and can be imported when space becomes available.",
+          reason: `Intake capacity is full (${INTAKE_QUEUE_LIMIT} eligible applications). This message remains in Gmail and can be imported when space becomes available.`,
         });
         continue;
       }

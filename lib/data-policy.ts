@@ -1,7 +1,9 @@
 import type { AppState, Application, User } from "@/types";
 
 export const ACTIVE_APPLICATION_LIMIT = 100;
-export const INTAKE_QUEUE_LIMIT = 1000;
+// Keep the active workspace fast while retaining a bounded, ordered intake
+// backlog. Closed records remain in audit history and do not consume capacity.
+export const INTAKE_QUEUE_LIMIT = 500;
 export const intakeCapacity = (applications: Application[]) => {
   const retained = applications.filter(eligibleIntake).length;
   return {

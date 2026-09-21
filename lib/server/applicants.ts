@@ -1,4 +1,8 @@
-import { activeIntake, intakeCapacity } from "@/lib/data-policy";
+import {
+  activeIntake,
+  intakeCapacity,
+  INTAKE_QUEUE_LIMIT,
+} from "@/lib/data-policy";
 import "server-only";
 import { formalName } from "@/lib/names";
 import { z } from "zod";
@@ -45,7 +49,7 @@ export async function createApplicant(input: unknown, user: User) {
     const state = await getState(tx);
     if (intakeCapacity(state.applications).full)
       throw new SafeError(
-        "Intake capacity is full (1,000 eligible applications). Complete or close an application before adding another.",
+        `Intake capacity is full (${INTAKE_QUEUE_LIMIT} eligible applications). Complete or close an application before adding another.`,
         409,
       );
     if (
