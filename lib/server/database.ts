@@ -182,7 +182,28 @@ export async function transaction<T>(
 // MVCC readers do not wait behind recruitment imports. Mutations retain the
 // shared advisory lock and commit the workspace and relational tables together.
 export function readTransaction<T>(fn: (tx: Transaction) => Promise<T>) {
-  return transaction(fn, { readOnly: true });
+  // A Sheets read can begin just before a separately committed intake or audit
+  // checkpoint changes the remote revision. It is safe to replay read-only
+  // work from a fresh snapshot; surfacing this transient race made normal
+  // Gmail status polling look like a failed sync.
+  return (async () => {
+    let lastError: unknown;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        return await transaction(fn, { readOnly: true });
+      } catch (error) {
+        lastError = error;
+        if (
+          !(error instanceof SafeError) ||
+          error.status !== 409 ||
+          error.message !==
+            "Records changed while loading. Refresh and try again."
+        )
+          throw error;
+      }
+    }
+    throw lastError;
+  })();
 }
 export async function readRecord<T>(
   tx: Transaction,
