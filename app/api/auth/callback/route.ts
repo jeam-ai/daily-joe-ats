@@ -77,6 +77,19 @@ function storageFailureCode(error: unknown) {
   return "unexpected";
 }
 
+function storageFailureDetails(error: unknown) {
+  const details: { reason: string; name?: string; code?: string } = {
+    reason: storageFailureCode(error),
+  };
+  if (!error || typeof error !== "object") return details;
+  const candidate = error as Record<string, unknown>;
+  for (const key of ["name", "code"] as const) {
+    const value = key in candidate ? String(candidate[key]) : "";
+    if (/^[A-Za-z][A-Za-z0-9_.-]{0,63}$/.test(value)) details[key] = value;
+  }
+  return details;
+}
+
 export const maxDuration = 240;
 export async function GET(request: NextRequest) {
   let origin = process.env.APP_ORIGIN || "http://localhost:3000";
@@ -149,9 +162,7 @@ export async function GET(request: NextRequest) {
     } catch (error) {
       // The identity has been verified; failures from this point are storage
       // failures, not Google authorization failures.
-      console.error("OAuth storage read failed", {
-        reason: storageFailureCode(error),
-      });
+      console.error("OAuth storage read failed", storageFailureDetails(error));
       throw new SafeError("database", 503);
     }
     if (!payload?.email_verified || !email || !registeredUser)
@@ -239,9 +250,7 @@ export async function GET(request: NextRequest) {
         recordEvent(s, email, "auth.login");
       });
     } catch (error) {
-      console.error("OAuth storage write failed", {
-        reason: storageFailureCode(error),
-      });
+      console.error("OAuth storage write failed", storageFailureDetails(error));
       throw new SafeError("database", 503);
     }
     const response = NextResponse.redirect(
