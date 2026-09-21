@@ -1,12 +1,26 @@
 import type { NextConfig } from "next";
 const config: NextConfig = {
   serverExternalPackages: [
+    "@napi-rs/canvas",
     "pdf-parse",
     "mammoth",
     "pg",
     "exceljs",
     "tesseract.js",
   ],
+  // pdf.js loads its canvas implementation through createRequire at runtime,
+  // which cannot be discovered by automatic output tracing.
+  outputFileTracingIncludes: {
+    "/api/**": [
+      "./node_modules/@napi-rs/canvas/**/*",
+      "./node_modules/@napi-rs/canvas-linux-x64-gnu/**/*",
+    ],
+  },
+  // Local operational state and temporary credentials must never be copied
+  // into a production function bundle.
+  outputFileTracingExcludes: {
+    "/*": ["./.data/**/*"],
+  },
   poweredByHeader: false,
   // OAuth callback URLs contain short-lived codes; never print incoming URLs.
   logging: { incomingRequests: false, browserToTerminal: false },

@@ -6,7 +6,6 @@ import { matchHiringNeed, senderName } from "@/lib/intake-matching";
 import { activeIntake, intakeCapacity } from "@/lib/data-policy";
 import "server-only";
 import { createHash } from "node:crypto";
-import { PDFParse } from "pdf-parse";
 import mammoth from "mammoth";
 import { accessToken } from "./service";
 import { validEmail } from "./payload";

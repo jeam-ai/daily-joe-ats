@@ -1,5 +1,4 @@
 import "server-only";
-import { PDFParse } from "pdf-parse";
 import mammoth from "mammoth";
 import { createHash } from "node:crypto";
 import type { Application } from "@/types";
@@ -75,6 +74,10 @@ export async function extractResume(bytes: Buffer, filename: string) {
   }
   try {
     if (mime === "application/pdf") {
+      // Load PDF.js only for an actual PDF operation. Keeping this out of the
+      // server module graph lets unrelated routes such as OAuth callbacks run
+      // without initializing the native canvas runtime.
+      const { PDFParse } = await import("pdf-parse");
       const parser = new PDFParse({ data: bytes });
       try {
         const result = await withDeadline(parser.getText({ first: 10 }), 20000);
