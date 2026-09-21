@@ -1,5 +1,5 @@
 import "server-only";
-import { sheetsConfiguration, validateWorkbook } from "./sheets-management";
+import type { SheetsConfiguration } from "./sheets-management";
 import {
   sheetsPrimary,
   gatewayRequest,
@@ -7,7 +7,7 @@ import {
 } from "./sheets-gateway";
 import { createRequire } from "node:module";
 import type { HealthCheck } from "@/types/operations";
-import type { User } from "@/types";
+import type { Application, User } from "@/types";
 import {
   readTransaction,
   transaction,
@@ -17,14 +17,13 @@ import {
 import { withStore } from "./store";
 import { config } from "./config";
 import { accessToken } from "@/lib/google/gmail/service";
-import { intakeStatus } from "@/lib/google/gmail/sync";
 import { aiConfigured, aiModel, geminiProvider } from "./ai-provider";
 import { aiUsage } from "./ai-assist";
 import { withDeadline } from "./deadline";
 import { writeAudit } from "./audit";
 import { reportIssue, resolveIssue, recordIssue } from "./diagnostics";
-import { getState } from "./repository";
 import { pendingFailures, clearBufferedFailure } from "./diagnostic-buffer";
+import { collectionSheets, entitySheets } from "@/lib/sheets-schema";
 
 export interface HealthSnapshot {
   checkedAt?: string;
@@ -57,6 +56,138 @@ const definitions = [
   ["timekeeping", "Timekeeping processing"],
   ["window", "Application intake window"],
 ];
+type StoredRow = Record<string, unknown>;
+type HealthStorage = {
+  records: StoredRow[];
+  applications: Application[];
+  readable: boolean;
+};
+type IntakeHealth = {
+  status: string;
+  message: string;
+  startedAt?: string;
+  lastSuccessfulAt?: string;
+  imported: number;
+  pending: string[];
+};
+type BackgroundHealth = {
+  status?: string;
+  leaseUntil?: number;
+};
+const recordValue = <T>(
+  snapshot: HealthStorage,
+  collection: string,
+  id: string,
+): T | undefined => {
+  const row = snapshot.records.find(
+    (item) => item.collection === collection && item.id === id,
+  );
+  if (!row) return;
+  try {
+    return JSON.parse(String(row.payload)) as T;
+  } catch {
+    return;
+  }
+};
+const collectionValues = <T>(snapshot: HealthStorage, collection: string) =>
+  snapshot.records
+    .filter((item) => item.collection === collection)
+    .flatMap((item) => {
+      try {
+        return [JSON.parse(String(item.payload)) as T];
+      } catch {
+        return [];
+      }
+    });
+function intakeHealth(snapshot: HealthStorage): IntakeHealth {
+  const saved = recordValue<Partial<IntakeHealth>>(snapshot, "jobs", "gmail"),
+    workspace = recordValue<{ intakePaused?: boolean }>(
+      snapshot,
+      "workspace",
+      "main",
+    ),
+    state: IntakeHealth = {
+      status: saved?.status || "idle",
+      message: saved?.message || "No Gmail synchronization has been recorded.",
+      startedAt: saved?.startedAt,
+      lastSuccessfulAt: saved?.lastSuccessfulAt,
+      imported: saved?.imported || 0,
+      pending: Array.isArray(saved?.pending) ? saved.pending : [],
+    };
+  if (workspace?.intakePaused)
+    return {
+      ...state,
+      status: "paused",
+      message: "Gmail intake is paused. Resume it in Settings when ready.",
+    };
+  return state;
+}
+async function healthStorage(): Promise<HealthStorage> {
+  if (sheetsPrimary()) {
+    const collections = [
+      "workspace",
+      "sheets_configuration",
+      "jobs",
+      "sync",
+      "email_index",
+      "extraction_jobs",
+      "timekeeping_jobs",
+      // Loading this encrypted record verifies that private Drive storage is
+      // readable without retrieving applicant document contents.
+      "secure",
+    ];
+    const result = await gatewayRequest<{
+      results: StoredRow[][];
+    }>("loadMany", {
+      queries: [
+        ...collections.map((collection) => ({
+          table: "records",
+          ...(collection === "secure"
+            ? {}
+            : {
+                tab:
+                  collectionSheets[collection] || "Settings and Configuration",
+              }),
+          collection,
+        })),
+        { table: "applications", tab: entitySheets.applications },
+        {
+          table: "resumes",
+          tab: entitySheets.resumes,
+          metadataOnly: true,
+        },
+      ],
+    });
+    const applicationRows = result.results[collections.length] || [];
+    return {
+      records: result.results.slice(0, collections.length).flat(),
+      applications: applicationRows.flatMap((row) => {
+        try {
+          return [JSON.parse(String(row.payload)) as Application];
+        } catch {
+          return [];
+        }
+      }),
+      readable: true,
+    };
+  }
+  return readTransaction(async (tx) => {
+    const records = await tx.query("SELECT collection,id,payload FROM records");
+    const applicationRows = await tx.query("SELECT payload FROM applications");
+    await tx.query("SELECT id FROM resumes LIMIT 1");
+    return {
+      records,
+      applications: applicationRows.flatMap((row) => {
+        try {
+          return [JSON.parse(String(row.payload)) as Application];
+        } catch {
+          return [];
+        }
+      }),
+      readable: true,
+    };
+  });
+}
 export async function cachedHealth(): Promise<HealthSnapshot> {
   return (
     (await readTransaction((tx) =>
@@ -82,6 +213,16 @@ export async function checkHealth() {
 async function performChecks(): Promise<HealthSnapshot> {
   // Health is observational. Document issues are recorded at ingestion/reprocessing;
   // scanning and writing every document here would turn checks into a bulk job.
+  // One batched persistence read feeds every internal service card. Starting a
+  // separate Apps Script request for each card would serialize behind the same
+  // gateway lock and make later cards time out for reasons unrelated to health.
+  const stored = withDeadline(healthStorage(), 12000).catch(() => null);
+  const primaryStatus = sheetsPrimary()
+    ? withDeadline(
+        gatewayRequest<{ verified: boolean; revision: number }>("status"),
+        10000,
+      ).catch(() => null)
+    : Promise.resolve(null);
   const check = async (
     id: string,
     work: () => Promise<Partial<HealthCheck>>,
@@ -120,7 +261,8 @@ async function performChecks(): Promise<HealthSnapshot> {
     check("database", async () => {
       try {
         if (sheetsPrimary()) {
-          const status = await gatewayRequest<{ verified: boolean }>("status");
+          const status = await primaryStatus;
+          if (!status) throw Error("Storage status unavailable");
           return {
             status: status.verified ? "Healthy" : "Attention Needed",
             detail: status.verified
@@ -212,7 +354,9 @@ async function performChecks(): Promise<HealthSnapshot> {
       };
     }),
     check("intake", async () => {
-      const j = await intakeStatus();
+      const snapshot = await stored;
+      if (!snapshot) throw Error("Storage snapshot unavailable");
+      const j = intakeHealth(snapshot);
       return {
         status: ["error", "authorization"].includes(j.status)
           ? "Attention Needed"
@@ -225,13 +369,17 @@ async function performChecks(): Promise<HealthSnapshot> {
       };
     }),
     check("sheets", async () => {
-      const configured = await sheetsConfiguration();
+      const snapshot = await stored;
+      if (!snapshot) throw Error("Storage snapshot unavailable");
+      const configured = recordValue<SheetsConfiguration>(
+        snapshot,
+        "sheets_configuration",
+        "primary",
+      );
       if (configured) {
         if (sheetsPrimary() && gatewayConfigured()) {
-          const status = await gatewayRequest<{
-            verified: boolean;
-            revision: number;
-          }>("status");
+          const status = await primaryStatus;
+          if (!status) throw Error("Storage status unavailable");
           return {
             status: status.verified ? "Healthy" : "Attention Needed",
             detail: `Google Sheets revision ${status.revision}. Schema: ${configured.schema || "Not checked"}. Migration: ${configured.migration?.status || "Not recorded"}.`,
@@ -270,8 +418,10 @@ async function performChecks(): Promise<HealthSnapshot> {
           signal: AbortSignal.timeout(10000),
         },
       );
-      const sync = await readTransaction((tx) =>
-        readRecord<{ at: string; revision: number }>(tx, "sync", "completed"),
+      const sync = recordValue<{ at: string; revision: number }>(
+        snapshot,
+        "sync",
+        "completed",
       );
       return {
         status: r.ok ? "Healthy" : "Attention Needed",
@@ -328,7 +478,8 @@ async function performChecks(): Promise<HealthSnapshot> {
       }
     }),
     check("storage", async () => {
-      await readTransaction((tx) => tx.query("SELECT id FROM resumes LIMIT 1"));
+      const snapshot = await stored;
+      if (!snapshot?.readable) throw Error("Storage snapshot unavailable");
       return {
         status: "Healthy",
         detail:
@@ -343,23 +494,21 @@ async function performChecks(): Promise<HealthSnapshot> {
             : id === "extraction"
               ? "extraction_jobs"
               : "timekeeping_jobs";
-        const jobs = await readTransaction(async (tx) =>
-          (
-            await tx.query("SELECT payload FROM records WHERE collection=$1", [
-              collection,
-            ])
-          ).map((r) => JSON.parse(String(r.payload))),
-        );
+        const snapshot = await stored;
+        if (!snapshot) throw Error("Storage snapshot unavailable");
+        const jobs = collectionValues<BackgroundHealth>(snapshot, collection);
         const failed = jobs.filter(
           (j) =>
-            ["Failed", "Unconfirmed"].includes(j.status) ||
-            (j.status === "Running" && j.leaseUntil < Date.now()),
+            ["Failed", "Unconfirmed"].includes(j.status || "") ||
+            (j.status === "Running" &&
+              typeof j.leaseUntil === "number" &&
+              j.leaseUntil < Date.now()),
         ).length;
         const queued = jobs.filter((j) =>
-          ["Queued", "Running", "Sending"].includes(j.status),
+          ["Queued", "Running", "Sending"].includes(j.status || ""),
         ).length;
         const completed = jobs.filter((j) =>
-          ["Sent", "Completed"].includes(j.status),
+          ["Sent", "Completed"].includes(j.status || ""),
         ).length;
         return {
           status: failed
@@ -379,8 +528,11 @@ async function performChecks(): Promise<HealthSnapshot> {
       }),
     ),
     check("window", async () => {
-      const state = await readTransaction(getState);
-      const real = state.applications.filter((a) => !a.isDemo && !a.deletedAt);
+      const snapshot = await stored;
+      if (!snapshot) throw Error("Storage snapshot unavailable");
+      const real = snapshot.applications.filter(
+        (a) => !a.isDemo && !a.deletedAt,
+      );
       return {
         status: "Healthy",
         detail: `${real.filter((a) => a.queueState === "Active").length} active · ${real.filter((a) => a.queueState === "Queued").length} queued · ${real.filter((a) => a.queueState === "Closed").length} closed. Active membership is ordered by received time and capped at 100.`,
@@ -389,7 +541,9 @@ async function performChecks(): Promise<HealthSnapshot> {
       };
     }),
     check("jobs", async () => {
-      const j = await intakeStatus();
+      const snapshot = await stored;
+      if (!snapshot) throw Error("Storage snapshot unavailable");
+      const j = intakeHealth(snapshot);
       return {
         status: ["error", "authorization"].includes(j.status)
           ? "Attention Needed"

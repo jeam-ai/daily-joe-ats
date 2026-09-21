@@ -6,7 +6,7 @@ Daily Joe Careers keeps its existing recruitment, Gmail, AI, Timekeeping, and au
 
 - **Google Sheets** is the operational record store when `PERSISTENCE_PROVIDER=sheets`. Logical entities have separate tabs defined in `lib/sheets-schema.ts`. Stable keys update rows instead of appending duplicates. JSON columns preserve typed values and relationships; 30,000-character chunks avoid cell truncation.
 - Position tabs, Positions, and Onboarding are formula views of canonical records. New positions create their own view. Timekeeping Exceptions is a named read model keyed by batch and employee-day, with the original encrypted analysis retained separately.
-- **Private Google Drive storage** holds encrypted resumes, source messages, pending email bodies, AI results, authorization state, and isolated demo records. They never enter production workbook cells. `TOKEN_ENCRYPTION_KEY` stays in server configuration, not Drive or Sheets.
+- **Private Google Drive storage** holds encrypted resumes, source messages, pending email bodies, AI results, authorization state, and isolated demo records. They never enter production workbook cells. For the careers account, `DJC_PRIVATE_FOLDER_ID` points to the existing `JEAM FILES` folder; gateway files must stay within that configured boundary. `TOKEN_ENCRYPTION_KEY` stays in server configuration, not Drive or Sheets.
 - **Neon is preserved.** Selecting `local` or `sheets` does not connect to it, delete it, or change its schema. For the approved fresh start, no historic Neon records are claimed to have been recovered. Applicants start empty and Gmail intake stays paused.
 - SQLite is a local development/source store and an in-memory query cache for the Sheets adapter. It is not a durable Vercel database. A remote commit must succeed before the application reports a saved change.
 
@@ -17,7 +17,7 @@ Use the official careers Google account. Create an Apps Script project containin
 In Project Settings → Script Properties:
 
 1. Set `DJC_SPREADSHEET_ID` to the workbook selected in Data Management.
-2. Run `initializeStorage` once. It verifies workbook access and creates a private folder, recording `DJC_PRIVATE_FOLDER_ID`. It does not change sharing permissions or create applicants.
+2. Set `DJC_PRIVATE_FOLDER_ID` to the approved private storage folder (`JEAM FILES` for the careers account). If it is omitted, `initializeStorage` creates a new private folder; production should use the approved existing folder instead. `initializeStorage` verifies workbook access. It does not change sharing permissions or create applicants.
 3. Have the account owner set `DJC_SECRET` to a cryptographically random value of at least 32 characters. Configure the identical value as `SHEETS_GATEWAY_SECRET` on the application server. Do not put it in source code, a workbook cell, a public variable, or chat.
 4. Deploy a Web app, executing as the careers account. The endpoint must be reachable by the application server. The owner must approve this access change. Every request requires a time-bounded HMAC; anonymous/forged requests are rejected before storage is read.
 5. Set server-only `SHEETS_GATEWAY_URL` to the deployment's `/exec` URL. Keep `PERSISTENCE_PROVIDER=local` until verification completes.
@@ -39,6 +39,8 @@ Migration creates and decrypt-verifies an encrypted source backup, validates IDs
 A persisted maintenance lease blocks source writes during migration. After successful verification the source stays frozen, preventing edits from being lost between verification and cutover. Set `PERSISTENCE_PROVIDER=sheets` and restart/redeploy. Verify sign-in, settings, and a deliberately isolated test workflow before enabling intake. **Cancel Cutover & Resume Source** is an explicit administrator recovery action; it preserves the destination and requires a new reviewed migration before a later cutover.
 
 Gateway commits use a script lock, expected revision, and idempotency receipt. Private blobs and their manifest are immutable. One atomic Sheets batch publishes operational row changes and the new manifest pointer. An interrupted upload leaves unreferenced private files, not a partially committed database. There is no automatic destructive cleanup.
+
+`manifest-*.json` files describe a committed revision. `private-batch-*.json` files appear only when protected records change and can contain several records in one batch. The manifest currently referenced by the workbook and every private batch it references are required for normal reads. Older unreferenced files are recovery artifacts from previous commits or interrupted staging. Do not remove them by filename alone; any future retention tool must first prove that a file is unreachable from the live manifest and preserve a reviewed recovery window.
 
 ## Backup and recovery
 
