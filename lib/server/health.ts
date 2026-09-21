@@ -22,13 +22,7 @@ import { aiConfigured, aiModel, geminiProvider } from "./ai-provider";
 import { aiUsage } from "./ai-assist";
 import { withDeadline } from "./deadline";
 import { writeAudit } from "./audit";
-import {
-  reportIssue,
-  resolveIssue,
-  recordIssue,
-  diagnosticHistory,
-  unresolved,
-} from "./diagnostics";
+import { reportIssue, resolveIssue, recordIssue } from "./diagnostics";
 import { getState } from "./repository";
 import { pendingFailures, clearBufferedFailure } from "./diagnostic-buffer";
 
@@ -78,22 +72,16 @@ export async function cachedHealth(): Promise<HealthSnapshot> {
   );
 }
 let inProgress: Promise<HealthSnapshot> | undefined;
-export async function checkHealth(user: User) {
+export async function checkHealth() {
   if (inProgress) return inProgress;
-  inProgress = performChecks(user).finally(() => {
+  inProgress = performChecks().finally(() => {
     inProgress = undefined;
   });
   return inProgress;
 }
-async function performChecks(user: User): Promise<HealthSnapshot> {
+async function performChecks(): Promise<HealthSnapshot> {
   // Health is observational. Document issues are recorded at ingestion/reprocessing;
   // scanning and writing every document here would turn checks into a bulk job.
-  const [known, previous] = await Promise.all([
-    withDeadline(diagnosticHistory(), 8000).catch(() => []),
-    withDeadline(cachedHealth(), 8000).catch(
-      () => ({ checks: [] }) as HealthSnapshot,
-    ),
-  ]);
   const check = async (
     id: string,
     work: () => Promise<Partial<HealthCheck>>,
@@ -103,7 +91,7 @@ async function performChecks(user: User): Promise<HealthSnapshot> {
         id,
         service: definitions.find((d) => d[0] === id)![1],
         checkedAt: new Date().toISOString(),
-        lastSuccess: previous.checks.find((c) => c.id === id)?.lastSuccess,
+        lastSuccess: undefined as string | undefined,
       };
     try {
       // Keep the complete dashboard inside the browser's request deadline. A
@@ -323,14 +311,9 @@ async function performChecks(user: User): Promise<HealthSnapshot> {
         };
       try {
         await geminiProvider().check();
-        const generationIssue = known.some(
-          (i) => i.category.startsWith("ai.") && unresolved(i),
-        );
         return {
-          status: generationIssue ? "Attention Needed" : "Healthy",
-          detail: generationIssue
-            ? `Model access is available for ${aiModel()}, but recorded AI requests have unresolved failures. System Analysis remains available. Review the Error Center; model access alone does not confirm generation is working.`
-            : `Gemini model access verified: ${aiModel()}. No application was analyzed and no generation request was made.`,
+          status: "Healthy",
+          detail: `Gemini model access verified: ${aiModel()}. No application was analyzed and no generation request was made. Recorded request failures remain available in the Error Center.`,
           href: "/settings/ai",
           action: "View AI Integration",
         };

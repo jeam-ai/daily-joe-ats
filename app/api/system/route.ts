@@ -60,7 +60,7 @@ export async function POST(request: Request) {
       );
     const body = await request.json();
     if (body.action === "check") {
-      const result = await checkHealth(user);
+      const result = await checkHealth();
       after(async () => {
         await persistHealth(result, user).catch(() => undefined);
         await settleHealthDiagnostics(result).catch(() => undefined);

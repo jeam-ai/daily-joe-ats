@@ -99,13 +99,24 @@ export function SystemHealth() {
     setBusy(true);
     setError("");
     try {
-      r.setData(
-        await requestJson("/api/system", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "check" }),
-        }),
+      const result = await requestJson<{
+        checkedAt?: string;
+        checks: HealthCheck[];
+      }>("/api/system", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "check" }),
+      });
+      const priorSuccess = new Map(
+        r.data?.checks.map((item) => [item.id, item.lastSuccess]),
       );
+      r.setData({
+        ...result,
+        checks: result.checks.map((item) => ({
+          ...item,
+          lastSuccess: item.lastSuccess || priorSuccess.get(item.id),
+        })),
+      });
       notify("System checks completed. Review each service result.");
     } catch (e) {
       setError((e as Error).message);
