@@ -209,7 +209,9 @@ export async function syncIntake(
     job.checked = preview.scanned;
     const selections = preview.rows.map((row) => ({
       messageId: row.messageId,
-      name: row.name || "Name requires review",
+      name:
+        row.name ||
+        "Applicant name was not clearly stated in the submitted application.",
       hiringNeedId:
         matchHiringNeed(row.subject, workspace.hiringNeeds)?.id || "",
     }));

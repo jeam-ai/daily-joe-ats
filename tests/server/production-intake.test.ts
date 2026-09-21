@@ -213,7 +213,10 @@ test("automatic intake resumes beyond ten, maintains latest 100 with an older qu
   }
 });
 test("matching needs evidence of both position and location; sender addresses are never fabricated names", () => {
-  assert.equal(senderName("unknown@example.invalid"), "Name requires review");
+  assert.equal(
+    senderName("unknown@example.invalid"),
+    "Applicant name was not clearly stated in the submitted application.",
+  );
   const need = {
     id: "n",
     position: "Barista",

@@ -1,7 +1,10 @@
 import type { Application } from "@/types";
 import type { intakeEvidence } from "./intake-evidence";
 export const missingInformation = (value?: string) =>
-  !value?.trim() || /requires review|not verified|^unknown$/i.test(value);
+  !value?.trim() ||
+  /requires review|not verified|not clearly stated|not confirmed from submitted information|^unknown$/i.test(
+    value,
+  );
 export function evidenceInformation(
   e: ReturnType<typeof intakeEvidence>,
 ): NonNullable<Application["information"]> {

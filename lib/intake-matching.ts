@@ -22,5 +22,5 @@ export function senderName(from: string) {
     : "";
   return display && display.length <= 200 && !display.includes("@")
     ? display
-    : "Name requires review";
+    : "Applicant name was not clearly stated in the submitted application.";
 }

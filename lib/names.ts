@@ -2,7 +2,8 @@
 // a comma or an explicit source order identifies the surname unambiguously.
 export function formalName(value: string, surnameFirst = false) {
   let name = value.trim().replace(/\s+/g, " ");
-  if (/requires review|not stated|not verified/i.test(name)) return name;
+  if (/requires review|not stated|not clearly stated|not verified/i.test(name))
+    return name;
   if (name.includes(",")) {
     const [last, ...given] = name.split(",");
     name = `${given.join(" ").trim()} ${last.trim()}`;

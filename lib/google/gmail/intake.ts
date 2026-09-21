@@ -378,7 +378,9 @@ export async function confirmImport(
         });
         continue;
       }
-      const position = r.appliedPosition || "Position requires review";
+      const position =
+        r.appliedPosition ||
+        "Applied position was not clearly stated in the submitted application.";
       if (intakeCapacity(state.applications).full) {
         issues.push({
           message: r.subject,
@@ -387,7 +389,9 @@ export async function confirmImport(
         });
         continue;
       }
-      const location = r.appliedLocation || "Location requires review";
+      const location =
+        r.appliedLocation ||
+        "Preferred work location was not clearly stated in the submitted application.";
       const rules = need?.criteria || [];
       const now = new Date().toISOString();
       const sequence =

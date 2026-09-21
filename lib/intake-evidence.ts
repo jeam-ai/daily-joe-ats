@@ -178,11 +178,15 @@ export function intakeEvidence(input: {
   const name = normalizeName(resumeName || submittedName || displayName);
   if (resumeName) evidence.name = `Resume: ${resumeName}`;
   else if (submittedName) evidence.name = `Email body: ${submittedName}`;
-  else if (name !== "Name requires review")
+  else if (
+    name !==
+    "Applicant name was not clearly stated in the submitted application."
+  )
     evidence.name = "Gmail sender display name";
   if (
     resumeName &&
-    displayName !== "Name requires review" &&
+    displayName !==
+      "Applicant name was not clearly stated in the submitted application." &&
     normalizeName(resumeName).toLowerCase() !== displayName.toLowerCase()
   )
     warnings.push(
@@ -245,11 +249,11 @@ export function intakeEvidence(input: {
     position:
       detectedRoles.size === 1
         ? [...detectedRoles][0]
-        : "Position requires review",
+        : "Applied position was not clearly stated in the submitted application.",
     location:
       detectedLocations.size === 1
         ? [...detectedLocations][0]
-        : "Location requires review",
+        : "Preferred work location was not clearly stated in the submitted application.",
     evidence,
     sources: provenance,
     nameUncertain:

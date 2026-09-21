@@ -105,7 +105,9 @@ export async function createApplicant(input: unknown, user: User) {
         lastName: values.lastName,
         email: values.email.toLowerCase(),
         phone: values.phone,
-        location: values.residence || "Residence requires review",
+        location:
+          values.residence ||
+          "Residence not confirmed from submitted information.",
         education: values.education,
         availability: values.availability,
         experienceDetails: values.experienceDetails,

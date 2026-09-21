@@ -31,9 +31,18 @@ test("residence never becomes preferred work location and missing evidence remai
     body: "My home address is Naga City.",
     resume: "Barista at Example Coffee\nAddress: Santa Rosa, Laguna",
   });
-  assert.equal(r.location, "Location requires review");
-  assert.equal(r.position, "Position requires review");
-  assert.equal(r.name, "Name requires review");
+  assert.equal(
+    r.location,
+    "Preferred work location was not clearly stated in the submitted application.",
+  );
+  assert.equal(
+    r.position,
+    "Applied position was not clearly stated in the submitted application.",
+  );
+  assert.equal(
+    r.name,
+    "Applicant name was not clearly stated in the submitted application.",
+  );
 });
 test("explicit preferences and conflicting submitted branches remain auditable", () => {
   const r = intakeEvidence({
@@ -46,6 +55,9 @@ test("explicit preferences and conflicting submitted branches remain auditable",
     subject: "Barista Naga City",
     body: "My preferred branch is Santa Rosa, Laguna.",
   });
-  assert.equal(conflict.location, "Location requires review");
+  assert.equal(
+    conflict.location,
+    "Preferred work location was not clearly stated in the submitted application.",
+  );
   assert.equal(conflict.warnings.length, 1);
 });
