@@ -4,6 +4,7 @@ import { requireOrigin, requireUser } from "@/lib/auth/session";
 import {
   cachedHealth,
   checkHealth,
+  persistHealth,
   aiIntegration,
   settleHealthDiagnostics,
 } from "@/lib/server/health";
@@ -60,7 +61,10 @@ export async function POST(request: Request) {
     const body = await request.json();
     if (body.action === "check") {
       const result = await checkHealth(user);
-      after(() => settleHealthDiagnostics(result));
+      after(async () => {
+        await persistHealth(result, user).catch(() => undefined);
+        await settleHealthDiagnostics(result).catch(() => undefined);
+      });
       return Response.json(result);
     }
     if (body.action === "test-applicant") {

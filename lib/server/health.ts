@@ -106,7 +106,10 @@ async function performChecks(user: User): Promise<HealthSnapshot> {
         lastSuccess: previous.checks.find((c) => c.id === id)?.lastSuccess,
       };
     try {
-      const result = await withDeadline(work(), 15000);
+      // Keep the complete dashboard inside the browser's request deadline. A
+      // slow provider is reported as Not Verified without holding every other
+      // independent service check behind it.
+      const result = await withDeadline(work(), 10000);
       return {
         ...base,
         status: "Not Verified",
@@ -416,13 +419,19 @@ async function performChecks(user: User): Promise<HealthSnapshot> {
       };
     }),
   ]);
-  const snapshot = { checkedAt: new Date().toISOString(), checks };
+  return { checkedAt: new Date().toISOString(), checks };
+}
+
+// Persisting a health snapshot requires a remote Sheets commit in production.
+// It is audit work, not part of the interactive check result, so the route
+// schedules it with Next.js `after()` and returns the verified results first.
+export async function persistHealth(snapshot: HealthSnapshot, user: User) {
   await withDeadline(
     transaction(
       async (tx) => {
         await putRecord(tx, "health", "latest", snapshot);
         await writeAudit(tx, user.email, "health.checked", undefined, {
-          services: checks.map((c) => ({
+          services: snapshot.checks.map((c) => ({
             service: c.service,
             status: c.status,
           })),
@@ -432,7 +441,6 @@ async function performChecks(user: User): Promise<HealthSnapshot> {
     ),
     10000,
   );
-  return snapshot;
 }
 // Diagnostic persistence runs after the health response. It cannot hold the
 // health UI behind an unrelated recruitment transaction.
