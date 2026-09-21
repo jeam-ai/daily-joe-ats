@@ -49,6 +49,34 @@ function callbackFailure(error: unknown) {
   return providerFailure(error);
 }
 
+function storageFailureCode(error: unknown) {
+  if (error instanceof SafeError) {
+    if (error.message.includes("authorization needs renewal"))
+      return "authorization_renewal";
+    if (error.message.includes("authorization could not be verified"))
+      return "authorization_response";
+    if (error.message.includes("temporarily unavailable"))
+      return "gateway_unavailable";
+    if (error.message.includes("gateway could not be verified"))
+      return "gateway_response";
+    if (
+      error.message.includes("authenticated transaction gateway") ||
+      error.message.includes("gateway address is invalid")
+    )
+      return "gateway_configuration";
+    if (error.message.includes("could not complete this operation"))
+      return "gateway_operation";
+    return "storage_safe_error";
+  }
+  if (
+    error instanceof DOMException &&
+    ["AbortError", "TimeoutError"].includes(error.name)
+  )
+    return "timeout";
+  if (error instanceof TypeError) return "network";
+  return "unexpected";
+}
+
 export const maxDuration = 240;
 export async function GET(request: NextRequest) {
   let origin = process.env.APP_ORIGIN || "http://localhost:3000";
@@ -118,9 +146,12 @@ export async function GET(request: NextRequest) {
     let registeredUser;
     try {
       registeredUser = email ? await findUser(email) : undefined;
-    } catch {
+    } catch (error) {
       // The identity has been verified; failures from this point are storage
       // failures, not Google authorization failures.
+      console.error("OAuth storage read failed", {
+        reason: storageFailureCode(error),
+      });
       throw new SafeError("database", 503);
     }
     if (!payload?.email_verified || !email || !registeredUser)
@@ -207,7 +238,10 @@ export async function GET(request: NextRequest) {
         }
         recordEvent(s, email, "auth.login");
       });
-    } catch {
+    } catch (error) {
+      console.error("OAuth storage write failed", {
+        reason: storageFailureCode(error),
+      });
       throw new SafeError("database", 503);
     }
     const response = NextResponse.redirect(
