@@ -224,19 +224,30 @@ export function readTransaction<T>(fn: (tx: Transaction) => Promise<T>) {
         return await transaction(fn, { readOnly: true });
       } catch (error) {
         lastError = error;
-        if (
-          !(error instanceof SafeError) ||
-          error.status !== 409 ||
-          error.message !==
-            "Records changed while loading. Refresh and try again."
-        )
+        const revisionChanged =
+            error instanceof SafeError &&
+            error.status === 409 &&
+            error.message ===
+              "Records changed while loading. Refresh and try again.",
+          temporarySheetsRead =
+            sheetsPrimary() &&
+            error instanceof SafeError &&
+            error.status === 503 &&
+            /temporarily unavailable|could not complete this operation/.test(
+              error.message,
+            );
+        if (!revisionChanged && !temporarySheetsRead)
           throw error;
+        if (temporarySheetsRead && attempt >= 2) throw error;
         // Intake checkpoints can create a short burst of revisions. A small
         // bounded backoff lets the reader hydrate one coherent revision while
         // keeping every browser request within its deadline.
         if (attempt < 5)
           await new Promise((resolve) =>
-            setTimeout(resolve, 50 * 2 ** attempt),
+            setTimeout(
+              resolve,
+              (temporarySheetsRead ? 500 : 50) * 2 ** attempt,
+            ),
           );
       }
     }
