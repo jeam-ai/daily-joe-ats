@@ -65,7 +65,8 @@ test("Sheets primary persists transactions, private credentials, rollback, stale
   const files = new Map<string, string>();
   const fileReads = new Map<string, number>();
   let locks = 0,
-    fail = false;
+    fail = false,
+    loseCommitResponse = false;
   const props = {
     DJC_SECRET: process.env.SHEETS_GATEWAY_SECRET,
     DJC_SPREADSHEET_ID: "fixture",
@@ -193,11 +194,23 @@ test("Sheets primary persists transactions, private credentials, rollback, stale
     context,
   );
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = async (_url, init) =>
-    new Response(
-      context.doPost({ postData: { contents: String(init?.body) } }),
-      { headers: { "Content-Type": "application/json" } },
-    );
+  globalThis.fetch = async (_url, init) => {
+    const body = String(init?.body),
+      response = context.doPost({ postData: { contents: body } });
+    // The remote operation committed, but the caller lost the HTTPS response.
+    // The storage adapter must retry the same commit receipt rather than
+    // emitting a second logical update.
+    if (
+      loseCommitResponse &&
+      JSON.parse(JSON.parse(body).payload).operation === "commit"
+    ) {
+      loseCommitResponse = false;
+      throw Error("simulated response loss after commit");
+    }
+    return new Response(response, {
+      headers: { "Content-Type": "application/json" },
+    });
+  };
   try {
     assert.equal(
       (await gatewayRequest<{ verified: boolean }>("status")).verified,
@@ -310,6 +323,14 @@ test("Sheets primary persists transactions, private credentials, rollback, stale
     assert.deepEqual(
       await readTransaction((tx) => readRecord(tx, "config", "one")),
       { value: 1 },
+    );
+    loseCommitResponse = true;
+    await transaction((tx) =>
+      putRecord(tx, "config", "receipt-retry", { value: "confirmed" }),
+    );
+    assert.deepEqual(
+      await readTransaction((tx) => readRecord(tx, "config", "receipt-retry")),
+      { value: "confirmed" },
     );
     const status = await gatewayRequest<{ revision: number }>("status");
     const entity = sheetEntity("records", {
