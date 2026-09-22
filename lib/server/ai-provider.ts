@@ -143,7 +143,11 @@ export function classifyAiError(error: unknown): AiProviderError {
   if (
     e.name === "TimeoutError" ||
     e.name === "AbortError" ||
-    /(?:timed?\s*out|deadline|abort)/i.test(message) ||
+    Number(e.status) === 499 ||
+    Number(e.status) === 504 ||
+    Number(e.code) === 499 ||
+    Number(e.code) === 504 ||
+    /(?:timed?\s*out|deadline|abort|cancelled)/i.test(message) ||
     (error instanceof SafeError && error.status === 504)
   )
     return new AiProviderError("timeout", 504);

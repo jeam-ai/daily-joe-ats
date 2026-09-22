@@ -10,7 +10,12 @@ import {
 } from "@/lib/applicant-information";
 import { canEdit } from "@/lib/data-policy";
 import { seal, unseal } from "@/lib/auth/security";
-import { aiConfigured, aiModel, classifyAiError } from "./ai-provider";
+import {
+  AiProviderError,
+  aiConfigured,
+  aiModel,
+  classifyAiError,
+} from "./ai-provider";
 import { config, SafeError } from "./config";
 import {
   readTransaction,
@@ -187,14 +192,9 @@ export const extractionProvider = (): ExtractionProvider => ({
       try {
         return validateExtraction(response.text || "", sources);
       } catch {
-        throw { code: "invalid_response" };
+        throw new AiProviderError("invalid_response", 502);
       }
     } catch (e) {
-      if ((e as { code?: string }).code === "invalid_response")
-        throw new SafeError(
-          "AI extraction could not verify the returned evidence.",
-          502,
-        );
       throw classifyAiError(e);
     }
   },

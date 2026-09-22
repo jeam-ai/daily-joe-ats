@@ -263,6 +263,14 @@ test("structured responses reject malformed, incomplete, invented quotes and dec
       .code,
     "timeout",
   );
+  assert.equal(
+    classifyAiError({ status: 499, message: "operation cancelled" }).code,
+    "timeout",
+  );
+  assert.equal(
+    classifyAiError({ status: 504, message: "deadline exceeded" }).code,
+    "timeout",
+  );
   assert.doesNotMatch(
     classifyAiError(Error("secret token")).message,
     /secret token/,
