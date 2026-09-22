@@ -16,7 +16,7 @@ import { validEmail } from "./payload";
 import { config, SafeError } from "@/lib/server/config";
 import { withStore } from "@/lib/server/store";
 import {
-  transaction,
+  retryableTransaction,
   readTransaction,
   putRecord,
   readRecord,
@@ -295,7 +295,7 @@ export async function previewImport(
     }
   }
   const id = crypto.randomUUID();
-  await transaction(async (tx) => {
+  await retryableTransaction(async (tx) => {
     await putRecord(
       tx,
       "import_previews",
@@ -327,7 +327,7 @@ export async function confirmImport(
   if (!confirmed) throw new SafeError("Confirm the import first.");
   if (!["Admin", "Talent Acquisition", "HR Generalist"].includes(user.role))
     throw new SafeError("Recruitment manager access required.", 403);
-  return transaction(async (tx) => {
+  return retryableTransaction(async (tx) => {
     const encrypted = await readRecord<string>(tx, "import_previews", id);
     if (!encrypted)
       throw new SafeError("Preview expired. Preview Gmail again.", 409);

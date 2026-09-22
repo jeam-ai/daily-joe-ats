@@ -179,6 +179,37 @@ export async function transaction<T>(
     throw error;
   }
 }
+function retryableSheetsConflict(error: unknown) {
+  return (
+    sheetsPrimary() &&
+    error instanceof SafeError &&
+    error.status === 409 &&
+    /Records changed while loading|Another update was saved first/.test(
+      error.message,
+    )
+  );
+}
+// Only use this for callbacks containing database reads/writes and no external
+// side effects. A failed optimistic commit publishes nothing, so replaying the
+// callback from a fresh Sheets revision is safe and prevents background jobs
+// from stalling behind another independent writer.
+export async function retryableTransaction<T>(
+  fn: (tx: Transaction) => Promise<T>,
+  attempts = 5,
+) {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    try {
+      return await transaction(fn);
+    } catch (error) {
+      lastError = error;
+      if (!retryableSheetsConflict(error) || attempt === attempts - 1)
+        throw error;
+      await new Promise((resolve) => setTimeout(resolve, 75 * 2 ** attempt));
+    }
+  }
+  throw lastError;
+}
 // MVCC readers do not wait behind recruitment imports. Mutations retain the
 // shared advisory lock and commit the workspace and relational tables together.
 export function readTransaction<T>(fn: (tx: Transaction) => Promise<T>) {

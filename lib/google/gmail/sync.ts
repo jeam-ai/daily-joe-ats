@@ -8,7 +8,7 @@ import "server-only";
 import { previewImport, confirmImport, official, gmail } from "./intake";
 import { accessToken } from "./service";
 import {
-  transaction,
+  retryableTransaction,
   readTransaction,
   readRecord,
   putRecord,
@@ -103,7 +103,7 @@ export async function syncIntake(
   if (!actor || !canManage(actor)) return;
   const runId = crypto.randomUUID(),
     now = Date.now();
-  const claimed = await transaction(async (tx) => {
+  const claimed = await retryableTransaction(async (tx) => {
     const job = (await readRecord<IntakeSync>(tx, "jobs", "gmail")) || empty();
     if (job.leaseUntil && job.leaseUntil > now) return null;
     if (!force && (job.consecutiveFailures || 0) >= 3) return null;
@@ -127,7 +127,7 @@ export async function syncIntake(
   if (!claimed) return;
   const job = claimed;
   async function checkpoint() {
-    await transaction(async (tx) => {
+    await retryableTransaction(async (tx) => {
       const current = await readRecord<IntakeSync>(tx, "jobs", "gmail");
       if (current?.runId !== runId)
         throw new SafeError(

@@ -11,6 +11,7 @@ import {
 } from "../../lib/sheets-schema";
 import {
   transaction,
+  retryableTransaction,
   readTransaction,
   putRecord,
   readRecord,
@@ -267,6 +268,27 @@ test("Sheets primary persists transactions, private credentials, rollback, stale
       fileReads.get(batchId),
       1,
       "one Drive read serves all records in the private batch",
+    );
+    let injectConflict = true;
+    await retryableTransaction(async (tx) => {
+      await putRecord(tx, "config", "retry-safe", { value: "preserved" });
+      if (!injectConflict) return;
+      injectConflict = false;
+      const status = await gatewayRequest<{ revision: number }>("status");
+      const concurrent = sheetEntity("records", {
+        collection: "config",
+        id: "concurrent",
+        payload: '{"value":"other writer"}',
+      });
+      await gatewayRequest("commit", {
+        expectedRevision: status.revision,
+        commitId: "concurrent-write",
+        changes: [{ ...concurrent, cells: sheetCells(concurrent) }],
+      });
+    });
+    assert.deepEqual(
+      await readTransaction((tx) => readRecord(tx, "config", "retry-safe")),
+      { value: "preserved" },
     );
     await assert.rejects(
       transaction(async (tx) => {
