@@ -40,6 +40,33 @@ export const workspaceHydrationTables = [
   "notifications",
   "users",
 ] as const;
+// A cold serverless instance may execute a narrow query (for example a count
+// from Applications) before the workspace projection is read. Load every
+// relational parent first so the local SQLite adapter keeps foreign-key
+// validation enabled while hydrating Sheets rows.
+export const tableHydrationDependencies: Record<string, readonly string[]> = {
+  applications: ["applicants", "resumes", "hiring_needs"],
+  intake_window: ["applications"],
+  interviews: ["applications"],
+  application_requirements: ["applications"],
+  screening_results: ["applications"],
+  employment_records: ["applications"],
+  application_events: ["applications"],
+};
+function hydrationPrerequisites(table: string) {
+  const ordered: string[] = [],
+    seen = new Set<string>();
+  const visit = (candidate: string) => {
+    for (const dependency of tableHydrationDependencies[candidate] || []) {
+      if (seen.has(dependency)) continue;
+      visit(dependency);
+      seen.add(dependency);
+      ordered.push(dependency);
+    }
+  };
+  visit(table);
+  return ordered;
+}
 type Cache = {
   db: DatabaseSync;
   revision: number;
@@ -164,6 +191,47 @@ export async function sheetsTransaction<T>(
           )
         )
           return;
+        const prerequisites = hydrationPrerequisites(table).filter(
+          (dependency) =>
+            !current.loaded.has(
+              JSON.stringify([dependency, "", "", dependency === "resumes"]),
+            ),
+        );
+        if (prerequisites.length && !prefetched) {
+          const pending = [...prerequisites, table],
+            batch = await gatewayRequest<{
+              revision: number;
+              results: DatabaseRow[][];
+            }>("loadMany", {
+              queries: pending.map((candidate) => ({
+                table: candidate,
+                tab: tabFor(candidate),
+                metadataOnly: candidate === "resumes",
+              })),
+            });
+          for (let i = 0; i < prerequisites.length; i++)
+            await load(
+              prerequisites[i],
+              undefined,
+              undefined,
+              prerequisites[i] === "resumes",
+              { revision: batch.revision, rows: batch.results[i] },
+            );
+          return load(table, collection, id, metadataOnly, {
+            revision: batch.revision,
+            rows: batch.results[pending.length - 1],
+          });
+        }
+        // Prefetched workspace batches are already dependency ordered. This
+        // fallback preserves correctness if a future caller supplies a child
+        // table alone.
+        for (const dependency of prerequisites)
+          await load(
+            dependency,
+            undefined,
+            undefined,
+            dependency === "resumes",
+          );
         const result =
           prefetched ||
           (await gatewayRequest<{

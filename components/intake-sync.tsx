@@ -15,6 +15,20 @@ export function IntakeSyncStatus() {
     last = useRef("");
   const enabled = dataset === "real" && canManage(state?.currentUser);
   const paused = !!state?.intakePaused;
+  const working =
+    busy || ["checking", "processing"].includes(job?.status || "");
+  const progress = busy
+    ? 10
+    : job?.status === "checking"
+      ? 30
+      : job?.status === "processing"
+        ? 70
+        : 100;
+  const progressLabel = busy
+    ? "Starting secure sync"
+    : job?.status === "checking"
+      ? "Checking Gmail for eligible applications"
+      : "Reading and validating the current application batch";
   async function check() {
     const value = await requestJson<IntakeSync>("/api/intake/sync");
     setJob(value);
@@ -83,6 +97,17 @@ export function IntakeSyncStatus() {
             ? "Paused — applications will not be imported until intake is resumed."
             : error || job?.message || "Checking sync status…"}
         </span>
+        {working && (
+          <div className="intake-progress-wrap">
+            <small>{progressLabel}</small>
+            <progress
+              max={100}
+              value={progress}
+              aria-label="Gmail application sync progress"
+              aria-valuetext={progressLabel}
+            />
+          </div>
+        )}
         {job?.completedAt && (
           <small>
             Last check: {formatDate(job.completedAt, state?.preferences, true)}

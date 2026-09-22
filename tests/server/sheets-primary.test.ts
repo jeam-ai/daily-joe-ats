@@ -20,7 +20,10 @@ import {
   persistenceMaintenance,
   assertSourceWritable,
 } from "../../lib/server/persistence-maintenance";
-import { workspaceHydrationTables } from "../../lib/server/sheets-database";
+import {
+  tableHydrationDependencies,
+  workspaceHydrationTables,
+} from "../../lib/server/sheets-database";
 
 test("Sheets workspace hydration loads application parents before child records", () => {
   const parent = (table: string) =>
@@ -28,6 +31,20 @@ test("Sheets workspace hydration loads application parents before child records"
   assert.ok(parent("applicants") < parent("applications"));
   assert.ok(parent("resumes") < parent("applications"));
   assert.ok(parent("hiring_needs") < parent("applications"));
+  assert.deepEqual(tableHydrationDependencies.applications, [
+    "applicants",
+    "resumes",
+    "hiring_needs",
+  ]);
+  for (const child of [
+    "intake_window",
+    "interviews",
+    "application_requirements",
+    "screening_results",
+    "employment_records",
+    "application_events",
+  ])
+    assert.deepEqual(tableHydrationDependencies[child], ["applications"]);
 });
 
 test("Sheets primary persists transactions, private credentials, rollback, stale revisions and idempotent commits through the actual gateway", async () => {

@@ -1107,6 +1107,15 @@ fieldset {
   color: var(--text-muted);
   margin-top: 3px;
 }
+.intake-progress-wrap {
+  width: min(520px, 62vw);
+  margin-top: 9px;
+}
+.intake-progress-wrap progress {
+  display: block;
+  height: 7px;
+  margin-top: 6px;
+}
 .intake-sync details {
   max-width: 650px;
 }

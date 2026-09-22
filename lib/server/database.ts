@@ -188,7 +188,7 @@ export function readTransaction<T>(fn: (tx: Transaction) => Promise<T>) {
   // Gmail status polling look like a failed sync.
   return (async () => {
     let lastError: unknown;
-    for (let attempt = 0; attempt < 3; attempt++) {
+    for (let attempt = 0; attempt < 6; attempt++) {
       try {
         return await transaction(fn, { readOnly: true });
       } catch (error) {
@@ -200,6 +200,13 @@ export function readTransaction<T>(fn: (tx: Transaction) => Promise<T>) {
             "Records changed while loading. Refresh and try again."
         )
           throw error;
+        // Intake checkpoints can create a short burst of revisions. A small
+        // bounded backoff lets the reader hydrate one coherent revision while
+        // keeping every browser request within its deadline.
+        if (attempt < 5)
+          await new Promise((resolve) =>
+            setTimeout(resolve, 50 * 2 ** attempt),
+          );
       }
     }
     throw lastError;
