@@ -26,6 +26,7 @@ import {
 import { AppProvider, useApp } from "./provider";
 import { Avatar, Badge, Button } from "./ui";
 import Image from "next/image";
+import { RouteFeedback } from "./route-feedback";
 const navigation = [
   ["Home", "/", House],
   ["Applications", "/applications", UsersRound],
@@ -235,6 +236,7 @@ function Frame({
             </Link>
           </div>
         </header>
+        <RouteFeedback />
         <main id="main-content">
           <DemoControls banner />
           {!path.startsWith("/timekeeping") && <IntakeSyncStatus />}

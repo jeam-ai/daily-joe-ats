@@ -1,5 +1,7 @@
 "use client";
 import Image from "next/image";
+import Link from "next/link";
+import { useState } from "react";
 
 export default function ErrorPage({
   reset,
@@ -7,6 +9,12 @@ export default function ErrorPage({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
+  const [retrying, setRetrying] = useState(false);
+  const retry = () => {
+    setRetrying(true);
+    window.setTimeout(() => setRetrying(false), 12000);
+    reset();
+  };
   return (
     <main className="status-page">
       <div className="status-card">
@@ -20,15 +28,28 @@ export default function ErrorPage({
           />
           <span>CAREERS ATS</span>
         </div>
-        <p className="eyebrow">Workspace unavailable</p>
-        <h1>We hit a small snag.</h1>
+        <p className="eyebrow">Workspace loading issue</p>
+        <h1>We couldn&apos;t load Daily Joe Careers right now.</h1>
         <p className="status-copy">
-          Your records are safe. Refresh this workspace and we&apos;ll try
-          again.
+          The latest workspace data could not be retrieved. Your saved records
+          have not been changed.
         </p>
-        <button className="button primary" onClick={() => reset()}>
-          Try again
-        </button>
+        <p className="status-help">
+          Try loading the workspace again. If this continues, open System Health
+          after signing in to review the storage connection.
+        </p>
+        <div className="status-actions">
+          <button
+            className="button primary"
+            onClick={retry}
+            disabled={retrying}
+          >
+            {retrying ? "Loading workspace…" : "Load workspace again"}
+          </button>
+          <Link className="button secondary" href="/applications">
+            Go to Applications
+          </Link>
+        </div>
       </div>
     </main>
   );

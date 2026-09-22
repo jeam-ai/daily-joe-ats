@@ -39,6 +39,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       tone: "success" | "error" | "info";
     } | null>(null),
     [error, setError] = useState(""),
+    [loading, setLoading] = useState(true),
     [saving, setSaving] = useState(false);
   const ref = useRef<AppState | null>(null);
   const [dataset, setDataset] = useState<"real" | "demo">("real");
@@ -89,6 +90,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   );
   const refresh = useCallback(async () => {
     const request = ++generation.current;
+    setLoading(true);
     try {
       const r = await clientFetch("/api/workspace", { cache: "no-store" });
       const data = await r.json();
@@ -99,6 +101,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       setError("");
     } catch (e) {
       if (request === generation.current) setError((e as Error).message);
+    } finally {
+      if (request === generation.current) setLoading(false);
     }
   }, []);
   useLayoutEffect(() => {
@@ -191,6 +195,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       {error && (
         <div className="error-banner" role="alert">
           {error} <Button onClick={() => void refresh()}>Retry</Button>
+        </div>
+      )}
+      {loading && !state && (
+        <div className="workspace-request-status" role="status">
+          <span className="workspace-request-spinner" aria-hidden="true" />
+          <span>
+            <strong>Loading your workspace…</strong>
+            <small>Retrieving the latest saved records.</small>
+          </span>
         </div>
       )}
       {(!error || state) && children}

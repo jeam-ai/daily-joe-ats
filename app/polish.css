@@ -332,6 +332,127 @@ input[type="radio"] {
 .status-brand span {
   color: var(--info);
 }
+.route-feedback {
+  position: relative;
+  z-index: 25;
+  height: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+.route-feedback-card {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-height: 0;
+  padding: 0 36px;
+  background: var(--surface-elevated);
+  border-bottom: 1px solid transparent;
+  color: var(--text-primary);
+  opacity: 0;
+  transform: translateY(-8px);
+  transition:
+    opacity 160ms ease,
+    transform 160ms ease,
+    padding 160ms ease;
+  box-shadow: 0 6px 16px #19375412;
+}
+.route-feedback.is-visible .route-feedback-card {
+  min-height: 58px;
+  padding-top: 10px;
+  padding-bottom: 11px;
+  border-bottom-color: var(--border);
+  opacity: 1;
+  transform: translateY(0);
+}
+.route-feedback-card > span:last-child {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+}
+.route-feedback-card strong {
+  font-weight: 600;
+}
+.route-feedback-card small {
+  color: var(--text-secondary);
+}
+.route-feedback-bar {
+  display: block;
+  height: 3px;
+  overflow: hidden;
+  border-radius: 99px;
+  background: var(--surface-subtle);
+}
+.route-feedback-bar i {
+  display: block;
+  width: 38%;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  animation: route-progress 1.15s ease-in-out infinite;
+}
+.workspace-request-status {
+  position: fixed;
+  z-index: 45;
+  right: 22px;
+  bottom: 22px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: min(370px, calc(100vw - 44px));
+  padding: 12px 14px;
+  background: var(--surface-elevated);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow-elevated);
+  font-size: 12px;
+}
+.workspace-request-status strong,
+.workspace-request-status small {
+  display: block;
+}
+.workspace-request-status small {
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+.workspace-request-spinner {
+  width: 17px;
+  height: 17px;
+  flex: 0 0 auto;
+  border: 2px solid var(--info-bg);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: workspace-spin 800ms linear infinite;
+}
+.status-help {
+  margin-top: 10px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+.status-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 22px;
+}
+@keyframes route-progress {
+  from {
+    transform: translateX(-110%);
+  }
+  to {
+    transform: translateX(300%);
+  }
+}
+@keyframes workspace-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
 .nav-count {
   background: var(--info-bg);
   color: var(--info);
@@ -894,6 +1015,15 @@ summary {
   }
 }
 @media (max-width: 700px) {
+  .route-feedback-card {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+  .route-feedback-card > span:last-child {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 0;
+  }
   .mobile-backdrop {
     display: block;
     position: fixed;
