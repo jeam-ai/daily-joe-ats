@@ -108,10 +108,10 @@ export async function gatewayRequest<T>(
             }
           : { payload, signature },
       ),
-      // Bulk applicant commits can legitimately exceed the former 45-second
-      // client deadline inside Apps Script. Keep this bounded below the route
-      // duration while allowing the atomic gateway operation to finish.
-      signal: AbortSignal.timeout(90000),
+      // Reads should stay responsive. Atomic commits may include a private
+      // document batch, so allow a bounded confirmation window below the
+      // server route deadline; same-key receipt retry handles a lost response.
+      signal: AbortSignal.timeout(operation === "commit" ? 120000 : 30000),
     });
   } catch {
     throw new SafeError(

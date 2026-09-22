@@ -470,16 +470,44 @@ export async function sheetsTransaction<T>(
               changes.push({ ...e, deleted: true, cells: [] });
           if (changes.length) {
             const commitId = crypto.randomUUID();
+            const commit = {
+              expectedRevision: current.revision,
+              commitId,
+              changes,
+            };
             let committed: { revision: number };
             try {
-              committed = await gatewayRequest("commit", {
-                expectedRevision: current.revision,
-                commitId,
-                changes,
-              });
+              committed = await gatewayRequest("commit", commit);
             } catch (error) {
+              // The Apps Script gateway records a commit receipt before it
+              // returns. If the HTTPS response times out after a successful
+              // write, retry this *same* idempotency key once so the gateway
+              // can confirm the receipt instead of replaying a new mutation.
+              const confirmationRetry =
+                error instanceof SafeError &&
+                error.status === 503 &&
+                /timed out before confirming|storage could not complete this operation/.test(
+                  error.message,
+                );
+              if (confirmationRetry) {
+                await new Promise((resolve) => setTimeout(resolve, 1500));
+                try {
+                  committed = await gatewayRequest("commit", commit);
+                } catch (retryError) {
+                  globalSheets.djcSheetsCache = undefined;
+                  throw retryError;
+                }
+              } else {
+                globalSheets.djcSheetsCache = undefined;
+                throw error;
+              }
+            }
+            if (!committed!) {
               globalSheets.djcSheetsCache = undefined;
-              throw error;
+              throw new SafeError(
+                "Google Sheets did not confirm the saved operation. Refresh before retrying; existing records were preserved.",
+                503,
+              );
             }
             current.revision = committed.revision;
             current.checkedAt = Date.now();
