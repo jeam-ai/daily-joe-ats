@@ -51,9 +51,9 @@ export function IntakeSyncStatus() {
           value.status === "capacity"
             ? 60000
             : ["checking", "processing"].includes(value.status)
-              ? 10000
+              ? 3000
               : value.pending.length || value.page
-                ? 15000
+                ? 4000
                 : 120000;
         setError("");
         if (

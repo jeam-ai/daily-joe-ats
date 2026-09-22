@@ -32,7 +32,13 @@ type Context = {
   hasDemo: boolean;
 };
 const AppContext = createContext<Context | null>(null);
-export function AppProvider({ children }: { children: React.ReactNode }) {
+export function AppProvider({
+  children,
+  email,
+}: {
+  children: React.ReactNode;
+  email?: string;
+}) {
   const [state, setState] = useState<AppState | null>(null),
     [toast, setToast] = useState<{
       message: string;
@@ -42,6 +48,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     [loading, setLoading] = useState(true),
     [saving, setSaving] = useState(false);
   const ref = useRef<AppState | null>(null);
+  const cacheKey = email ? `djc-workspace:${email.toLowerCase()}` : "";
   const [dataset, setDataset] = useState<"real" | "demo">("real");
   useEffect(() => {
     try {
@@ -98,16 +105,39 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       if (request !== generation.current) return;
       ref.current = data;
       setState(data);
+      if (cacheKey)
+        try {
+          sessionStorage.setItem(
+            cacheKey,
+            JSON.stringify({ savedAt: Date.now(), state: data }),
+          );
+        } catch {}
       setError("");
     } catch (e) {
       if (request === generation.current) setError((e as Error).message);
     } finally {
       if (request === generation.current) setLoading(false);
     }
-  }, []);
+  }, [cacheKey]);
   useLayoutEffect(() => {
+    // A short-lived, same-user cache lets the shell and current page render
+    // immediately during a cold Sheets read. A background refresh always
+    // replaces it with the current server-authoritative state.
+    if (cacheKey)
+      try {
+        const cached = JSON.parse(sessionStorage.getItem(cacheKey) || "null");
+        if (
+          cached?.state &&
+          typeof cached.savedAt === "number" &&
+          Date.now() - cached.savedAt < 15 * 60 * 1000
+        ) {
+          ref.current = cached.state as AppState;
+          setState(cached.state as AppState);
+          setLoading(false);
+        }
+      } catch {}
     void refresh();
-  }, [refresh]);
+  }, [cacheKey, refresh]);
   useEffect(() => {
     const media = window.matchMedia("(prefers-color-scheme: dark)");
     const apply = () => {

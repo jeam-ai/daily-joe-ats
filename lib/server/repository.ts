@@ -4,6 +4,7 @@ import { defaultEmailTemplate } from "@/lib/email-templates";
 import { unresolved } from "./diagnostics";
 import type { DiagnosticIssue } from "@/types/operations";
 import { writeAudit } from "./audit";
+import { buildTracker } from "./tracker";
 import "server-only";
 import type { AppState, User } from "@/types";
 import {
@@ -29,7 +30,6 @@ import {
   activeIntake,
   balanceIntakeWindow,
 } from "@/lib/data-policy";
-import { buildTracker } from "./tracker";
 export async function getState(tx: Transaction): Promise<AppState> {
   const stored = await readRecord<AppState>(tx, "workspace", "main");
   // Capacity counts active production applicants; historical records are retained.
@@ -62,7 +62,7 @@ export async function getState(tx: Transaction): Promise<AppState> {
 export async function saveState(
   tx: Transaction,
   state: AppState,
-  options: { sync?: boolean } = {},
+  options: { sync?: boolean; trackerWorkbook?: boolean } = {},
 ) {
   delete state.currentUser;
   delete state.demoAvailable;
@@ -213,10 +213,16 @@ export async function saveState(
     updatedAt: state.trackerUpdatedAt,
     state: real,
   });
-  await putRecord(tx, "tracker", "workbook", {
-    revision: state.revision,
-    base64: Buffer.from(await buildTracker(state)).toString("base64"),
-  });
+  // Building an XLSX workbook touches every applicant row and is expensive in
+  // a Sheets-backed deployment. The operational records are already committed
+  // above; exports build a fresh workbook on demand. Keep the optional cached
+  // artifact for an explicit maintenance/export workflow only, never for an
+  // ordinary edit, stage change, or Gmail import.
+  if (options.trackerWorkbook)
+    await putRecord(tx, "tracker", "workbook", {
+      revision: state.revision,
+      base64: Buffer.from(await buildTracker(state)).toString("base64"),
+    });
   await putRecord(tx, "sync", "pending", { revision: state.revision });
 }
 export async function audit(

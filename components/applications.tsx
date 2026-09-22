@@ -99,7 +99,29 @@ export function Applications({ talent = false }: { talent?: boolean }) {
             ).toISOString()
           : "",
   }).toString();
+  // The provider already has the bounded active/queued workspace in memory.
+  // Avoid a second Sheets-backed list request for the default page; reserve
+  // server pagination for a real search, filter, date range, or later page.
+  const canUseWorkspaceListing =
+    page === 1 &&
+    !q &&
+    !needFilter &&
+    !status &&
+    !stage &&
+    !position &&
+    !location &&
+    !screening &&
+    !date &&
+    !experience &&
+    !employmentStatus &&
+    !urgency;
   useEffect(() => {
+    if (canUseWorkspaceListing) {
+      setListing(undefined);
+      setListError("");
+      setListLoading(false);
+      return;
+    }
     const abort = new AbortController();
     setListLoading(true);
     setListError("");
@@ -122,23 +144,10 @@ export function Applications({ talent = false }: { talent?: boolean }) {
       clearTimeout(timer);
       abort.abort();
     };
-  }, [queryParams, dataset, state?.revision, reload]);
+  }, [canUseWorkspaceListing, queryParams, dataset, state?.revision, reload]);
   if (!state) return <LoadingSkeleton />;
   const selectedNeed = state.hiringNeeds.find((need) => need.id === needFilter);
-  const canShowImmediate =
-      page === 1 &&
-      !q &&
-      !needFilter &&
-      !status &&
-      !stage &&
-      !position &&
-      !location &&
-      !screening &&
-      !date &&
-      !experience &&
-      !employmentStatus &&
-      !urgency,
-    immediateRows = (canShowImmediate ? state.applications : [])
+  const immediateRows = (canUseWorkspaceListing ? state.applications : [])
       .filter((application) => {
         if (talent) return application.status === "Talent Pool";
         if (tab === "All applications") return true;
