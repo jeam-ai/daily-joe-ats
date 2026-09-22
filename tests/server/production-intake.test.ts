@@ -137,6 +137,19 @@ test("automatic intake resumes beyond ten, maintains latest 100 with an older qu
       AUTOMATIC_INTAKE_BATCH_SIZE,
       "lease prevents concurrent duplicate batches",
     );
+    assert.equal(
+      Number(
+        (
+          await transaction((tx) =>
+            tx.query("SELECT COUNT(*) AS n FROM records WHERE collection=$1", [
+              "import_previews",
+            ]),
+          )
+        )[0].n,
+      ),
+      0,
+      "automatic intake does not persist temporary preview files",
+    );
     for (let i = 1; i < 100 / AUTOMATIC_INTAKE_BATCH_SIZE; i++)
       await syncIntake(undefined, true);
     s = await transaction(getState);

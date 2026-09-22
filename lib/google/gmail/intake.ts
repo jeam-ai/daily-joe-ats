@@ -295,26 +295,35 @@ export async function previewImport(
     }
   }
   const id = crypto.randomUUID();
-  await retryableTransaction(async (tx) => {
-    await putRecord(
-      tx,
-      "import_previews",
-      id,
-      seal(
-        { actor: user.email, expiresAt: Date.now() + 15 * 60000, rows, issues },
-        config().encryptionKey,
-      ),
-    );
-    await audit(tx, user.email, "Gmail import preview", undefined, {
-      eligible: rows.length,
-      skipped: issues.length,
+  const prepared: Preview = {
+    actor: user.email,
+    expiresAt: Date.now() + 15 * 60000,
+    rows,
+    issues,
+  };
+  // A manual preview must survive the request so HR can inspect and confirm
+  // it. Automatic intake confirms in this same server operation; persisting a
+  // temporary binary-heavy preview would add a redundant Drive file and a full
+  // Sheets commit before the actual application write.
+  if (!options.automatic)
+    await retryableTransaction(async (tx) => {
+      await putRecord(
+        tx,
+        "import_previews",
+        id,
+        seal(prepared, config().encryptionKey),
+      );
+      await audit(tx, user.email, "Gmail import preview", undefined, {
+        eligible: rows.length,
+        skipped: issues.length,
+      });
     });
-  });
   return {
     id,
     rows: rows.map(({ data, text, emailBody, sender, ...r }) => r),
     issues,
     scanned: messages.length,
+    automaticPreview: options.automatic ? prepared : undefined,
   };
 }
 export async function confirmImport(
@@ -323,15 +332,20 @@ export async function confirmImport(
   selections: { messageId: string; name: string; hiringNeedId: string }[],
   confirmed: boolean,
   automatic = false,
+  automaticPreview?: Preview,
 ) {
   if (!confirmed) throw new SafeError("Confirm the import first.");
   if (!["Admin", "Talent Acquisition", "HR Generalist"].includes(user.role))
     throw new SafeError("Recruitment manager access required.", 403);
   return retryableTransaction(async (tx) => {
-    const encrypted = await readRecord<string>(tx, "import_previews", id);
-    if (!encrypted)
+    const encrypted = automaticPreview
+      ? null
+      : await readRecord<string>(tx, "import_previews", id);
+    if (!automaticPreview && !encrypted)
       throw new SafeError("Preview expired. Preview Gmail again.", 409);
-    const preview = unseal<Preview>(encrypted, config().encryptionKey);
+    const preview =
+      automaticPreview ||
+      unseal<Preview>(encrypted as string, config().encryptionKey);
     if (
       preview.used ||
       preview.actor !== user.email ||
@@ -537,13 +551,15 @@ export async function confirmImport(
       });
       imported++;
     }
-    preview.used = true;
-    await putRecord(
-      tx,
-      "import_previews",
-      id,
-      seal({ ...preview, rows: [] }, config().encryptionKey),
-    );
+    if (!automaticPreview) {
+      preview.used = true;
+      await putRecord(
+        tx,
+        "import_previews",
+        id,
+        seal({ ...preview, rows: [] }, config().encryptionKey),
+      );
+    }
     await saveState(tx, state);
     return {
       imported,

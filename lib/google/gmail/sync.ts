@@ -239,6 +239,7 @@ export async function syncIntake(
         selections,
         true,
         true,
+        preview.automaticPreview,
       );
       job.imported = result.imported;
     }
