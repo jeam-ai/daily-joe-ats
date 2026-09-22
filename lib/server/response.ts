@@ -9,7 +9,9 @@ export function safeError(error: unknown) {
     after(() => reportIssue("database.unavailable"));
   } else if (
     error instanceof SafeError &&
-    /Sheets|Spreadsheet|Records changed while loading/.test(error.message)
+    /Sheets|Spreadsheet|Records changed while loading|Sheets storage timed out/.test(
+      error.message,
+    )
   ) {
     bufferFailure("sheets.sync");
     after(() => reportIssue("sheets.sync"));

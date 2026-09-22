@@ -48,6 +48,7 @@ export type IntakeSync = {
   failures?: number;
   consecutiveFailures?: number;
   lastSuccessfulAt?: string;
+  errorCode?: string;
   headCheckedAt?: number;
   seenIds?: string[];
 };
@@ -213,7 +214,7 @@ export async function syncIntake(
       ids,
       // Leave enough time for the preview, normalized application rows and
       // final job checkpoint to commit to Sheets after document processing.
-      deadline: now + Math.max(1000, budgetMs - 80000),
+      deadline: now + Math.max(1000, budgetMs - 50000),
       automatic: true,
     });
     job.checked = preview.scanned;
@@ -266,11 +267,13 @@ export async function syncIntake(
     job.issues = [
       ...new Map(
         [
-          ...preview.issues.filter((i) => !i.reason.startsWith("Duplicate")),
           ...job.issues,
-        ].map((issue) => [`${issue.message}:${issue.reason}`, issue]),
+          ...preview.issues.filter((i) => !i.reason.startsWith("Duplicate")),
+        ].map((issue) => [issue.message, issue]),
       ).values(),
-    ].slice(0, 40);
+    ]
+      .reverse()
+      .slice(0, 40);
     job.status = retryBatch ? "error" : "complete";
     job.message = retryBatch
       ? "Some messages could not be read. Retry to resume this batch."
@@ -282,17 +285,25 @@ export async function syncIntake(
     if (job.imported) await syncSheets();
   } catch (error) {
     const e = error as SafeError;
+    job.errorCode =
+      error instanceof SafeError
+        ? `safe-${error.status}`
+        : error instanceof Error
+          ? error.name || "unexpected"
+          : "unexpected";
     job.status =
       e.status === 401 ||
       (e.status === 409 && /Connect|Authorize/.test(e.message))
         ? "authorization"
         : "error";
     await reportIssue(
-      job.status === "authorization"
-        ? "gmail.authorization"
-        : e.status === 504 || /timeout|timed out/i.test(e.message || "")
-          ? "gmail.timeout"
-          : "gmail.sync",
+      !(error instanceof SafeError)
+        ? "server.failure"
+        : job.status === "authorization"
+          ? "gmail.authorization"
+          : e.status === 504 || /timeout|timed out/i.test(e.message || "")
+            ? "gmail.timeout"
+            : "gmail.sync",
     );
     job.message =
       error instanceof SafeError &&

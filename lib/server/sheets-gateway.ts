@@ -89,25 +89,36 @@ export async function gatewayRequest<T>(
       `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`,
   );
   const signature = createHmac("sha256", secret).update(payload).digest("hex");
-  const r = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(deployment
-        ? { Authorization: `Bearer ${await gatewayAccessToken()}` }
-        : {}),
-    },
-    body: JSON.stringify(
-      deployment
-        ? {
-            function: "executeGateway",
-            parameters: [{ payload, signature }],
-            devMode: false,
-          }
-        : { payload, signature },
-    ),
-    signal: AbortSignal.timeout(45000),
-  });
+  let r: Response;
+  try {
+    r = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(deployment
+          ? { Authorization: `Bearer ${await gatewayAccessToken()}` }
+          : {}),
+      },
+      body: JSON.stringify(
+        deployment
+          ? {
+              function: "executeGateway",
+              parameters: [{ payload, signature }],
+              devMode: false,
+            }
+          : { payload, signature },
+      ),
+      // Bulk applicant commits can legitimately exceed the former 45-second
+      // client deadline inside Apps Script. Keep this bounded below the route
+      // duration while allowing the atomic gateway operation to finish.
+      signal: AbortSignal.timeout(90000),
+    });
+  } catch {
+    throw new SafeError(
+      "Google Sheets storage timed out before confirming this operation. Original data remains preserved; refresh before retrying.",
+      503,
+    );
+  }
   if (!r.ok)
     throw new SafeError(
       "Google Sheets storage is temporarily unavailable. Retry after checking System Health.",

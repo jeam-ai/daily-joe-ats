@@ -233,7 +233,7 @@ export function readTransaction<T>(fn: (tx: Transaction) => Promise<T>) {
             sheetsPrimary() &&
             error instanceof SafeError &&
             error.status === 503 &&
-            /temporarily unavailable|could not complete this operation/.test(
+            /temporarily unavailable|could not complete this operation|timed out before confirming/.test(
               error.message,
             );
         if (!revisionChanged && !temporarySheetsRead) throw error;
