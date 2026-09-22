@@ -85,13 +85,16 @@ export async function intakeStatus() {
         message:
           "Gmail intake is paused. Resume it in Settings when you are ready.",
       };
-    if (
-      state.leaseUntil &&
-      state.leaseUntil < Date.now() &&
-      ["checking", "processing"].includes(state.status)
-    ) {
+    const startedAt = state.startedAt ? Date.parse(state.startedAt) : 0;
+    const stalled =
+      ["checking", "processing"].includes(state.status) &&
+      ((state.leaseUntil && state.leaseUntil < Date.now()) ||
+        !startedAt ||
+        Date.now() - startedAt > STALE_INTAKE_WORKER_MS);
+    if (stalled) {
       state.status = "error";
-      state.message = "The last sync was interrupted. Retry to resume safely.";
+      state.message =
+        "The last Gmail check stopped before completion. Retrying safely from the saved queue…";
       delete state.runId;
       delete state.leaseUntil;
     }

@@ -347,3 +347,21 @@ test("expired job leases become an actionable retry state", async () => {
   );
   assert.equal((await intakeStatus()).status, "error");
 });
+test("an aged Gmail worker becomes actionable even before its stale lease expires", async () => {
+  await transaction((tx) =>
+    putRecord(tx, "jobs", "gmail", {
+      status: "checking",
+      message: "Checking the official mailbox…",
+      startedAt: new Date(Date.now() - 91000).toISOString(),
+      leaseUntil: Date.now() + 60000,
+      runId: "aged-worker",
+      pending: ["saved-message"],
+      issues: [],
+      imported: 0,
+      checked: 0,
+    }),
+  );
+  const job = await intakeStatus();
+  assert.equal(job.status, "error");
+  assert.match(job.message, /stopped before completion/i);
+});
