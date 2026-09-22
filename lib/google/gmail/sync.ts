@@ -321,6 +321,7 @@ export async function syncIntake(
     } else {
       const recovered = !!job.consecutiveFailures;
       job.consecutiveFailures = 0;
+      delete job.errorCode;
       if (job.status === "complete")
         job.lastSuccessfulAt = new Date().toISOString();
       if (recovered)
