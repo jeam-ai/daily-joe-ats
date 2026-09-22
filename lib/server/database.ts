@@ -184,7 +184,7 @@ function retryableSheetsConflict(error: unknown) {
     sheetsPrimary() &&
     error instanceof SafeError &&
     error.status === 409 &&
-    /Records changed while loading|Another update was saved first/.test(
+    /Records changed while loading|Another update was saved first|finishing another operation/.test(
       error.message,
     )
   );
@@ -227,8 +227,9 @@ export function readTransaction<T>(fn: (tx: Transaction) => Promise<T>) {
         const revisionChanged =
             error instanceof SafeError &&
             error.status === 409 &&
-            error.message ===
-              "Records changed while loading. Refresh and try again.",
+            /Records changed while loading|finishing another operation/.test(
+              error.message,
+            ),
           temporarySheetsRead =
             sheetsPrimary() &&
             error instanceof SafeError &&

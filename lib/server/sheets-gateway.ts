@@ -139,10 +139,12 @@ export async function gatewayRequest<T>(
     throw new SafeError(
       result.code === "conflict"
         ? "Another update was saved first. Refresh before retrying; your changes have not overwritten it."
-        : result.code === "unverified"
-          ? "The migration has not passed verification. Sheets cutover is blocked."
-          : "Sheets storage could not complete this operation. Original data remains preserved. Check System Health.",
-      result.code === "conflict" ? 409 : 503,
+        : result.code === "busy"
+          ? "Google Sheets is finishing another operation. Retrying safely."
+          : result.code === "unverified"
+            ? "The migration has not passed verification. Sheets cutover is blocked."
+            : "Sheets storage could not complete this operation. Original data remains preserved. Check System Health.",
+      result.code === "conflict" || result.code === "busy" ? 409 : 503,
     );
   return result.data;
 }
