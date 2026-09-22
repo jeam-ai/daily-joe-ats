@@ -1,5 +1,3 @@
-import { after } from "next/server";
-import { syncIntake } from "@/lib/google/gmail/sync";
 import { requireUser, requireOrigin } from "@/lib/auth/session";
 import {
   publicState,
@@ -8,7 +6,6 @@ import {
 } from "@/lib/server/repository";
 import { safeError } from "@/lib/server/response";
 import { SafeError } from "@/lib/server/config";
-import { syncSheets } from "@/lib/google/sheets";
 export const runtime = "nodejs";
 export const maxDuration = 240;
 export async function GET() {
@@ -34,8 +31,11 @@ export async function PUT(request: Request) {
       body.confirmed === true,
       body.dataset === "demo" ? "demo" : "real",
     );
-    if (body.dataset !== "demo") after(() => syncIntake(user));
-    if (state.syncStatus === "pending") state.syncStatus = await syncSheets();
+    // Gmail polling is handled by the dedicated intake worker. Starting a
+    // mailbox scan after every HR edit competes with the Sheets transaction
+    // that just saved the edit and can delay unrelated workspace reads.
+    if (state.syncStatus === "pending")
+      state.syncStatus = "Changes committed to Google Sheets.";
     return Response.json(state);
   } catch (e) {
     return safeError(e);

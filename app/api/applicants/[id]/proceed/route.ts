@@ -3,7 +3,6 @@ import { after } from "next/server";
 import { requireOrigin, requireUser } from "@/lib/auth/session";
 import { proceedApplicant, deliverEmail } from "@/lib/server/email-outbox";
 import { safeError } from "@/lib/server/response";
-import { syncIntake } from "@/lib/google/gmail/sync";
 import { z } from "zod";
 import { SafeError } from "@/lib/server/config";
 export const runtime = "nodejs";
@@ -41,7 +40,6 @@ export async function POST(
             jobId: result.emailId,
           });
         }
-        await syncIntake(user);
       }
     });
     return Response.json({

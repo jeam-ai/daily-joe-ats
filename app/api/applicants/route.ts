@@ -4,7 +4,6 @@ import { SafeError } from "@/lib/server/config";
 import { createApplicant } from "@/lib/server/applicants";
 import { transaction } from "@/lib/server/database";
 import { getState } from "@/lib/server/repository";
-import { syncSheets } from "@/lib/google/sheets";
 export const runtime = "nodejs";
 export async function POST(request: Request) {
   try {
@@ -14,7 +13,10 @@ export async function POST(request: Request) {
     if (text.length > 16000)
       throw new SafeError("Applicant details are too long.");
     const result = await createApplicant(JSON.parse(text), user);
-    return Response.json({ ...result, syncStatus: await syncSheets() });
+    return Response.json({
+      ...result,
+      syncStatus: "Changes committed to Google Sheets.",
+    });
   } catch (error) {
     return safeError(error);
   }

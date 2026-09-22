@@ -11,7 +11,6 @@ import { seal, unseal } from "@/lib/auth/security";
 import { extractResume } from "@/lib/server/documents";
 import { buildInsight, screenResumeAgainstCriteria } from "@/lib/screening";
 
-import { syncSheets } from "@/lib/google/sheets";
 export const runtime = "nodejs";
 export const maxDuration = 180;
 type Context = { params: Promise<{ id: string }> };
@@ -219,7 +218,7 @@ export async function POST(request: Request, { params }: Context) {
     }
     return Response.json({
       message: "Resume evidence saved. HR review is required.",
-      syncStatus: await syncSheets(),
+      syncStatus: "Changes committed to Google Sheets.",
     });
   } catch (e) {
     if (documentApplicant && (!(e instanceof SafeError) || e.status !== 409))

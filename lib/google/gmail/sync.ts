@@ -20,7 +20,6 @@ import {
   INTAKE_QUEUE_LIMIT,
 } from "@/lib/data-policy";
 import { SafeError } from "@/lib/server/config";
-import { syncSheets } from "@/lib/google/sheets";
 import type { User } from "@/types";
 
 export type IntakeSync = {
@@ -253,7 +252,6 @@ export async function syncIntake(
     if (full) {
       job.status = "capacity";
       job.message = `Intake capacity reached (${INTAKE_QUEUE_LIMIT}). Remaining messages are retained in Gmail and will be retried when space becomes available.`;
-      if (job.imported) await syncSheets();
       return;
     }
     const retryIds = preview.issues.filter((i) =>
@@ -285,7 +283,6 @@ export async function syncIntake(
         : job.imported
           ? `${job.imported} new application${job.imported === 1 ? "" : "s"} imported. ${job.pending.length || job.page ? "More messages will be checked automatically." : "Mailbox check complete."}`
           : "No new eligible applications in this batch.";
-    if (job.imported) await syncSheets();
   } catch (error) {
     const e = error as SafeError;
     job.errorCode =

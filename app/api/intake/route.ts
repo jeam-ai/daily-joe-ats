@@ -5,7 +5,6 @@ import { requireOrigin, requireUser } from "@/lib/auth/session";
 import { previewImport, confirmImport } from "@/lib/google/gmail/intake";
 import { SafeError } from "@/lib/server/config";
 import { safeError } from "@/lib/server/response";
-import { syncSheets } from "@/lib/google/sheets";
 export const maxDuration = 300;
 export const runtime = "nodejs";
 export async function POST(req: Request) {
@@ -40,7 +39,10 @@ export async function POST(req: Request) {
       true,
     );
     after(() => runExtractionJobs());
-    return Response.json({ ...result, syncStatus: await syncSheets() });
+    return Response.json({
+      ...result,
+      syncStatus: "Changes committed to Google Sheets.",
+    });
   } catch (e) {
     return safeError(e);
   }

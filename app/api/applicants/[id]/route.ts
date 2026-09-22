@@ -1,10 +1,7 @@
-import { after } from "next/server";
-import { syncIntake } from "@/lib/google/gmail/sync";
 import { requireOrigin, requireUser } from "@/lib/auth/session";
 import { safeError } from "@/lib/server/response";
 import { SafeError } from "@/lib/server/config";
 import { deleteApplicant, restoreApplicant } from "@/lib/server/applicants";
-import { syncSheets } from "@/lib/google/sheets";
 export const runtime = "nodejs";
 export const maxDuration = 240;
 type Context = { params: Promise<{ id: string }> };
@@ -14,10 +11,11 @@ export async function DELETE(request: Request, { params }: Context) {
     const user = await requireUser();
     const { id } = await params;
     const result = await deleteApplicant(id, await request.json(), user);
-    if (!result.isDemo) after(() => syncIntake(user));
     return Response.json({
       ...result,
-      syncStatus: result.isDemo ? "Demo isolated" : await syncSheets(),
+      syncStatus: result.isDemo
+        ? "Demo isolated"
+        : "Changes committed to Google Sheets.",
     });
   } catch (error) {
     return safeError(error);
@@ -31,7 +29,10 @@ export async function POST(request: Request, { params }: Context) {
     if ((await request.json()).confirmed !== true)
       throw new SafeError("Confirm restoring this applicant.");
     const result = await restoreApplicant(id, user);
-    return Response.json({ ...result, syncStatus: await syncSheets() });
+    return Response.json({
+      ...result,
+      syncStatus: "Changes committed to Google Sheets.",
+    });
   } catch (error) {
     return safeError(error);
   }

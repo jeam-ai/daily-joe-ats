@@ -24,6 +24,11 @@ function doPost(e) {
     let diff=expected.length^envelope.signature.length;for(let i=0;i<expected.length;i++)diff|=expected.charCodeAt(i)^envelope.signature.charCodeAt(i);
     const request=JSON.parse(envelope.payload);
     if(diff||typeof request.at!=='number'||!Number.isFinite(request.at)||Math.abs(Date.now()-request.at)>120000)return djcJson({ok:false,code:'unauthorized'});
+    // Reads are revision-checked below and must not wait behind a large resume
+    // import or audit commit. Only the operation that advances the workbook
+    // revision needs the exclusive lock. This keeps normal workspace pages
+    // responsive while preserving atomic writes.
+    if(request.operation!=='commit')return djcJson({ok:true,data:djcOperation(request,props)});
     const lock=LockService.getScriptLock();if(!lock.tryLock(20000))return djcJson({ok:false,code:'busy'});
     try {return djcJson({ok:true,data:djcOperation(request,props)});} finally {lock.releaseLock();}
   } catch(error) {return djcJson({ok:false,code:['conflict','unverified','schema','integrity'].includes(error.message)?error.message:'operation_failed'});}
@@ -51,6 +56,9 @@ function djcOperation(r,props,snapshot) {
     const tabs=Array.from(new Set(r.queries.flatMap(function(q){return q.tab?[q.tab]:q.tabs||[]})));
     const cache={},privateCache={};
     if(tabs.length){const result=Sheets.Spreadsheets.Values.batchGet(id,{ranges:tabs.map(function(tab){return "'"+tab.replace(/'/g,"''")+"'!A2:Q"})});tabs.forEach(function(tab,i){cache[tab]=result.valueRanges[i].values||[]});}
+    // Do not return a mixed snapshot when a writer completed during batchGet.
+    // The caller safely retries a conflict from one fresh revision.
+    if(djcState(id).revision!==state.revision)throw Error('conflict');
     return {revision:state.revision,results:r.queries.map(function(q){return djcOperation(Object.assign({},q,{operation:'load'}),props,{state:state,manifest:manifest,rows:cache,privateRows:privateCache}).rows})};
   }
   if(r.operation==='load') {
@@ -59,6 +67,7 @@ function djcOperation(r,props,snapshot) {
     let rows=[];const privateCache=snapshot&&snapshot.privateRows||{};
     (r.tab?[r.tab]:r.tabs||[]).forEach(function(tab){const loaded=djcLoadRows(id,tab,snapshot&&snapshot.rows);Object.keys(loaded.groups).forEach(function(key){if(JSON.parse(key)[0]!==r.table)return;const parts=loaded.groups[key];const row=djcDecode(parts);if(match(row))rows.push(row)});});
     Object.keys(manifest.blobs).forEach(function(key){const ref=manifest.blobs[key];if(ref.table===r.table&&match(ref.metadata)){if(r.metadataOnly)rows.push(ref.metadata);else {const row=djcPrivateRow(ref,privateCache);if(row)rows.push(row);}}});
+    if(!snapshot&&djcState(id).revision!==state.revision)throw Error('conflict');
     return {revision:state.revision,rows:rows};
   }
   if(r.operation==='commit') {
