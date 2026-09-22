@@ -213,7 +213,6 @@ export async function syncIntake(
     }
     job.status = "processing";
     job.message = "Reading resumes and checking hiring-need qualifications…";
-    await checkpoint();
     const preview = await previewImport(actor, {
       ids,
       // Leave enough time for the preview, normalized application rows and
