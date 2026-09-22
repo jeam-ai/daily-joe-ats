@@ -1,5 +1,6 @@
 import { after } from "next/server";
 import { requireUser, requireOrigin } from "@/lib/auth/session";
+import { canManage } from "@/lib/data-policy";
 import {
   configureExtraction,
   extractionProvider,
@@ -13,9 +14,39 @@ export const runtime = "nodejs";
 export const maxDuration = 120;
 export async function GET(request: Request) {
   try {
-    await requireUser();
+    const user = await requireUser();
     const data = await extractionStatus(),
-      applicant = new URL(request.url).searchParams.get("applicant");
+      url = new URL(request.url),
+      applicant = url.searchParams.get("applicant"),
+      drain = url.searchParams.get("drain") === "1";
+    if (drain) {
+      if (!canManage(user))
+        throw new SafeError("Recruitment manager access required.", 403);
+      const ready = data.jobs.some(
+        (job) =>
+          job.status === "Queued" ||
+          (job.status === "Failed" &&
+            !!job.retryAt &&
+            job.retryAt <= Date.now()),
+      );
+      if (ready && data.enabled && data.configured)
+        after(() => runExtractionJobs(1).catch(() => undefined));
+      return Response.json(
+        {
+          enabled: data.enabled,
+          configured: data.configured,
+          queued: data.jobs.filter((job) => job.status === "Queued").length,
+          running: data.jobs.filter((job) => job.status === "Running").length,
+          retryable: data.jobs.filter(
+            (job) =>
+              job.status === "Failed" &&
+              !!job.retryAt &&
+              job.retryAt <= Date.now(),
+          ).length,
+        },
+        { headers: { "Cache-Control": "no-store" } },
+      );
+    }
     if (applicant)
       data.jobs = data.jobs.filter((j) => j.applicationId === applicant);
     if (

@@ -87,6 +87,29 @@ export function IntakeSyncStatus() {
       clearTimeout(timer);
     };
   }, [enabled, paused]);
+  // Automatic evidence fallback is deliberately a separate, slow cadence from
+  // Gmail import. It keeps long provider work from delaying intake while still
+  // draining eligible low-confidence/missing-field records without HR clicks.
+  useEffect(() => {
+    if (!enabled || paused) return;
+    let stopped = false,
+      timer: ReturnType<typeof setTimeout>;
+    async function pump() {
+      try {
+        await requestJson("/api/system/extraction?drain=1");
+      } catch {
+        // The Error Center records server failures. A later cadence retries a
+        // safe, leased job without surfacing noisy background toasts.
+      } finally {
+        if (!stopped) timer = setTimeout(() => void pump(), 180000);
+      }
+    }
+    timer = setTimeout(() => void pump(), 20000);
+    return () => {
+      stopped = true;
+      clearTimeout(timer);
+    };
+  }, [enabled, paused]);
   if (!enabled) return null;
   return (
     <div className="intake-sync" aria-label="Automatic Gmail intake">
