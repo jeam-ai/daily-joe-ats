@@ -341,6 +341,20 @@ test("transactional production repository and intake boundaries", async (t) => {
         const missing = p.rows.find((row) => row.messageId === "missing");
         assert.equal(missing?.hasResume, false);
         assert.match(missing?.processingNote || "", /No resume was attached/);
+        const automaticDeadline = await previewImport(user, {
+          ids: ["newer"],
+          deadline: Date.now() - 1,
+          automatic: true,
+        });
+        assert.equal(automaticDeadline.rows.length, 1);
+        assert.equal(automaticDeadline.rows[0].hasResume, false);
+        assert.equal(
+          automaticDeadline.issues.some((issue) =>
+            /Preview time limit reached/.test(issue.reason),
+          ),
+          false,
+          "automatic intake records email facts instead of surfacing a manual preview timeout",
+        );
         assert.equal(sendCalls, 0);
       } finally {
         globalThis.fetch = original;

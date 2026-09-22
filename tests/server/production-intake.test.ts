@@ -325,8 +325,11 @@ test("unreadable attachments preserve email facts and do not pause intake", asyn
       (application) => application.gmailMessageId === "broken",
     );
     assert.ok(imported);
-    assert.equal(imported?.resumeId, undefined);
-    assert.match(imported?.notes.join(" ") || "", /could not be read/);
+    assert.ok(
+      imported?.resumeId,
+      "a type-validated document is retained for HR retry even if extraction fails",
+    );
+    assert.match(imported?.notes.join(" ") || "", /processing was deferred/i);
   } finally {
     globalThis.fetch = original;
   }

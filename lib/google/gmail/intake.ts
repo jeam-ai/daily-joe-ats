@@ -28,7 +28,7 @@ import type { Application, QualificationRule, User } from "@/types";
 const MAX_PREVIEW_MESSAGES = 40;
 export { screenResumeAgainstCriteria } from "@/lib/screening";
 import { screenResumeAgainstCriteria, buildInsight } from "@/lib/screening";
-import { extractResume } from "@/lib/server/documents";
+import { detectResumeType, extractResume } from "@/lib/server/documents";
 import { withDeadline } from "@/lib/server/deadline";
 export function resumeScreeningInsight(
   text: string,
@@ -204,14 +204,6 @@ export async function previewImport(
     seen = new Set(state.applications.map((a) => a.gmailMessageId));
   {
     for (const message of messages) {
-      if (Date.now() >= deadline) {
-        issues.push({
-          message: "Import preview",
-          reason:
-            "Preview time limit reached. Import the ready records, then retry to continue.",
-        });
-        break;
-      }
       if (rows.length >= 10) break;
       const header = (name: string) =>
         message.payload.headers.find((h) => h.name.toLowerCase() === name)
@@ -240,7 +232,15 @@ export async function previewImport(
         /\.(pdf|docx|txt|png|jpe?g)$/i.test(p.filename!),
       );
       const emailBody = messageBody(message.payload);
-      const pushEmailOnly = (reason: string) => {
+      const pushEmailOnly = (
+        reason: string,
+        deferredResume?: {
+          filename: string;
+          mime: string;
+          hash: string;
+          data: string;
+        },
+      ) => {
         const evidence = intakeEvidence({
           subject,
           body: emailBody,
@@ -259,19 +259,21 @@ export async function previewImport(
           residence: evidence.residence,
           email,
           receivedAt: new Date(Number(message.internalDate)).toISOString(),
-          filename: "",
-          mime: "",
-          hash: createHash("sha256")
-            .update(`gmail-message:${message.id}`)
-            .digest("hex"),
-          data: "",
+          filename: deferredResume?.filename || "",
+          mime: deferredResume?.mime || "",
+          hash:
+            deferredResume?.hash ||
+            createHash("sha256")
+              .update(`gmail-message:${message.id}`)
+              .digest("hex"),
+          data: deferredResume?.data || "",
           text: "",
           extraction: {
             method: "text",
             warnings: [reason],
           },
           processingNote: reason,
-          hasResume: false,
+          hasResume: !!deferredResume,
           subject: subject.slice(0, 200),
           rfcId: /^<[^<>\s]+@[^<>\s]+>$/.test(header("message-id"))
             ? header("message-id")
@@ -279,16 +281,39 @@ export async function previewImport(
         });
         emails.add(email);
         hashes.add(
-          createHash("sha256")
-            .update(`gmail-message:${message.id}`)
-            .digest("hex"),
+          deferredResume?.hash ||
+            createHash("sha256")
+              .update(`gmail-message:${message.id}`)
+              .digest("hex"),
         );
         threads.add(message.threadId);
       };
+      if (Date.now() >= deadline) {
+        if (options.automatic) {
+          pushEmailOnly(
+            "Resume processing was deferred so Gmail intake could continue. The submitted email was imported; retry document processing from the applicant profile.",
+          );
+          continue;
+        }
+        issues.push({
+          message: "Import preview",
+          reason:
+            "Preview time limit reached. Import the ready records, then retry to continue.",
+        });
+        break;
+      }
       if (!p || (p.body?.size || 0) > 8 * 1024 * 1024) {
         pushEmailOnly(attachmentProblem(attachments, p));
         continue;
       }
+      let deferredResume:
+        | {
+            filename: string;
+            mime: string;
+            hash: string;
+            data: string;
+          }
+        | undefined;
       try {
         const content =
           p.body?.data ||
@@ -308,9 +333,31 @@ export async function previewImport(
           skip("Duplicate resume.");
           continue;
         }
+        // A slow scan must never freeze the intake queue. Once a document has
+        // passed type validation, retain the original securely and let HR
+        // explicitly reprocess it later if this short automatic budget is
+        // exceeded. Invalid files are still rejected and never stored.
+        const detectedMime = detectResumeType(bytes, p.filename!);
+        deferredResume = {
+          filename: p.filename!,
+          mime: detectedMime,
+          hash,
+          data: bytes.toString("base64"),
+        };
+        const remaining = deadline - Date.now();
+        const extractionBudget = options.automatic
+          ? Math.min(8000, remaining)
+          : remaining;
+        if (extractionBudget <= 0) {
+          pushEmailOnly(
+            "Resume processing was deferred so Gmail intake could continue. The original resume was retained; retry document processing from the applicant profile.",
+            deferredResume,
+          );
+          continue;
+        }
         const document = await withDeadline(
           extractResume(bytes, p.filename!),
-          Math.max(1, deadline - Date.now()),
+          Math.max(1, extractionBudget),
         );
         const { text: extracted, mime, extraction } = document;
         const evidence = intakeEvidence({
@@ -351,7 +398,12 @@ export async function previewImport(
         // The message itself is still an application. Preserve submitted email
         // facts and let automatic AI fallback inspect subject/body rather than
         // repeatedly blocking intake on one unreadable attachment.
-        pushEmailOnly(attachmentProblem(attachments, p, error));
+        pushEmailOnly(
+          deferredResume
+            ? "Resume processing was deferred so Gmail intake could continue. The original resume was retained; retry document processing from the applicant profile."
+            : attachmentProblem(attachments, p, error),
+          deferredResume,
+        );
       }
     }
   }
