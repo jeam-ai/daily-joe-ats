@@ -256,10 +256,20 @@ test("unreadable attachments preserve email facts and do not pause intake", asyn
   const state = await transaction(getState);
   await transaction((tx) =>
     putRecord(tx, "jobs", "gmail", {
-      status: "error",
+      status: "checking",
       message: "Prior attachment failure",
+      // Simulate a host that ended a run after it had acquired its lease. The
+      // next worker must reclaim this safely instead of holding the UI on a
+      // stale "Checking" message until the original lease time elapses.
+      startedAt: new Date(Date.now() - 91000).toISOString(),
+      leaseUntil: Date.now() + 60000,
       pending: ["broken"],
-      issues: [],
+      issues: [
+        {
+          message: "Old attachment message",
+          reason: "Failed to read resume from a previous attempt.",
+        },
+      ],
       imported: 0,
       checked: 0,
       failures: 2,
@@ -304,6 +314,11 @@ test("unreadable attachments preserve email facts and do not pause intake", asyn
     assert.equal(job.consecutiveFailures, 0);
     assert.equal(job.pending.length, 0);
     assert.equal(job.imported, 1);
+    assert.equal(
+      job.issues.length,
+      0,
+      "a successful email-only fallback clears an old resolved review item",
+    );
     assert.doesNotMatch(job.message, /unreadable attachments/i);
     assert.ok(job.seenIds?.includes("broken"));
     const imported = (await transaction(getState)).applications.find(

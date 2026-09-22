@@ -544,6 +544,52 @@ input[type="radio"] {
   margin-bottom: 10px;
   padding-bottom: 12px;
 }
+.stage-legend:not(.compact) {
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+}
+.stage-legend:not(.compact) > strong {
+  margin-right: 2px;
+  color: var(--text-primary);
+}
+.stage-legend:not(.compact) .stage-key {
+  gap: 6px;
+  padding: 5px 8px;
+  border-radius: 7px;
+  font-weight: 600;
+}
+.stage-legend:not(.compact) .stage-key.blue {
+  background: var(--info-bg);
+  color: var(--info);
+}
+.stage-legend:not(.compact) .stage-key.purple {
+  background: var(--purple-bg);
+  color: var(--purple);
+}
+.stage-legend:not(.compact) .stage-key.orange {
+  background: var(--orange-bg);
+  color: var(--orange);
+}
+.stage-legend:not(.compact) .stage-key.amber {
+  background: var(--warning-bg);
+  color: var(--warning);
+}
+.stage-legend:not(.compact) .stage-key.green,
+.stage-legend:not(.compact) .stage-key.deep-green {
+  background: var(--success-bg);
+  color: var(--success);
+}
+.stage-legend:not(.compact) .stage-key.red {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+.stage-legend:not(.compact) .stage-key.neutral {
+  background: var(--surface-subtle);
+  color: var(--text-secondary);
+}
 .tabs {
   overflow-x: auto;
   gap: 24px;

@@ -8,7 +8,7 @@ import { safeError } from "@/lib/server/response";
 import { reportIssue } from "@/lib/server/diagnostics";
 import { intakeStatus, syncIntake } from "@/lib/google/gmail/sync";
 export const runtime = "nodejs";
-export const maxDuration = 240;
+export const maxDuration = 120;
 export async function GET() {
   try {
     const user = await requireUser();
@@ -36,12 +36,15 @@ export async function POST(request: Request) {
       });
     after(async () => {
       const started = Date.now();
-      await syncIntake(user, force, 140000).catch(() =>
+      // Gmail sync is deliberately small and resumable. A later poll takes
+      // the next durable slice, which is more reliable than one long task in
+      // a serverless `after` lifecycle.
+      await syncIntake(user, force, 75000).catch(() =>
         reportIssue("gmail.sync"),
       );
-      if (Date.now() - started < 150000)
+      if (Date.now() - started < 85000)
         await runExtractionJobs(1).catch(() => reportIssue("ai.provider"));
-      if (Date.now() - started < 180000)
+      if (Date.now() - started < 100000)
         await drainEmailOutbox(1).catch(() =>
           reportIssue("notification.failed"),
         );

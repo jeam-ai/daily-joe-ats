@@ -55,7 +55,12 @@ export type IntakeSync = {
 // automatic batches small enough to finish, persist, and release their lease
 // inside a serverless invocation; the browser/cron immediately continues the
 // remaining durable queue.
-export const AUTOMATIC_INTAKE_BATCH_SIZE = 5;
+export const AUTOMATIC_INTAKE_BATCH_SIZE = 3;
+// Background work may be stopped by a serverless host before its advertised
+// route limit. A durable job can be safely reclaimed after this interval: its
+// application writes use stable Gmail IDs and its checkpoint rejects an older
+// run ID, so reclaiming never creates a second import of the same message.
+const STALE_INTAKE_WORKER_MS = 90000;
 const empty = (): IntakeSync => ({
   status: "idle",
   message: "Ready to check the careers mailbox.",
@@ -110,7 +115,18 @@ export async function syncIntake(
     now = Date.now();
   const claimed = await retryableTransaction(async (tx) => {
     const job = (await readRecord<IntakeSync>(tx, "jobs", "gmail")) || empty();
-    if (job.leaseUntil && job.leaseUntil > now) return null;
+    const startedAt = job.startedAt ? Date.parse(job.startedAt) : 0;
+    const staleWorker =
+      ["checking", "processing"].includes(job.status) &&
+      (!startedAt || now - startedAt > STALE_INTAKE_WORKER_MS);
+    if (job.leaseUntil && job.leaseUntil > now && !staleWorker) return null;
+    if (staleWorker) {
+      job.status = "error";
+      job.message =
+        "The previous Gmail check stopped before completion. Resuming safely from the saved queue…";
+      delete job.runId;
+      delete job.leaseUntil;
+    }
     if (!force && (job.consecutiveFailures || 0) >= 3) return null;
     if (force) job.consecutiveFailures = 0;
     const capacityFreed =
@@ -119,11 +135,10 @@ export async function syncIntake(
       return null;
     Object.assign(job, {
       runId,
-      // The browser route may spend additional time committing and
-      // checkpointing after its document-processing budget. Keep the lease
-      // aligned with the 240-second serverless ceiling so a status poll never
-      // starts a second writer while the original invocation is still alive.
-      leaseUntil: now + Math.max(budgetMs + 20000, 230000),
+      // Keep the lease close to the bounded worker budget. If a host stops a
+      // background task unexpectedly, the next polling cycle can resume from
+      // the durable message queue instead of leaving the UI on "Checking".
+      leaseUntil: now + Math.max(90000, Math.min(budgetMs + 20000, 120000)),
       status: "checking",
       startedAt: new Date(now).toISOString(),
       message: "Checking the official mailbox…",
@@ -166,6 +181,8 @@ export async function syncIntake(
       delete job.page;
       job.query = query;
     }
+    job.message = "Finding new eligible applications in the official mailbox…";
+    await checkpoint();
     // Revisit the mailbox head independently of the older-page cursor.
     // New arrivals must not wait behind a full window or a large backlog.
     if (!job.headCheckedAt || now - job.headCheckedAt > 30000) {
@@ -183,6 +200,7 @@ export async function syncIntake(
       if (!job.pending.length && !job.page) job.page = head.nextPageToken;
       job.pending = [...new Set([...fresh, ...job.pending])];
       job.headCheckedAt = now;
+      await checkpoint();
     }
     // Continue checking new message IDs, but do not read documents or consume
     // the historical cursor while retained eligible intake is at capacity.
@@ -211,12 +229,16 @@ export async function syncIntake(
       return;
     }
     job.status = "processing";
-    job.message = "Reading resumes and checking hiring-need qualifications…";
+    job.message = `Reading and validating ${ids.length} application${ids.length === 1 ? "" : "s"}…`;
+    await checkpoint();
     const preview = await previewImport(actor, {
       ids,
       // Leave enough time for the preview, normalized application rows and
       // final job checkpoint to commit to Sheets after document processing.
-      deadline: now + Math.max(1000, budgetMs - 50000),
+      // Automated intake intentionally processes a small slice and continues
+      // later. Keeping document work below a minute prevents a single complex
+      // scan from stranding the whole Gmail queue.
+      deadline: now + Math.min(60000, Math.max(1000, budgetMs - 30000)),
       automatic: true,
     });
     job.checked = preview.scanned;
@@ -281,16 +303,13 @@ export async function syncIntake(
       job.seenIds = [...new Set([...(job.seenIds || []), ...ids])].slice(-5000);
     }
     if (job.failures >= 3) job.failures = 0; // Continue past unreadable mail; issues remain visible and a later scan retries it.
-    job.issues = [
-      ...new Map(
-        [
-          ...job.issues,
-          ...preview.issues.filter((i) => !i.reason.startsWith("Duplicate")),
-        ].map((issue) => [issue.message, issue]),
-      ).values(),
-    ]
-      .reverse()
-      .slice(0, 40);
+    // Review items describe the current attempted batch. Do not keep a
+    // resolved attachment failure visible forever after its email-only
+    // fallback was imported successfully; the durable application timeline
+    // retains the original processing note for HR review.
+    job.issues = preview.issues
+      .filter((issue) => !issue.reason.startsWith("Duplicate"))
+      .slice(-40);
     job.status = retryBatch ? "error" : "complete";
     job.message = retryBatch
       ? "Some messages could not be read. Retry to resume this batch."

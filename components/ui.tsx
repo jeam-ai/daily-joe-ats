@@ -100,7 +100,7 @@ export function StageLegend({ compact = false }: { compact?: boolean }) {
     >
       <strong>Stage guide</strong>
       {stageLegend.map(([stage, tone]) => (
-        <span className="stage-key" key={stage}>
+        <span className={`stage-key ${tone}`} key={stage}>
           <i className={`stage-dot ${tone}`} aria-hidden="true" />
           {stage}
         </span>
