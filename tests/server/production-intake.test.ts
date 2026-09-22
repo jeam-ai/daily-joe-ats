@@ -11,7 +11,11 @@ import {
 } from "../../lib/server/repository";
 import { initialState } from "../../lib/server/initial-state";
 import { withStore } from "../../lib/server/store";
-import { syncIntake, intakeStatus } from "../../lib/google/gmail/sync";
+import {
+  AUTOMATIC_INTAKE_BATCH_SIZE,
+  syncIntake,
+  intakeStatus,
+} from "../../lib/google/gmail/sync";
 import { activeIntake } from "../../lib/data-policy";
 import { matchHiringNeed, senderName } from "../../lib/intake-matching";
 delete process.env.DATABASE_URL;
@@ -130,10 +134,11 @@ test("automatic intake resumes beyond ten, maintains latest 100 with an older qu
     let s = await transaction(getState);
     assert.equal(
       s.applications.length,
-      5,
+      AUTOMATIC_INTAKE_BATCH_SIZE,
       "lease prevents concurrent duplicate batches",
     );
-    for (let i = 0; i < 19; i++) await syncIntake(undefined, true);
+    for (let i = 1; i < 100 / AUTOMATIC_INTAKE_BATCH_SIZE; i++)
+      await syncIntake(undefined, true);
     s = await transaction(getState);
     assert.equal(s.applications.filter(activeIntake).length, 100);
     assert.equal(
@@ -156,21 +161,21 @@ test("automatic intake resumes beyond ten, maintains latest 100 with an older qu
     await syncIntake(undefined, true);
     assert.equal((await intakeStatus()).status, "complete");
     s = await transaction(getState);
-    assert.equal(s.applications.length, 105);
+    assert.equal(s.applications.length, 100 + AUTOMATIC_INTAKE_BATCH_SIZE);
     assert.equal(
       s.applications.filter((a) => a.queueState === "Queued").length,
-      5,
+      AUTOMATIC_INTAKE_BATCH_SIZE,
     );
     s.applications[0].status = "Rejected";
     await transaction((tx) => saveState(tx, s));
     await syncIntake();
     s = await transaction(getState);
-    assert.equal(s.applications.length, 105);
+    assert.equal(s.applications.length, 100 + AUTOMATIC_INTAKE_BATCH_SIZE);
     assert.equal(s.applications.filter(activeIntake).length, 100);
     assert.equal(s.applications[0].status, "Rejected");
     assert.equal(
       new Set(s.applications.map((a) => a.gmailMessageId)).size,
-      105,
+      100 + AUTOMATIC_INTAKE_BATCH_SIZE,
     );
     assert.equal(sends, 0);
     assert.ok(
@@ -183,7 +188,7 @@ test("automatic intake resumes beyond ten, maintains latest 100 with an older qu
     assert.equal(saved.preferences.theme, "dark");
     assert.equal(
       saved.applications.length,
-      105,
+      100 + AUTOMATIC_INTAKE_BATCH_SIZE,
       "a preference save from an old form preserves imported applicants",
     );
     assert.equal(saved.applications[0].status, "Rejected");

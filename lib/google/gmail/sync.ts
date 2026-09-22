@@ -51,6 +51,11 @@ export type IntakeSync = {
   headCheckedAt?: number;
   seenIds?: string[];
 };
+// Resume extraction (especially OCR) is the expensive part of intake. Keep
+// automatic batches small enough to finish, persist, and release their lease
+// inside a serverless invocation; the browser/cron immediately continues the
+// remaining durable queue.
+export const AUTOMATIC_INTAKE_BATCH_SIZE = 2;
 const empty = (): IntakeSync => ({
   status: "idle",
   message: "Ready to check the careers mailbox.",
@@ -195,7 +200,7 @@ export async function syncIntake(
       job.page = page.nextPageToken;
       await checkpoint();
     }
-    const ids = job.pending.slice(0, 5);
+    const ids = job.pending.slice(0, AUTOMATIC_INTAKE_BATCH_SIZE);
     if (!ids.length) {
       job.status = "complete";
       job.message = "Mailbox checked. No new eligible applications.";
@@ -206,7 +211,9 @@ export async function syncIntake(
     await checkpoint();
     const preview = await previewImport(actor, {
       ids,
-      deadline: now + Math.max(1000, budgetMs - 30000),
+      // Leave enough time for the preview, normalized application rows and
+      // final job checkpoint to commit to Sheets after document processing.
+      deadline: now + Math.max(1000, budgetMs - 80000),
       automatic: true,
     });
     job.checked = preview.scanned;
