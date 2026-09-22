@@ -1,9 +1,22 @@
 import { NextResponse } from "next/server";
+import { after } from "next/server";
 import { SafeError } from "./config";
 import { bufferFailure, isDatabaseFailure } from "./diagnostic-buffer";
+import { reportIssue } from "./diagnostics";
 export function safeError(error: unknown) {
-  if (isDatabaseFailure(error)) bufferFailure("database.unavailable");
-  else if (!(error instanceof SafeError)) bufferFailure("server.failure");
+  if (isDatabaseFailure(error)) {
+    bufferFailure("database.unavailable");
+    after(() => reportIssue("database.unavailable"));
+  } else if (
+    error instanceof SafeError &&
+    /Sheets|Spreadsheet|Records changed while loading/.test(error.message)
+  ) {
+    bufferFailure("sheets.sync");
+    after(() => reportIssue("sheets.sync"));
+  } else if (!(error instanceof SafeError)) {
+    bufferFailure("server.failure");
+    after(() => reportIssue("server.failure"));
+  }
   return NextResponse.json(
     {
       error:

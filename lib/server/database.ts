@@ -236,8 +236,7 @@ export function readTransaction<T>(fn: (tx: Transaction) => Promise<T>) {
             /temporarily unavailable|could not complete this operation/.test(
               error.message,
             );
-        if (!revisionChanged && !temporarySheetsRead)
-          throw error;
+        if (!revisionChanged && !temporarySheetsRead) throw error;
         if (temporarySheetsRead && attempt >= 2) throw error;
         // Intake checkpoints can create a short burst of revisions. A small
         // bounded backoff lets the reader hydrate one coherent revision while

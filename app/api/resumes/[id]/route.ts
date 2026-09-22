@@ -1,5 +1,5 @@
 import { requireUser } from "@/lib/auth/session";
-import { transaction } from "@/lib/server/database";
+import { readTransaction } from "@/lib/server/database";
 import { getState } from "@/lib/server/repository";
 import { safeError } from "@/lib/server/response";
 import { config, SafeError } from "@/lib/server/config";
@@ -12,7 +12,7 @@ export async function GET(
   try {
     await requireUser();
     const { id } = await params;
-    return await transaction(async (tx) => {
+    return await readTransaction(async (tx) => {
       const application = (await getState(tx)).applications.find(
         (a) => a.resumeId === id && !a.deletedAt,
       );

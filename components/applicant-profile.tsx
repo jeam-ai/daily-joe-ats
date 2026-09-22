@@ -26,6 +26,7 @@ import {
   ArrowRight,
   Plus,
   FileCheck2,
+  Pencil,
 } from "lucide-react";
 import type {
   Application,
@@ -127,6 +128,7 @@ export function ApplicantProfile({ id }: { id: string }) {
   } = useApp();
   const router = useRouter();
   const [editing, setEditing] = useState(false),
+    [confirmEditing, setConfirmEditing] = useState(false),
     [deleting, setDeleting] = useState(false);
   const [tab, setTab] = useState("Overview");
   const [decision, setDecision] = useState<Decision | null>(null);
@@ -155,6 +157,9 @@ export function ApplicantProfile({ id }: { id: string }) {
   const manager = canManage(state.currentUser);
   const actorEmail = state.currentUser?.email;
   const next = nextStage(a);
+  const requestEdit = () => {
+    if (editable) setConfirmEditing(true);
+  };
   const template =
     state.emailTemplates.find(
       (t) => t.id === templateId && t.enabled !== false,
@@ -335,7 +340,27 @@ export function ApplicantProfile({ id }: { id: string }) {
         Back to applications
       </Link>
       <div className="profile-header">
-        <Avatar name={a.applicant.name} />
+        <div className="applicant-avatar-wrap">
+          <Avatar
+            name={a.applicant.name}
+            imageUrl={
+              a.applicantPhotoId
+                ? `/api/applicants/${a.id}/photo?v=${encodeURIComponent(a.applicantPhotoVersion || "1")}`
+                : undefined
+            }
+          />
+          {editable && (
+            <button
+              className="avatar-edit"
+              type="button"
+              onClick={requestEdit}
+              aria-label="Edit applicant information and optional photo"
+              title="Edit applicant information and optional photo"
+            >
+              <Pencil size={14} />
+            </button>
+          )}
+        </div>
         <div>
           <div className="profile-name">
             <h1>{a.applicant.name}</h1>
@@ -361,7 +386,11 @@ export function ApplicantProfile({ id }: { id: string }) {
           </div>
         </div>
       </div>
-      <ApplicationSource application={a} />
+      <ApplicationSource
+        application={a}
+        editable={editable}
+        onEdit={requestEdit}
+      />
       <DocumentRecovery application={a} />
       <div className="stage-track">
         {[
@@ -394,7 +423,11 @@ export function ApplicantProfile({ id }: { id: string }) {
         <div>
           {tab === "Overview" && (
             <>
-              <ApplicantInformation application={a} />
+              <ApplicantInformation
+                application={a}
+                editable={editable}
+                onEdit={requestEdit}
+              />
               <Card>
                 <div className="card-heading">
                   <div>
@@ -674,7 +707,7 @@ export function ApplicantProfile({ id }: { id: string }) {
                   items={[
                     {
                       label: "Edit Applicant",
-                      onClick: () => setEditing(true),
+                      onClick: requestEdit,
                       disabled: !editable,
                     },
                     {
@@ -798,6 +831,38 @@ export function ApplicantProfile({ id }: { id: string }) {
               }}
             >
               {workspaceSaving ? "Saving…" : "Confirm update"}
+            </Button>
+          </div>
+        </Modal>
+      )}
+      {confirmEditing && (
+        <Modal
+          title="Edit applicant information?"
+          onClose={() => setConfirmEditing(false)}
+        >
+          <p>
+            Changes saved by HR become the authoritative applicant information
+            and will not be silently replaced by a later Gmail sync, document
+            extraction, or AI fallback.
+          </p>
+          <p>
+            The original submitted evidence remains preserved in the activity
+            and audit history. Adding an applicant photo is optional.
+          </p>
+          <div className="modal-actions">
+            <Button
+              variant="secondary"
+              onClick={() => setConfirmEditing(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => {
+                setConfirmEditing(false);
+                setEditing(true);
+              }}
+            >
+              Continue editing
             </Button>
           </div>
         </Modal>

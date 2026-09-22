@@ -3,7 +3,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import type { Application } from "@/types";
 import { useApp } from "./provider";
-import { Button, Field, Input, Modal, Select, Badge } from "./ui";
+import { Avatar, Button, Field, Input, Modal, Select, Badge } from "./ui";
 import { requestJson } from "@/lib/client-request";
 import { formalName, nameParts } from "@/lib/names";
 import { canManage } from "@/lib/data-policy";
@@ -107,6 +107,22 @@ export function ApplicantEditor({
                 );
                 return;
               }
+              const photo = form.get("photo");
+              const removePhoto = form.get("removePhoto") === "on";
+              if (photo instanceof File && photo.size) {
+                const payload = new FormData();
+                payload.set("photo", photo);
+                await requestJson(`/api/applicants/${application.id}/photo`, {
+                  method: "POST",
+                  body: payload,
+                });
+                await refresh();
+              } else if (removePhoto && application.applicantPhotoId) {
+                await requestJson(`/api/applicants/${application.id}/photo`, {
+                  method: "DELETE",
+                });
+                await refresh();
+              }
             } else {
               const result = createdId
                 ? { id: createdId }
@@ -149,6 +165,32 @@ export function ApplicantEditor({
             {application.id} · {application.source || "Recruitment"}
             {application.isDemo && <Badge tone="amber">DEMO DATA</Badge>}
           </p>
+        )}
+        {application && (
+          <div className="applicant-photo-field">
+            <Avatar
+              name={application.applicant.name}
+              imageUrl={
+                application.applicantPhotoId
+                  ? `/api/applicants/${application.id}/photo?v=${encodeURIComponent(application.applicantPhotoVersion || "1")}`
+                  : undefined
+              }
+            />
+            <div>
+              <Field label="Applicant photo (optional)">
+                <Input name="photo" type="file" accept="image/png,image/jpeg" />
+                <small>
+                  PNG or JPG, up to 2 MB. Initials remain when no photo is set.
+                </small>
+              </Field>
+              {application.applicantPhotoId && (
+                <label className="checkbox-row">
+                  <input name="removePhoto" type="checkbox" />
+                  Remove current photo and use initials
+                </label>
+              )}
+            </div>
+          </div>
         )}
         <div className="form-grid">
           {(

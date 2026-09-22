@@ -191,6 +191,57 @@ export async function sheetsTransaction<T>(
           )
         )
           return;
+        // The first authenticated page load needs the workspace projection,
+        // its relational rows, and the two diagnostic collections. Fetch them
+        // from one immutable gateway snapshot so a cold serverless instance
+        // does not spend several Apps Script executions hydrating one page or
+        // observe a different revision between those reads.
+        if (!prefetched && table === "records" && collection === "workspace") {
+          const queries = [
+              {
+                table: "records",
+                tab: tabFor("records", "workspace"),
+                collection: "workspace",
+                id,
+              },
+              ...workspaceHydrationTables.map((candidate) => ({
+                table: candidate,
+                tab: tabFor(candidate),
+                metadataOnly: candidate === "resumes",
+              })),
+              ...["diagnostics", "diagnostic_reads"].map((candidate) => ({
+                table: "records",
+                tab: tabFor("records", candidate),
+                collection: candidate,
+              })),
+            ],
+            batch = await gatewayRequest<{
+              revision: number;
+              results: DatabaseRow[][];
+            }>("loadMany", { queries });
+          await load(table, collection, id, metadataOnly, {
+            revision: batch.revision,
+            rows: batch.results[0],
+          });
+          for (let i = 0; i < workspaceHydrationTables.length; i++) {
+            const candidate = workspaceHydrationTables[i];
+            await load(
+              candidate,
+              undefined,
+              undefined,
+              candidate === "resumes",
+              { revision: batch.revision, rows: batch.results[i + 1] },
+            );
+          }
+          for (let i = 0; i < 2; i++) {
+            const candidate = ["diagnostics", "diagnostic_reads"][i];
+            await load("records", candidate, undefined, false, {
+              revision: batch.revision,
+              rows: batch.results[workspaceHydrationTables.length + i + 1],
+            });
+          }
+          return;
+        }
         const prerequisites = hydrationPrerequisites(table).filter(
           (dependency) =>
             !current.loaded.has(

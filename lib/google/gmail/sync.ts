@@ -55,7 +55,7 @@ export type IntakeSync = {
 // automatic batches small enough to finish, persist, and release their lease
 // inside a serverless invocation; the browser/cron immediately continues the
 // remaining durable queue.
-export const AUTOMATIC_INTAKE_BATCH_SIZE = 2;
+export const AUTOMATIC_INTAKE_BATCH_SIZE = 5;
 const empty = (): IntakeSync => ({
   status: "idle",
   message: "Ready to check the careers mailbox.",

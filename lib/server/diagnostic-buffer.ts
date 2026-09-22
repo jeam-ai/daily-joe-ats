@@ -3,13 +3,13 @@
 const pending = new Map<
   string,
   {
-    category: "database.unavailable" | "server.failure";
+    category: "database.unavailable" | "server.failure" | "sheets.sync";
     at: string;
     count: number;
   }
 >();
 export function bufferFailure(
-  category: "database.unavailable" | "server.failure",
+  category: "database.unavailable" | "server.failure" | "sheets.sync",
 ) {
   const previous = pending.get(category);
   pending.set(category, {

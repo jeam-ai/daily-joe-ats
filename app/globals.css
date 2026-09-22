@@ -1325,6 +1325,51 @@ tbody tr:hover {
   height: 68px;
   font-size: 21px;
 }
+.applicant-avatar-wrap {
+  position: relative;
+  align-self: flex-start;
+}
+.applicant-avatar-wrap > .avatar {
+  width: 68px;
+  height: 68px;
+}
+.avatar-edit {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  box-shadow: var(--shadow);
+  cursor: pointer;
+}
+.avatar-edit:hover,
+.avatar-edit:focus-visible {
+  color: var(--blue-deep);
+  background: var(--blue);
+}
+.applicant-photo-field {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 16px;
+  align-items: center;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel-soft, var(--bg));
+}
+.inline-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
 .profile-name {
   display: flex;
   align-items: center;

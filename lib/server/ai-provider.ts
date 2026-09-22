@@ -127,12 +127,23 @@ export function geminiProvider(): AiProvider {
 }
 export function classifyAiError(error: unknown): AiProviderError {
   if (error instanceof AiProviderError) return error;
-  const e = error as { status?: number; code?: number; name?: string };
-  if (e.status === 429 || e.code === 429)
+  const e = error as {
+      status?: number | string;
+      code?: number | string;
+      name?: string;
+      message?: string;
+    },
+    message = String(e.message || "");
+  if (
+    Number(e.status) === 429 ||
+    Number(e.code) === 429 ||
+    /(?:429|rate.?limit|quota|resource.?exhausted)/i.test(message)
+  )
     return new AiProviderError("rate_limit", 429);
   if (
     e.name === "TimeoutError" ||
     e.name === "AbortError" ||
+    /(?:timed?\s*out|deadline|abort)/i.test(message) ||
     (error instanceof SafeError && error.status === 504)
   )
     return new AiProviderError("timeout", 504);

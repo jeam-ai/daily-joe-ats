@@ -74,6 +74,8 @@ export interface ApplicationTimelineEvent {
   metadata: Record<string, string>;
 }
 export interface Application {
+  applicantPhotoId?: string;
+  applicantPhotoVersion?: string;
   queueState?: "Active" | "Queued" | "Closed";
   information?: {
     fields: Record<

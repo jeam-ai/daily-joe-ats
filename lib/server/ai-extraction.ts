@@ -8,12 +8,14 @@ import {
   extractionReasons,
   missingInformation,
 } from "@/lib/applicant-information";
+import { canEdit } from "@/lib/data-policy";
 import { seal, unseal } from "@/lib/auth/security";
 import { aiConfigured, aiModel, classifyAiError } from "./ai-provider";
 import { config, SafeError } from "./config";
 import {
   readTransaction,
   transaction,
+  retryableTransaction,
   readRecord,
   putRecord,
   type Transaction,
@@ -162,7 +164,9 @@ export const extractionProvider = (): ExtractionProvider => ({
     try {
       const client = new GoogleGenAI({
         apiKey: process.env.GEMINI_API_KEY!,
-        httpOptions: { timeout: 45000, retryOptions: { attempts: 1 } },
+        // One SDK retry absorbs the provider's short-lived 503 high-demand
+        // response without creating an unbounded request loop.
+        httpOptions: { timeout: 45000, retryOptions: { attempts: 2 } },
       });
       const response = await withDeadline(
         client.models.generateContent({
@@ -198,10 +202,11 @@ export const extractionProvider = (): ExtractionProvider => ({
 export async function runExtractionJobs(
   limit = 2,
   provider: ExtractionProvider = extractionProvider(),
+  preferredApplicationId?: string,
 ) {
   if (!aiConfigured()) return;
   for (let count = 0; count < limit; count++) {
-    const claimed = await transaction(async (tx) => {
+    const claimed = await retryableTransaction(async (tx) => {
       if (
         (
           await readRecord<{ enabled: boolean }>(
@@ -223,7 +228,12 @@ export async function runExtractionJobs(
       );
       const job = rows
         .map((r) => JSON.parse(String(r.payload)) as ExtractionJob)
-        .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+        .sort((a, b) => {
+          const priority =
+            Number(b.applicationId === preferredApplicationId) -
+            Number(a.applicationId === preferredApplicationId);
+          return priority || a.createdAt.localeCompare(b.createdAt);
+        })
         .find(
           (j) =>
             j.attempts < 3 &&
@@ -296,7 +306,7 @@ export async function runExtractionJobs(
           "No readable submitted content is available for extraction.",
         );
       const result = await provider.extract(sources);
-      const committed = await transaction(async (tx) => {
+      const committed = await retryableTransaction(async (tx) => {
         const current = await readRecord<ExtractionJob>(
           tx,
           "extraction_jobs",
@@ -407,10 +417,9 @@ export async function runExtractionJobs(
         ["rate_limit", "timeout", "provider"].includes(code)
       )
         job.retryAt =
-          Date.now() +
-          (code === "rate_limit" ? 3600000 : 60000 * 2 ** job.attempts);
+          Date.now() + (code === "rate_limit" ? 3600000 : 60000 * job.attempts);
       else delete job.retryAt;
-      await transaction(async (tx) => {
+      await retryableTransaction(async (tx) => {
         const current = await readRecord<ExtractionJob>(
           tx,
           "extraction_jobs",
@@ -424,7 +433,7 @@ export async function runExtractionJobs(
             tx,
             "ai_extraction",
             "backoff",
-            Date.now() + (code === "rate_limit" ? 3600000 : 300000),
+            Date.now() + (code === "rate_limit" ? 3600000 : 60000),
           );
         await recordIssue(
           "ai.provider",
@@ -453,6 +462,48 @@ export async function runExtractionJobs(
     }
   }
 }
+export async function retryExtraction(applicationId: string, user: User) {
+  return retryableTransaction(async (tx) => {
+    const state = await getState(tx),
+      application = state.applications.find(
+        (item) => item.id === applicationId && !item.deletedAt,
+      );
+    if (!application) throw new SafeError("Applicant not found.", 404);
+    if (!canEdit(user, application))
+      throw new SafeError("You cannot retry this applicant operation.", 403);
+    const jobs = (
+      await tx.query("SELECT payload FROM records WHERE collection=$1", [
+        "extraction_jobs",
+      ])
+    )
+      .map((row) => JSON.parse(String(row.payload)) as ExtractionJob)
+      .filter((job) => job.applicationId === applicationId)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    const job = jobs[0];
+    if (!job) {
+      await queueExtraction(tx, application, user.email);
+    } else if (job.status !== "Completed") {
+      job.status = "Queued";
+      job.attempts = 0;
+      delete job.error;
+      delete job.errorCode;
+      delete job.retryAt;
+      delete job.leaseUntil;
+      delete job.runId;
+      await putRecord(tx, "extraction_jobs", job.id, job);
+    }
+    await putRecord(tx, "ai_extraction", "backoff", 0);
+    await audit(
+      tx,
+      user.email,
+      "ai.extraction_retry_requested",
+      applicationId,
+      {
+        jobId: job?.id,
+      },
+    );
+  });
+}
 export async function extractionStatus() {
   const snapshot = await readTransaction(async (tx) => ({
     enabled:
@@ -471,7 +522,7 @@ export async function extractionStatus() {
     )
   )
     return snapshot;
-  return transaction(async (tx) => {
+  return retryableTransaction(async (tx) => {
     const jobs = (
       await tx.query("SELECT payload FROM records WHERE collection=$1", [
         "extraction_jobs",

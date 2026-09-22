@@ -36,6 +36,10 @@ export async function POST(request: Request) {
       });
     after(async () => {
       const started = Date.now();
+      // Drain an existing evidence-extraction job before Gmail document work.
+      // This prevents fallback jobs from remaining queued indefinitely while a
+      // large mailbox backlog keeps consuming the tail of every invocation.
+      await runExtractionJobs(1).catch(() => reportIssue("ai.provider"));
       await syncIntake(user, force, 140000).catch(() =>
         reportIssue("gmail.sync"),
       );

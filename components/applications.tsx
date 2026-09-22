@@ -125,8 +125,42 @@ export function Applications({ talent = false }: { talent?: boolean }) {
   }, [queryParams, dataset, state?.revision, reload]);
   if (!state) return <LoadingSkeleton />;
   const selectedNeed = state.hiringNeeds.find((need) => need.id === needFilter);
-  const rows = listing?.applications || [],
-    total = listing?.total || 0;
+  const canShowImmediate =
+      page === 1 &&
+      !q &&
+      !needFilter &&
+      !status &&
+      !stage &&
+      !position &&
+      !location &&
+      !screening &&
+      !date &&
+      !experience &&
+      !employmentStatus &&
+      !urgency,
+    immediateRows = (canShowImmediate ? state.applications : [])
+      .filter((application) => {
+        if (talent) return application.status === "Talent Pool";
+        if (tab === "All applications") return true;
+        if (tab === "Active")
+          return isActive(application) && application.queueState === "Active";
+        if (tab === "Queued") return application.queueState === "Queued";
+        if (tab === "Interviews")
+          return ["Initial Interview", "Final Interview"].includes(
+            application.stage,
+          );
+        if (tab === "Pre-employment")
+          return application.stage === "Requirements";
+        if (tab === "Onboarding") return application.stage === "Onboarding";
+        if (tab === "Hired")
+          return (
+            application.stage === "Hired" || application.status === "Hired"
+          );
+        return true;
+      })
+      .sort((a, b) => b.appliedAt.localeCompare(a.appliedAt)),
+    rows = listing?.applications || immediateRows.slice(0, 20),
+    total = listing?.total ?? immediateRows.length;
   const pageCount = Math.max(1, Math.ceil(total / 20)),
     currentPage = listing?.page || page,
     visible = rows;
@@ -448,14 +482,15 @@ export function Applications({ talent = false }: { talent?: boolean }) {
                 : "applications"}
           </span>
         </div>
-        {listError ? (
+        {listError && (
           <div className="error-banner" role="alert">
             {listError}
             <Button variant="secondary" onClick={() => setReload((v) => v + 1)}>
               Retry
             </Button>
           </div>
-        ) : listLoading ? (
+        )}
+        {listLoading && !rows.length ? (
           <LoadingSkeleton />
         ) : rows.length ? (
           <Table>

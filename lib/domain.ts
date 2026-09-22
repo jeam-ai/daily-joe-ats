@@ -26,6 +26,8 @@ export const userSchema = z.object({
   avatarUrl: z.url().max(500).optional(),
 });
 export const applicationSchema = z.object({
+  applicantPhotoId: id.optional(),
+  applicantPhotoVersion: text.optional(),
   assignedBranch: text.optional(),
   editedBy: text.optional(),
   editedAt: z.iso.datetime().optional(),

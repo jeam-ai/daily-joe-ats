@@ -593,6 +593,10 @@ export async function settleHealthDiagnostics(snapshot: HealthSnapshot) {
     }
   }
   await resolveIssue("database.unavailable").catch(() => undefined);
+  if (
+    snapshot.checks.find((check) => check.id === "sheets")?.status === "Healthy"
+  )
+    await resolveIssue("sheets.sync", {}, true).catch(() => undefined);
 }
 export async function aiIntegration() {
   const health = await cachedHealth();

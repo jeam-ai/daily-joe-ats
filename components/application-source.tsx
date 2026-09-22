@@ -3,10 +3,15 @@ import { useEffect } from "react";
 import type { Application } from "@/types";
 import { requestJson } from "@/lib/client-request";
 import { Badge, Button, Card } from "./ui";
+import { Pencil } from "lucide-react";
 export function ApplicationSource({
   application: a,
+  editable = false,
+  onEdit,
 }: {
   application: Application;
+  editable?: boolean;
+  onEdit?: () => void;
 }) {
   useEffect(() => {
     void requestJson(`/api/applicants/${a.id}/activity`, {
@@ -22,7 +27,19 @@ export function ApplicationSource({
     <Card className="spaced">
       <div className="card-heading">
         <h2>Application Source</h2>
-        <Badge>{a.isDemo ? "DEMO DATA" : a.source || "Manual"}</Badge>
+        <div className="inline-actions">
+          <Badge>{a.isDemo ? "DEMO DATA" : a.source || "Manual"}</Badge>
+          {onEdit && (
+            <Button
+              variant="secondary"
+              onClick={onEdit}
+              disabled={!editable}
+              aria-label="Edit application source and applicant information"
+            >
+              <Pencil size={15} /> Edit
+            </Button>
+          )}
+        </div>
       </div>
       <div className="padded form-stack">
         <p>

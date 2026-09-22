@@ -218,10 +218,15 @@ export async function previewImport(
         /\.(pdf|docx|txt|png|jpe?g)$/i.test(p.filename!),
       );
       if (!p) {
+        const legacyWord = attachments.some((part) =>
+          /\.doc$/i.test(part.filename || ""),
+        );
         skip(
-          attachments.length
-            ? "Unsupported resume format (PDF, DOCX, JPG, PNG, or TXT required)."
-            : "Missing resume attachment.",
+          legacyWord
+            ? "Legacy Microsoft Word .doc is not a supported resume format. Ask the applicant to resend it as PDF or DOCX; Gmail intake will continue with other applications."
+            : attachments.length
+              ? "Unsupported resume format (PDF, DOCX, JPG, PNG, or TXT required)."
+              : "Missing resume attachment.",
         );
         continue;
       }
@@ -287,9 +292,11 @@ export async function previewImport(
         emails.add(email);
         hashes.add(hash);
         threads.add(message.threadId);
-      } catch {
+      } catch (error) {
         skip(
-          "Failed to read resume. Check for a damaged or password-protected attachment and retry with an unlocked copy.",
+          error instanceof SafeError
+            ? `Failed to read resume: ${error.message}`
+            : "Failed to read resume. Check for a damaged or password-protected attachment and retry with an unlocked copy.",
         );
       }
     }

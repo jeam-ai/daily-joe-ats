@@ -3,15 +3,22 @@ import { useEffect, useState } from "react";
 import { requestJson } from "@/lib/client-request";
 import type { Application } from "@/types";
 import { Card, Badge } from "./ui";
+import { Button } from "./ui";
+import { Pencil } from "lucide-react";
 import { useApp } from "./provider";
 import { missingInformation } from "@/lib/applicant-information";
 export function ApplicantInformation({
   application: a,
+  editable = false,
+  onEdit,
 }: {
   application: Application;
+  editable?: boolean;
+  onEdit?: () => void;
 }) {
   const { state } = useApp();
   const [extractionError, setExtractionError] = useState("");
+  const [retrying, setRetrying] = useState(false);
   const [extraction, setExtraction] =
     useState<{ status: string; error?: string; createdAt: string }[]>();
   useEffect(() => {
@@ -59,6 +66,16 @@ export function ApplicantInformation({
             Submitted facts and recruitment assignment are recorded separately.
           </p>
         </div>
+        {onEdit && (
+          <Button
+            variant="secondary"
+            onClick={onEdit}
+            disabled={!editable}
+            aria-label="Edit applicant information"
+          >
+            <Pencil size={15} /> Edit
+          </Button>
+        )}
       </div>
       <dl className="information-grid">
         {rows.map(([key, label, value]) => (
@@ -93,17 +110,52 @@ export function ApplicantInformation({
       </dl>
       <div className="padded">
         {extraction?.[0] && (
-          <p
+          <div
             className={
               extraction[0].status === "Failed"
                 ? "warning-banner"
                 : "info-banner"
             }
           >
-            AI Assist extraction: {extraction[0].status}.{" "}
-            {extraction[0].error ||
-              "Evidence-supported clarification only; HR verifies applicant information."}
-          </p>
+            <p>
+              AI Assist extraction: {extraction[0].status}.{" "}
+              {extraction[0].error ||
+                "Evidence-supported clarification only; HR verifies applicant information."}
+            </p>
+            {extraction[0].status === "Failed" && editable && (
+              <Button
+                variant="secondary"
+                disabled={retrying}
+                onClick={async () => {
+                  setRetrying(true);
+                  setExtractionError("");
+                  try {
+                    await requestJson("/api/system/extraction", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        retry: true,
+                        applicationId: a.id,
+                      }),
+                    });
+                    setExtraction((current) =>
+                      current?.map((job, index) =>
+                        index === 0
+                          ? { ...job, status: "Queued", error: undefined }
+                          : job,
+                      ),
+                    );
+                  } catch (error) {
+                    setExtractionError((error as Error).message);
+                  } finally {
+                    setRetrying(false);
+                  }
+                }}
+              >
+                {retrying ? "Queuing retry…" : "Retry AI fallback"}
+              </Button>
+            )}
+          </div>
         )}
         {extractionError && <p className="fine-print">{extractionError}</p>}
         <h3>Recruitment assignment</h3>

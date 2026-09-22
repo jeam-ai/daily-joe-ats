@@ -15,7 +15,13 @@ export function detectResumeType(bytes: Buffer, filename: string) {
   const prefix = (values: number[]) => values.every((v, i) => bytes[i] === v);
   if (bytes.length > 8 * 1024 * 1024 || !bytes.length)
     throw new SafeError("Choose a non-empty resume under 8 MB.");
-  if (/\.pdf$/i.test(filename) && bytes.subarray(0, 5).toString() === "%PDF-")
+  // ISO 32000 permits a PDF header after a short binary/comment prefix. Some
+  // phone scanners and office exporters use that form, so inspect the first
+  // 1 KiB instead of rejecting an otherwise valid PDF at byte zero.
+  if (
+    /\.pdf$/i.test(filename) &&
+    bytes.subarray(0, 1024).includes(Buffer.from("%PDF-"))
+  )
     return "application/pdf";
   if (/\.docx$/i.test(filename) && prefix([0x50, 0x4b, 0x03, 0x04]))
     return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
