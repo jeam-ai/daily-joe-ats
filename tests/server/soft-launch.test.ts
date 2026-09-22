@@ -277,7 +277,7 @@ test("transactional production repository and intake boundaries", async (t) => {
     },
   );
   await t.test(
-    "preview uses the official mailbox, newest eligible messages, and reports missing resumes",
+    "preview keeps email-submitted applications when a resume is missing",
     async () => {
       await reset();
       await withStore((s) => {
@@ -337,8 +337,10 @@ test("transactional production repository and intake boundaries", async (t) => {
       try {
         const p = await previewImport(user);
         assert.equal(p.rows[0].messageId, "newer");
-        assert.equal(p.rows.length, 2);
-        assert.ok(p.issues.some((i) => i.reason.includes("Missing")));
+        assert.equal(p.rows.length, 3);
+        const missing = p.rows.find((row) => row.messageId === "missing");
+        assert.equal(missing?.hasResume, false);
+        assert.match(missing?.processingNote || "", /No resume was attached/);
         assert.equal(sendCalls, 0);
       } finally {
         globalThis.fetch = original;

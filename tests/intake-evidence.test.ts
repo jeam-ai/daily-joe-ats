@@ -61,3 +61,13 @@ test("explicit preferences and conflicting submitted branches remain auditable",
   );
   assert.equal(conflict.warnings.length, 1);
 });
+test("email subject and conversational body remain usable when a resume is unavailable", () => {
+  const body = intakeEvidence({
+    subject: "RESUME FOR JOB APPLICATION",
+    body: "Hello po, good day! I'm Jean Mitch Peñaflor po, applying for barista. I am willing to learn.",
+  });
+  assert.equal(body.name, "Jean Mitch Peñaflor");
+  assert.equal(body.position, "Barista");
+  const subject = intakeEvidence({ subject: "Jennifer Mendoza - Resume" });
+  assert.equal(subject.name, "Jennifer Mendoza");
+});

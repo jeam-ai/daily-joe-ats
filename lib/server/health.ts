@@ -131,6 +131,7 @@ async function healthStorage(): Promise<HealthStorage> {
       "sync",
       "email_index",
       "extraction_jobs",
+      "ai_extraction",
       "timekeeping_jobs",
       // Loading this encrypted record verifies that private Drive storage is
       // readable without retrieving applicant document contents.
@@ -510,13 +511,25 @@ async function performChecks(): Promise<HealthSnapshot> {
         const completed = jobs.filter((j) =>
           ["Sent", "Completed"].includes(j.status || ""),
         ).length;
+        const backoff =
+          id === "extraction"
+            ? recordValue<number>(snapshot, "ai_extraction", "backoff")
+            : undefined;
+        const delayed = typeof backoff === "number" && backoff > Date.now();
         return {
-          status: failed
-            ? "Attention Needed"
-            : jobs.length
-              ? "Healthy"
-              : "Not Verified",
-          detail: `${queued} queued or processing · ${completed} completed · ${failed} require review. ${jobs.length ? "Based on persisted delivery and job records." : "No operations have been recorded yet."}`,
+          status:
+            failed || delayed || (id === "extraction" && queued > 25)
+              ? "Attention Needed"
+              : jobs.length
+                ? "Healthy"
+                : "Not Verified",
+          detail: `${queued} queued or processing · ${completed} completed · ${failed} require review. ${
+            delayed
+              ? `Gemini requested a bounded retry after ${displayTime(new Date(backoff).toISOString())}; existing System Analysis remains available.`
+              : jobs.length
+                ? "Based on persisted delivery and job records."
+                : "No operations have been recorded yet."
+          }`,
           href:
             id === "timekeeping"
               ? "/timekeeping"

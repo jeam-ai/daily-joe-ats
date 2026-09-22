@@ -183,10 +183,14 @@ function retryableSheetsConflict(error: unknown) {
   return (
     sheetsPrimary() &&
     error instanceof SafeError &&
-    error.status === 409 &&
-    /Records changed while loading|Another update was saved first|finishing another operation/.test(
-      error.message,
-    )
+    ((error.status === 409 &&
+      /Records changed while loading|Another update was saved first|finishing another operation/.test(
+        error.message,
+      )) ||
+      (error.status === 503 &&
+        /storage could not complete this operation|storage is temporarily unavailable|timed out before confirming/.test(
+          error.message,
+        )))
   );
 }
 // Only use this for callbacks containing database reads/writes and no external

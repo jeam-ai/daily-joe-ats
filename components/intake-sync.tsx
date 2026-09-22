@@ -101,7 +101,10 @@ export function IntakeSyncStatus() {
         // The Error Center records server failures. A later cadence retries a
         // safe, leased job without surfacing noisy background toasts.
       } finally {
-        if (!stopped) timer = setTimeout(() => void pump(), 180000);
+        // Two leased jobs run after each request. A one-minute cadence keeps
+        // backlog moving while respecting provider backoff and never blocks
+        // normal workspace navigation.
+        if (!stopped) timer = setTimeout(() => void pump(), 60000);
       }
     }
     timer = setTimeout(() => void pump(), 20000);

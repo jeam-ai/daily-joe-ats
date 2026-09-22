@@ -252,7 +252,7 @@ test("matching needs evidence of both position and location; sender addresses ar
     undefined,
   );
 });
-test("unreadable attachments do not pause all intake after the bounded retry limit", async () => {
+test("unreadable attachments preserve email facts and do not pause intake", async () => {
   const state = await transaction(getState);
   await transaction((tx) =>
     putRecord(tx, "jobs", "gmail", {
@@ -303,9 +303,15 @@ test("unreadable attachments do not pause all intake after the bounded retry lim
     assert.equal(job.status, "complete");
     assert.equal(job.consecutiveFailures, 0);
     assert.equal(job.pending.length, 0);
-    assert.ok(job.issues.some((i) => /Failed to read/.test(i.reason)));
-    assert.match(job.message, /continue importing/);
+    assert.equal(job.imported, 1);
+    assert.doesNotMatch(job.message, /unreadable attachments/i);
     assert.ok(job.seenIds?.includes("broken"));
+    const imported = (await transaction(getState)).applications.find(
+      (application) => application.gmailMessageId === "broken",
+    );
+    assert.ok(imported);
+    assert.equal(imported?.resumeId, undefined);
+    assert.match(imported?.notes.join(" ") || "", /could not be read/);
   } finally {
     globalThis.fetch = original;
   }

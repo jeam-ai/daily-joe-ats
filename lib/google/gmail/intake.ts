@@ -81,6 +81,10 @@ export type PreviewRow = {
   appliedLocation?: string;
   residence?: string;
   processingNote?: string;
+  // An application may be imported from its submitted email even when an
+  // attachment is missing, damaged, or in an unsupported format. This keeps
+  // the original message auditable without pretending a resume was stored.
+  hasResume?: boolean;
   evidence?: ReturnType<typeof intakeEvidence>;
 };
 type Preview = {
@@ -120,6 +124,24 @@ export async function gmail<T>(token: string, url: string): Promise<T> {
 }
 function parts(p: Part): Part[] {
   return [p, ...(p.parts || []).flatMap(parts)];
+}
+function attachmentProblem(
+  attachments: Part[],
+  candidate?: Part,
+  error?: unknown,
+) {
+  if (!candidate) {
+    if (attachments.some((part) => /\.doc$/i.test(part.filename || "")))
+      return "A legacy Word .doc attachment could not be processed. Ask the applicant for PDF or DOCX if the original resume is needed.";
+    return attachments.length
+      ? "An attached file could not be processed as a resume. Applicant details were read from the email subject and body."
+      : "No resume was attached. Applicant details were read from the email subject and body.";
+  }
+  if ((candidate.body?.size || 0) > 8 * 1024 * 1024)
+    return "The attached resume exceeds the 8 MB processing limit. Applicant details were read from the email subject and body.";
+  if (error instanceof SafeError)
+    return `The attached resume could not be processed: ${error.message} Applicant details were read from the email subject and body.`;
+  return "The attached resume could not be read. Applicant details were read from the email subject and body; review the original attachment or request an unlocked copy.";
 }
 export async function previewImport(
   user: User,
@@ -217,21 +239,54 @@ export async function previewImport(
       const p = attachments.find((p) =>
         /\.(pdf|docx|txt|png|jpe?g)$/i.test(p.filename!),
       );
-      if (!p) {
-        const legacyWord = attachments.some((part) =>
-          /\.doc$/i.test(part.filename || ""),
+      const emailBody = messageBody(message.payload);
+      const pushEmailOnly = (reason: string) => {
+        const evidence = intakeEvidence({
+          subject,
+          body: emailBody,
+          filename: attachments[0]?.filename,
+          from,
+        });
+        rows.push({
+          messageId: message.id,
+          threadId: message.threadId,
+          name: evidence.name,
+          evidence,
+          emailBody,
+          sender: from,
+          appliedPosition: evidence.position,
+          appliedLocation: evidence.location,
+          residence: evidence.residence,
+          email,
+          receivedAt: new Date(Number(message.internalDate)).toISOString(),
+          filename: "",
+          mime: "",
+          hash: createHash("sha256")
+            .update(`gmail-message:${message.id}`)
+            .digest("hex"),
+          data: "",
+          text: "",
+          extraction: {
+            method: "text",
+            warnings: [reason],
+          },
+          processingNote: reason,
+          hasResume: false,
+          subject: subject.slice(0, 200),
+          rfcId: /^<[^<>\s]+@[^<>\s]+>$/.test(header("message-id"))
+            ? header("message-id")
+            : "",
+        });
+        emails.add(email);
+        hashes.add(
+          createHash("sha256")
+            .update(`gmail-message:${message.id}`)
+            .digest("hex"),
         );
-        skip(
-          legacyWord
-            ? "Legacy Microsoft Word .doc is not a supported resume format. Ask the applicant to resend it as PDF or DOCX; Gmail intake will continue with other applications."
-            : attachments.length
-              ? "Unsupported resume format (PDF, DOCX, JPG, PNG, or TXT required)."
-              : "Missing resume attachment.",
-        );
-        continue;
-      }
-      if ((p.body?.size || 0) > 8 * 1024 * 1024) {
-        skip("Resume exceeds the 8 MB limit.");
+        threads.add(message.threadId);
+      };
+      if (!p || (p.body?.size || 0) > 8 * 1024 * 1024) {
+        pushEmailOnly(attachmentProblem(attachments, p));
         continue;
       }
       try {
@@ -258,7 +313,6 @@ export async function previewImport(
           Math.max(1, deadline - Date.now()),
         );
         const { text: extracted, mime, extraction } = document;
-        const emailBody = messageBody(message.payload);
         const evidence = intakeEvidence({
           subject,
           body: emailBody,
@@ -284,6 +338,7 @@ export async function previewImport(
           data: bytes.toString("base64"),
           text: extracted,
           extraction,
+          hasResume: true,
           subject: subject.slice(0, 200),
           rfcId: /^<[^<>\s]+@[^<>\s]+>$/.test(header("message-id"))
             ? header("message-id")
@@ -293,11 +348,10 @@ export async function previewImport(
         hashes.add(hash);
         threads.add(message.threadId);
       } catch (error) {
-        skip(
-          error instanceof SafeError
-            ? `Failed to read resume: ${error.message}`
-            : "Failed to read resume. Check for a damaged or password-protected attachment and retry with an unlocked copy.",
-        );
+        // The message itself is still an application. Preserve submitted email
+        // facts and let automatic AI fallback inspect subject/body rather than
+        // repeatedly blocking intake on one unreadable attachment.
+        pushEmailOnly(attachmentProblem(attachments, p, error));
       }
     }
   }
@@ -420,19 +474,25 @@ export async function confirmImport(
       const sequence =
         ((await readRecord<number>(tx, "sequence", "applicant")) || 0) + 1;
       await putRecord(tx, "sequence", "applicant", sequence);
-      const applicationId = `DJC-${new Date().getFullYear()}-${String(sequence).padStart(5, "0")}`,
-        resumeId = crypto.randomUUID();
-      await tx.query(
-        "INSERT INTO resumes(id,sha256,filename,mime,content,extracted_text) VALUES($1,$2,$3,$4,$5,$6)",
-        [
-          resumeId,
-          r.hash,
-          r.filename,
-          r.mime,
-          seal(r.data, config().encryptionKey),
-          seal(r.text, config().encryptionKey),
-        ],
-      );
+      const applicationId = `DJC-${new Date().getFullYear()}-${String(sequence).padStart(5, "0")}`;
+      // Legacy preview records did not have hasResume. Treat a populated file
+      // payload as a real resume for backwards compatibility, but never create
+      // an empty placeholder document for an email-only application.
+      const hasResume =
+        r.hasResume !== false && !!r.filename && !!r.mime && !!r.data;
+      const resumeId = hasResume ? crypto.randomUUID() : undefined;
+      if (resumeId)
+        await tx.query(
+          "INSERT INTO resumes(id,sha256,filename,mime,content,extracted_text) VALUES($1,$2,$3,$4,$5,$6)",
+          [
+            resumeId,
+            r.hash,
+            r.filename,
+            r.mime,
+            seal(r.data, config().encryptionKey),
+            seal(r.text, config().encryptionKey),
+          ],
+        );
       const extracted =
         r.evidence ||
         intakeEvidence({
@@ -515,8 +575,7 @@ export async function confirmImport(
         gmailThreadId: r.threadId,
         rfcMessageId: r.rfcId,
         originalSubject: r.subject,
-        resumeId,
-        resumeHash: r.hash,
+        ...(resumeId ? { resumeId, resumeHash: r.hash } : {}),
         extraction: r.extraction,
         source: "Gmail",
         assignedTo: user.email,

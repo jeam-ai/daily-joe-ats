@@ -30,7 +30,9 @@ export async function GET(request: Request) {
             job.retryAt <= Date.now()),
       );
       if (ready && data.enabled && data.configured)
-        after(() => runExtractionJobs(1).catch(() => undefined));
+        // A short, bounded two-job burst lets automatic fallback keep up with
+        // Gmail batches without turning a status request into a long AI wait.
+        after(() => runExtractionJobs(2).catch(() => undefined));
       return Response.json(
         {
           enabled: data.enabled,

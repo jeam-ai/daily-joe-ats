@@ -132,9 +132,15 @@ export function intakeEvidence(input: {
   const named = (text: string) =>
     text
       .match(
-        /(?:\bmy name is|\b(?:full\s+)?name\s*:)\s*([\p{L}][\p{L} .,'’-]{3,80})(?=\n|$)/iu,
+        /(?:\bmy name is|\b(?:full\s+)?name\s*:|\b(?:i am|i'm|this is))\s*([\p{L}][\p{L} .,'’-]{2,80}?)(?=\s*(?:,|\.|!|\?|\n|$))/iu,
       )?.[1]
-      ?.trim();
+      ?.replace(/\s+(?:po|please)$/i, "")
+      .trim();
+  const subjectName = subject
+    .match(
+      /^\s*([\p{L}][\p{L} .,'’-]{3,80}?)\s*[-–—|]\s*(?:resume|cv|curriculum vitae|job application)\b/iu,
+    )?.[1]
+    ?.trim();
   const headingName = resume
     .split(/\n/)
     .map((l) => l.trim())
@@ -175,9 +181,12 @@ export function intakeEvidence(input: {
     provenance.residence = resume.includes(residence) ? "Resume" : "Email body";
   }
   const displayName = senderName(input.from || "");
-  const name = normalizeName(resumeName || submittedName || displayName);
+  const name = normalizeName(
+    resumeName || submittedName || subjectName || displayName,
+  );
   if (resumeName) evidence.name = `Resume: ${resumeName}`;
   else if (submittedName) evidence.name = `Email body: ${submittedName}`;
+  else if (subjectName) evidence.name = `Email subject: ${subjectName}`;
   else if (
     name !==
     "Applicant name was not clearly stated in the submitted application."
@@ -257,7 +266,7 @@ export function intakeEvidence(input: {
     evidence,
     sources: provenance,
     nameUncertain:
-      (!explicitResumeName && !submittedName) ||
+      (!explicitResumeName && !submittedName && !subjectName) ||
       (!!headingName && !explicitResumeName),
     warnings,
   };

@@ -220,14 +220,30 @@ export async function syncIntake(
       automatic: true,
     });
     job.checked = preview.scanned;
-    const selections = preview.rows.map((row) => ({
-      messageId: row.messageId,
-      name:
-        row.name ||
-        "Applicant name was not clearly stated in the submitted application.",
-      hiringNeedId:
-        matchHiringNeed(row.subject, workspace.hiringNeeds)?.id || "",
-    }));
+    // Public preview rows deliberately omit email body and resume content.
+    // Automatic intake retains its in-memory preview only for this one
+    // transaction so matching can use the submitted message without storing
+    // another binary-heavy preview record.
+    const automaticRows = preview.automaticPreview?.rows;
+    const selections = preview.rows.map((row) => {
+      const submitted = automaticRows?.find(
+        (candidate) => candidate.messageId === row.messageId,
+      );
+      return {
+        messageId: row.messageId,
+        name:
+          row.name ||
+          "Applicant name was not clearly stated in the submitted application.",
+        hiringNeedId:
+          // A submitted role or preferred branch is often written in the email
+          // body rather than its generic subject. Matching is advisory only and
+          // never replaces the separately recorded submitted position/location.
+          matchHiringNeed(
+            `${row.subject}\n${submitted?.emailBody || ""}`,
+            workspace.hiringNeeds,
+          )?.id || "",
+      };
+    });
     // Re-read the grant before committing; disconnecting stops pending imports.
     const currentConnection = await official();
     if (currentConnection.connectedAt !== connection.connectedAt)
