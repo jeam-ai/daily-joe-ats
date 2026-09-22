@@ -120,7 +120,11 @@ export async function syncIntake(
       return null;
     Object.assign(job, {
       runId,
-      leaseUntil: now + budgetMs + 20000,
+      // The browser route may spend additional time committing and
+      // checkpointing after its document-processing budget. Keep the lease
+      // aligned with the 240-second serverless ceiling so a status poll never
+      // starts a second writer while the original invocation is still alive.
+      leaseUntil: now + Math.max(budgetMs + 20000, 230000),
       status: "checking",
       startedAt: new Date(now).toISOString(),
       message: "Checking the official mailbox…",
