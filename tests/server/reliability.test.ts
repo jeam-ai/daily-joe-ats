@@ -15,6 +15,7 @@ import {
   getState,
   saveState,
   publicState,
+  visibleState,
   updateState,
 } from "../../lib/server/repository";
 import { createApplicant } from "../../lib/server/applicants";
@@ -175,6 +176,32 @@ test("latest 100 membership, promotion, indexed server pages and HR source prote
   assert.equal(saved.location, "Naga City");
   assert.equal(saved.information?.fields.residence.verifiedBy, user.email);
   assert.notEqual(saved.information?.fields.name.verifiedBy, "forged");
+});
+test("workspace bootstrap bounds application details and saves preserve omitted records", async () => {
+  await transaction((tx) => putRecord(tx, "workspace", "main", initialState()));
+  const sourceId = await applicant("workspace-preview-source");
+  const source = await current(sourceId);
+  await transaction(async (tx) => {
+    const state = await getState(tx);
+    state.applications = Array.from({ length: 60 }, (_, index) => ({
+      ...structuredClone(source),
+      id: `workspace-preview-${String(index).padStart(2, "0")}`,
+      applicant: {
+        ...structuredClone(source.applicant),
+        id: `workspace-person-${index}`,
+        email: `workspace-preview-${index}@example.invalid`,
+        name: `Preview Applicant ${index}`,
+      },
+      appliedAt: new Date(Date.UTC(2026, 8, 1, 0, index)).toISOString(),
+    }));
+    await saveState(tx, state, { sync: false });
+  });
+  const full = await readTransaction(getState);
+  const preview = visibleState(full, user);
+  assert.equal(preview.applications.length, 50);
+  assert.equal(preview.applicationSummary?.real.total, 60);
+  await updateState(preview, user, true);
+  assert.equal((await readTransaction(getState)).applications.length, 60);
 });
 test("Proceed commits one transition and one encrypted email, duplicate sends are fenced, failures retry without advancing twice", async () => {
   const id = await applicant("email");
@@ -600,7 +627,13 @@ test("large Odoo jobs preserve 900+ source rows, report progress and deduplicate
   const preview = completed.result as { id: string; attendanceRows: number };
   assert.equal(preview.attendanceRows, 975);
   const analysis = await createTimekeepingJob(
-    { kind: "analyze", id: preview.id, rules: defaultOdooRules, aliases: {} },
+    {
+      kind: "analyze",
+      id: preview.id,
+      rules: defaultOdooRules,
+      aliases: {},
+      cutoff: { start: "2026-08-31", end: "2026-09-15" },
+    },
     user,
   );
   await Promise.all([
@@ -615,7 +648,9 @@ test("large Odoo jobs preserve 900+ source rows, report progress and deduplicate
     (finished.result as { batchId: string }).batchId,
     user,
   );
-  assert.equal(batch.records.length, 975);
+  assert.equal(batch.period.start, "2026-08-31");
+  assert.equal(batch.period.end, "2026-09-15");
+  assert.equal(batch.records.length, 1040);
   assert.equal(batch.records.flatMap((r) => r.raw).length, 975);
   await assert.rejects(
     getTimekeepingJob(job.id, { ...user, email: "other@example.invalid" }),

@@ -31,7 +31,6 @@ import {
 import Link from "next/link";
 import { QualificationEditor } from "./qualification-editor";
 import type { QualificationRule } from "@/types";
-import { isActive } from "@/lib/recruitment";
 import { canManage } from "@/lib/data-policy";
 export function HiringNeeds() {
   const { state, update, notify, saving, dataset } = useApp();
@@ -58,11 +57,11 @@ export function HiringNeeds() {
   const requested = state.hiringNeeds
     .filter((n) => n.status !== "Closed")
     .reduce((total, need) => total + need.slots, 0);
-  const pipeline = state.applications.filter(
-    (application) =>
-      isActive(application) &&
-      openNeeds.some((need) => need.id === application.hiringNeedId),
-  ).length;
+  const pipeline = openNeeds.reduce(
+    (total, need) =>
+      total + (state.applicationSummary?.[dataset].activeByHiringNeed[need.id] || 0),
+    0,
+  );
   async function save(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const data = new FormData(e.currentTarget);
@@ -191,11 +190,7 @@ export function HiringNeeds() {
               </div>
               <div>
                 <strong>
-                  {
-                    state.applications.filter(
-                      (a) => a.hiringNeedId === n.id && isActive(a),
-                    ).length
-                  }
+                  {state.applicationSummary?.[dataset].activeByHiringNeed[n.id] || 0}
                 </strong>
                 <span>in pipeline</span>
               </div>
@@ -215,6 +210,23 @@ export function HiringNeeds() {
               <CalendarDays size={15} />
               Target: {formatDate(n.targetDate, state.preferences)}
             </p>
+            {(() => {
+              const days = Math.ceil(
+                (Date.parse(n.targetDate) - Date.now()) / 86400000,
+              );
+              if (!Number.isFinite(days) || n.status === "Closed") return null;
+              if (days > 7) return null;
+              const graceDays = Math.max(0, days + 10);
+              return (
+                <p className="retention-inline">
+                  {days > 0
+                    ? `Hiring request target date is in ${days} day${days === 1 ? "" : "s"}.`
+                    : graceDays > 0
+                      ? `This hiring need will be permanently removed in ${graceDays} day${graceDays === 1 ? "" : "s"} unless retained or reopened.`
+                      : "Hiring need retention period has elapsed. Reopen or update the target date to retain it."}
+                </p>
+              );
+            })()}
             <ul>
               {n.criteria?.map((r) => (
                 <li key={r.id}>

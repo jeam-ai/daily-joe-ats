@@ -15,7 +15,7 @@ export async function POST(request: Request) {
     const result = await createApplicant(JSON.parse(text), user);
     return Response.json({
       ...result,
-      syncStatus: "Changes committed to Google Sheets.",
+      syncStatus: "Changes saved to the ATS database.",
     });
   } catch (error) {
     return safeError(error);

@@ -1,5 +1,4 @@
 "use client";
-import { activeIntake } from "@/lib/data-policy";
 import { clientFetch, requestJson } from "@/lib/client-request";
 import { useState } from "react";
 import type { User, Location, QualificationRule } from "@/types";
@@ -538,7 +537,7 @@ export function PreferencesSettings() {
           <div className="info-banner">
             <h3>Import policy</h3>
             <p>
-              {state.applications.filter(activeIntake).length} / 100 active
+              {state.applicationSummary?.real.active || 0} / 100 active
               applicants. Applications display 20 records per page.
             </p>
           </div>

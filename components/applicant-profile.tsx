@@ -8,7 +8,7 @@ import {
   workflowTemplate,
 } from "@/lib/email-templates";
 import { EmailHistory, ViewEmail } from "./email-history";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { canManage, canEdit } from "@/lib/data-policy";
 import { ApplicantEditor, DeleteApplicantDialog } from "./applicant-management";
@@ -20,6 +20,7 @@ import {
   Phone,
   MapPin,
   CalendarDays,
+  Clock3,
   Check,
   HelpCircle,
   X,
@@ -121,6 +122,7 @@ export function Timeline({ application }: { application: Application }) {
 export function ApplicantProfile({ id }: { id: string }) {
   const {
     state,
+    ensureApplication,
     updateApplication,
     refresh,
     notify,
@@ -139,12 +141,31 @@ export function ApplicantProfile({ id }: { id: string }) {
   const [templateId, setTemplateId] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [detailLoading, setDetailLoading] = useState(false);
   const [pendingChange, setPendingChange] = useState<{
     action: string;
     value: Application;
   } | null>(null);
+  useEffect(() => {
+    if (!state || state.applications.some((application) => application.id === id))
+      return;
+    let current = true;
+    setDetailLoading(true);
+    ensureApplication(id)
+      .catch((cause) => {
+        if (current) setError((cause as Error).message);
+      })
+      .finally(() => {
+        if (current) setDetailLoading(false);
+      });
+    return () => {
+      current = false;
+    };
+  }, [state?.revision, state?.applications.length, id, ensureApplication]);
   if (!state) return <LoadingSkeleton />;
   const a = state.applications.find((a) => a.id === id);
+  if (!a)
+    if (detailLoading) return <LoadingSkeleton />;
   if (!a)
     return (
       <EmptyState
@@ -155,6 +176,18 @@ export function ApplicantProfile({ id }: { id: string }) {
   const app = a;
   const editable = canEdit(state.currentUser, a);
   const manager = canManage(state.currentUser);
+  const talentPoolDays = Math.ceil(
+    (Date.parse(a.talentPoolAddedAt || a.appliedAt) +
+      30 * 86400000 -
+      Date.now()) /
+      86400000,
+  );
+  const talentGraceDays = Math.ceil(
+    (Date.parse(a.talentPoolAddedAt || a.appliedAt) +
+      40 * 86400000 -
+      Date.now()) /
+      86400000,
+  );
   const actorEmail = state.currentUser?.email;
   const next = nextStage(a);
   const requestEdit = () => {
@@ -391,6 +424,63 @@ export function ApplicantProfile({ id }: { id: string }) {
         editable={editable}
         onEdit={requestEdit}
       />
+      {a.status === "Talent Pool" && (
+        <Card className="spaced retention-card">
+          <div className="card-heading">
+            <div>
+              <h2>
+                <Clock3 size={17} /> Talent Pool retention
+              </h2>
+              <p>
+                {a.talentPoolExpiredAt
+                  ? "This applicant has left the Talent Pool. Their application history remains available."
+                  : talentPoolDays > 0
+                    ? `Talent Pool expires in ${talentPoolDays} day${talentPoolDays === 1 ? "" : "s"}.`
+                    : `Talent Pool retention expires in ${Math.max(0, talentGraceDays)} day${talentGraceDays === 1 ? "" : "s"}. Retain applicant to keep them in the pool.`}
+              </p>
+            </div>
+            {!a.talentPoolExpiredAt && (
+              <Badge tone={talentGraceDays <= 10 ? "orange" : "neutral"}>
+                Expires{" "}
+                {formatDate(
+                  new Date(
+                    Date.parse(a.talentPoolAddedAt || a.appliedAt) +
+                      30 * 86400000,
+                  ).toISOString(),
+                  state.preferences,
+                )}
+              </Badge>
+            )}
+          </div>
+          {manager && (
+            <Button
+              variant="secondary"
+              disabled={saving}
+              onClick={async () => {
+                setSaving(true);
+                try {
+                  await requestJson(
+                    `/api/applicants/${encodeURIComponent(a.id)}/retention`,
+                    {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ action: "retain-talent-pool" }),
+                    },
+                  );
+                  await refresh();
+                  notify("Talent Pool retention reset for 30 days.");
+                } catch (error) {
+                  notify((error as Error).message, "error");
+                } finally {
+                  setSaving(false);
+                }
+              }}
+            >
+              Retain / Reset 30 days
+            </Button>
+          )}
+        </Card>
+      )}
       <DocumentRecovery application={a} />
       <div className="stage-track">
         {[

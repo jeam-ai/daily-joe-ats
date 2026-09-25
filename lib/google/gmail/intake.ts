@@ -3,11 +3,7 @@ import { evidenceInformation } from "@/lib/applicant-information";
 import { recordIssue } from "@/lib/server/diagnostics";
 import { intakeEvidence, messageBody } from "@/lib/intake-evidence";
 import { matchHiringNeed, senderName } from "@/lib/intake-matching";
-import {
-  activeIntake,
-  intakeCapacity,
-  INTAKE_QUEUE_LIMIT,
-} from "@/lib/data-policy";
+import { activeIntake } from "@/lib/data-policy";
 import "server-only";
 import { createHash } from "node:crypto";
 import mammoth from "mammoth";
@@ -70,6 +66,7 @@ export type PreviewRow = {
   filename: string;
   mime: string;
   hash: string;
+  attachmentId?: string;
   data: string;
   text: string;
   subject: string;
@@ -200,7 +197,6 @@ export async function previewImport(
       state.applications.map((a) => a.applicant.email.toLowerCase()),
     ),
     hashes = new Set(state.applications.map((a) => a.resumeHash)),
-    threads = new Set(state.applications.map((a) => a.gmailThreadId)),
     seen = new Set(state.applications.map((a) => a.gmailMessageId));
   {
     for (const message of messages) {
@@ -219,12 +215,8 @@ export async function previewImport(
         skip("Not an eligible external applicant sender.");
         continue;
       }
-      if (
-        emails.has(email) ||
-        threads.has(message.threadId) ||
-        seen.has(message.id)
-      ) {
-        skip("Duplicate applicant, message, or thread.");
+      if (seen.has(message.id)) {
+        skip("This Gmail message was already imported.");
         continue;
       }
       const attachments = parts(message.payload).filter((p) => p.filename);
@@ -239,6 +231,7 @@ export async function previewImport(
           mime: string;
           hash: string;
           data: string;
+          attachmentId?: string;
         },
       ) => {
         const evidence = intakeEvidence({
@@ -266,6 +259,7 @@ export async function previewImport(
             createHash("sha256")
               .update(`gmail-message:${message.id}`)
               .digest("hex"),
+          attachmentId: deferredResume?.attachmentId,
           data: deferredResume?.data || "",
           text: "",
           extraction: {
@@ -280,13 +274,13 @@ export async function previewImport(
             : "",
         });
         emails.add(email);
+        seen.add(message.id);
         hashes.add(
           deferredResume?.hash ||
             createHash("sha256")
               .update(`gmail-message:${message.id}`)
               .digest("hex"),
         );
-        threads.add(message.threadId);
       };
       if (Date.now() >= deadline) {
         if (options.automatic) {
@@ -312,6 +306,7 @@ export async function previewImport(
             mime: string;
             hash: string;
             data: string;
+            attachmentId?: string;
           }
         | undefined;
       try {
@@ -329,10 +324,6 @@ export async function previewImport(
         const bytes = Buffer.from(content, "base64url");
         if (bytes.length > 8 * 1024 * 1024) throw Error();
         const hash = createHash("sha256").update(bytes).digest("hex");
-        if (hashes.has(hash)) {
-          skip("Duplicate resume.");
-          continue;
-        }
         // A slow scan must never freeze the intake queue. Once a document has
         // passed type validation, retain the original securely and let HR
         // explicitly reprocess it later if this short automatic budget is
@@ -343,6 +334,7 @@ export async function previewImport(
           mime: detectedMime,
           hash,
           data: bytes.toString("base64"),
+          attachmentId: p.body?.attachmentId,
         };
         const remaining = deadline - Date.now();
         const extractionBudget = options.automatic
@@ -382,6 +374,7 @@ export async function previewImport(
           filename: p.filename!,
           mime,
           hash,
+          attachmentId: p.body?.attachmentId,
           data: bytes.toString("base64"),
           text: extracted,
           extraction,
@@ -392,8 +385,8 @@ export async function previewImport(
             : "",
         });
         emails.add(email);
+        seen.add(message.id);
         hashes.add(hash);
-        threads.add(message.threadId);
       } catch (error) {
         // The message itself is still an application. Preserve submitted email
         // facts and let automatic AI fallback inspect subject/body rather than
@@ -492,16 +485,7 @@ export async function confirmImport(
         throw new SafeError(
           "Choose a valid hiring need or leave it unassigned, and verify the applicant name.",
         );
-      if (
-        state.applications.some(
-          (a) =>
-            a.gmailMessageId === r.messageId ||
-            a.gmailThreadId === r.threadId ||
-            a.resumeHash === r.hash ||
-            (!a.isDemo &&
-              a.applicant.email.toLowerCase() === r.email.toLowerCase()),
-        )
-      ) {
+      if (state.applications.some((a) => a.gmailMessageId === r.messageId)) {
         issues.push({
           message: r.subject,
           reason: "Duplicate found at confirmation; skipped.",
@@ -511,13 +495,6 @@ export async function confirmImport(
       const position =
         r.appliedPosition ||
         "Applied position was not clearly stated in the submitted application.";
-      if (intakeCapacity(state.applications).full) {
-        issues.push({
-          message: r.subject,
-          reason: `Intake capacity is full (${INTAKE_QUEUE_LIMIT} eligible applications). This message remains in Gmail and can be imported when space becomes available.`,
-        });
-        continue;
-      }
       const location =
         r.appliedLocation ||
         "Preferred work location was not clearly stated in the submitted application.";
@@ -532,8 +509,15 @@ export async function confirmImport(
       // an empty placeholder document for an email-only application.
       const hasResume =
         r.hasResume !== false && !!r.filename && !!r.mime && !!r.data;
-      const resumeId = hasResume ? crypto.randomUUID() : undefined;
-      if (resumeId)
+      const existingResume = hasResume
+        ? (
+            await tx.query("SELECT id FROM resumes WHERE sha256=$1", [r.hash])
+          )[0]
+        : undefined;
+      const resumeId = hasResume
+        ? String(existingResume?.id || crypto.randomUUID())
+        : undefined;
+      if (resumeId && !existingResume)
         await tx.query(
           "INSERT INTO resumes(id,sha256,filename,mime,content,extracted_text) VALUES($1,$2,$3,$4,$5,$6)",
           [
@@ -541,8 +525,23 @@ export async function confirmImport(
             r.hash,
             r.filename,
             r.mime,
-            seal(r.data, config().encryptionKey),
+            // The original remains in Gmail/Drive. New Aiven records retain
+            // only source metadata and useful extracted text, never document
+            // bytes. Existing legacy bytes remain readable until cutover is
+            // explicitly verified and retired.
+            "",
             seal(r.text, config().encryptionKey),
+          ],
+        );
+      if (resumeId)
+        await tx.query(
+          "INSERT INTO resume_sources(resume_id,provider,gmail_message_id,gmail_attachment_id,created_at) VALUES($1,$2,$3,$4,$5) ON CONFLICT(resume_id) DO NOTHING",
+          [
+            resumeId,
+            "gmail",
+            r.messageId,
+            r.attachmentId || null,
+            new Date().toISOString(),
           ],
         );
       const extracted =
@@ -558,7 +557,13 @@ export async function confirmImport(
         id: applicationId,
         information: evidenceInformation(extracted),
         applicant: {
-          id: crypto.randomUUID(),
+          id:
+            state.applications.find(
+              (candidate) =>
+                !candidate.isDemo &&
+                candidate.applicant.email.toLowerCase() ===
+                  r.email.toLowerCase(),
+            )?.applicant.id || crypto.randomUUID(),
           name: selection.name.trim(),
           email: r.email,
           phone:

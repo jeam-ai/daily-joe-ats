@@ -216,6 +216,7 @@ export function Timekeeping() {
   const [attendance, setAttendance] = useState<File | null>(null),
     [pivot, setPivot] = useState<File | null>(null),
     [preview, setPreview] = useState<Preview | null>(null),
+    [cutoff, setCutoff] = useState({ start: "", end: "" }),
     [batch, setBatch] = useState<OdooBatch | null>(null),
     [batches, setBatches] = useState<BatchIndex[]>([]),
     [rules, setRules] = useState(defaultOdooRules),
@@ -285,6 +286,10 @@ export function Timekeeping() {
     setDetail("");
     setPage(1);
   }
+  function showPreview(value: Preview) {
+    setPreview(value);
+    setCutoff({ start: value.period.start, end: value.period.end });
+  }
   useEffect(() => {
     if (!permitted) return;
     void run("Loading saved analyses", async () => {
@@ -304,7 +309,7 @@ export function Timekeeping() {
           )
         ).job;
         const finished = await watch(current);
-        if (finished.kind === "upload") setPreview(finished.result as Preview);
+        if (finished.kind === "upload") showPreview(finished.result as Preview);
         else await load((finished.result as { batchId: string }).batchId);
       }
     });
@@ -420,7 +425,7 @@ export function Timekeeping() {
                       : job;
                   const finished = await watch(initial);
                   if (finished.kind === "upload")
-                    setPreview(finished.result as Preview);
+                    showPreview(finished.result as Preview);
                   else
                     await load(
                       (finished.result as { batchId: string }).batchId,
@@ -483,7 +488,7 @@ export function Timekeeping() {
                   { method: "POST", body: form },
                 );
                 const completed = await watch(accepted.job);
-                setPreview(completed.result as Preview);
+                showPreview(completed.result as Preview);
                 setAliases({});
               })
             }
@@ -506,6 +511,40 @@ export function Timekeeping() {
                   {w}
                 </p>
               ))}
+              <p className="muted">
+                Confirm the payroll cutoff dates. The report dates shown above
+                are inferred from entries and may omit days with no records.
+              </p>
+              <div className="form-grid">
+                <Field label="Cutoff start">
+                  <Input
+                    type="date"
+                    value={cutoff.start}
+                    onChange={(e) =>
+                      setCutoff((current) => ({
+                        ...current,
+                        start: e.target.value,
+                      }))
+                    }
+                  />
+                </Field>
+                <Field label="Cutoff end">
+                  <Input
+                    type="date"
+                    value={cutoff.end}
+                    onChange={(e) =>
+                      setCutoff((current) => ({
+                        ...current,
+                        end: e.target.value,
+                      }))
+                    }
+                  />
+                </Field>
+              </div>
+              <p className="muted">
+                Analyzing the same cutoff again replaces its saved analysis and
+                previous HR reviews.
+              </p>
               {preview.aliases.length > 0 && (
                 <details>
                   <summary>
@@ -566,6 +605,7 @@ export function Timekeeping() {
                         id: preview.id,
                         rules,
                         aliases,
+                        cutoff,
                       }),
                     );
                     const completed = await watch(accepted.job);
@@ -641,7 +681,7 @@ export function Timekeeping() {
               <p className="muted">
                 {batch.sources.map((s) => s.filename).join(" + ")}
                 {batch.previousBatchId
-                  ? " · Revised analysis; previous version retained"
+                  ? " · Revised analysis; previous saved version replaced"
                   : ""}
               </p>
             </div>

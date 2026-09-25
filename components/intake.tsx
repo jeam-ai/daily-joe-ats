@@ -1,5 +1,5 @@
 "use client";
-import { activeIntake, canManage } from "@/lib/data-policy";
+import { canManage } from "@/lib/data-policy";
 import { clientFetch } from "@/lib/client-request";
 import { useState } from "react";
 import { FileText, ScanText } from "lucide-react";
@@ -97,7 +97,7 @@ export function Intake({ authorized = false }: { authorized?: boolean }) {
         <div>
           <h2>Gmail applicant import</h2>
           <p>
-            {state.applications.filter(activeIntake).length} / 100 active
+            {state.applicationSummary?.real.active || 0} / 100 active
             applicants
           </p>
         </div>

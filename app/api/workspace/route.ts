@@ -35,7 +35,7 @@ export async function PUT(request: Request) {
     // mailbox scan after every HR edit competes with the Sheets transaction
     // that just saved the edit and can delay unrelated workspace reads.
     if (state.syncStatus === "pending")
-      state.syncStatus = "Changes committed to Google Sheets.";
+      state.syncStatus = "Changes saved to the ATS database.";
     return Response.json(state);
   } catch (e) {
     return safeError(e);

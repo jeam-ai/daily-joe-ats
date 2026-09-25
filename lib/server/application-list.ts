@@ -35,7 +35,10 @@ export async function listApplications(params: URLSearchParams, demo = false) {
     const v = params.get(parameter);
     if (v) where.push(`${column}=${bind(v)}`);
   };
-  if (params.get("talent") === "1") where.push("a.status='Talent Pool'");
+  if (params.get("talent") === "1")
+    where.push(
+      `a.status='Talent Pool' AND ${json("a", "talentPoolExpiredAt")} IS NULL`,
+    );
   else
     switch (params.get("tab")) {
       case "Active":
@@ -93,13 +96,20 @@ export async function listApplications(params: URLSearchParams, demo = false) {
     );
     const actual = Math.min(page, Math.max(1, Math.ceil(total / 20)));
     const rows = await tx.query(
-      `SELECT a.payload ${from} ORDER BY w.received_at DESC,a.id DESC LIMIT 20 OFFSET ${bind((actual - 1) * 20)}`,
+      `SELECT a.payload,r.category AS retention_category,r.started_at AS retention_started_at,r.expires_at AS retention_expires_at,r.reason AS retention_reason ${from.replace(" WHERE ", " LEFT JOIN application_retention r ON r.application_id=a.id WHERE ")} ORDER BY w.received_at DESC,a.id DESC LIMIT 20 OFFSET ${bind((actual - 1) * 20)}`,
       values,
     );
     return {
-      applications: rows.map(
-        (r) => JSON.parse(String(r.payload)) as Application,
-      ),
+      applications: rows.map((r) => {
+        const application = JSON.parse(String(r.payload)) as Application;
+        if (r.retention_category) {
+          application.retentionCategory = String(r.retention_category);
+          application.retentionStartedAt = String(r.retention_started_at);
+          application.retentionExpiresAt = String(r.retention_expires_at);
+          application.retentionReason = String(r.retention_reason);
+        }
+        return application;
+      }),
       total,
       page: actual,
     };

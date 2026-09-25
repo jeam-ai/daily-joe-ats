@@ -26,12 +26,28 @@ const schema = [
   "CREATE INDEX IF NOT EXISTS audit_entity_time_idx ON audit_logs(application_id,occurred_at)",
   "CREATE INDEX IF NOT EXISTS audit_action_time_idx ON audit_logs(action,occurred_at)",
   "CREATE TABLE IF NOT EXISTS resumes (id TEXT PRIMARY KEY, sha256 TEXT NOT NULL UNIQUE, filename TEXT NOT NULL, mime TEXT NOT NULL, content TEXT NOT NULL, extracted_text TEXT NOT NULL)",
+  // Source references allow new records to remain in Gmail/Drive rather than
+  // making PostgreSQL a binary document store. Legacy resume bytes are left
+  // untouched until the verified cutover explicitly retires them.
+  "CREATE TABLE IF NOT EXISTS resume_sources (resume_id TEXT PRIMARY KEY REFERENCES resumes(id), provider TEXT NOT NULL, gmail_message_id TEXT, gmail_attachment_id TEXT, drive_file_id TEXT, source_url TEXT, created_at TEXT NOT NULL)",
   "CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE, role TEXT NOT NULL, active INTEGER NOT NULL, payload TEXT NOT NULL)",
-  "CREATE TABLE IF NOT EXISTS applicants (id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE, payload TEXT NOT NULL)",
+  "CREATE TABLE IF NOT EXISTS applicants (id TEXT PRIMARY KEY, email TEXT NOT NULL, payload TEXT NOT NULL)",
+  // A person may return with another distinct Gmail application; the person
+  // row is reused while each application keeps its own lifecycle.
+  "CREATE INDEX IF NOT EXISTS applicants_email_idx ON applicants(email)",
   "CREATE TABLE IF NOT EXISTS hiring_needs (id TEXT PRIMARY KEY, payload TEXT NOT NULL)",
-  "CREATE TABLE IF NOT EXISTS applications (id TEXT PRIMARY KEY, applicant_id TEXT NOT NULL REFERENCES applicants(id), hiring_need_id TEXT REFERENCES hiring_needs(id), resume_id TEXT REFERENCES resumes(id), gmail_message_id TEXT UNIQUE, gmail_thread_id TEXT UNIQUE, stage TEXT NOT NULL, status TEXT NOT NULL, payload TEXT NOT NULL)",
+  "CREATE TABLE IF NOT EXISTS applications (id TEXT PRIMARY KEY, applicant_id TEXT NOT NULL REFERENCES applicants(id), hiring_need_id TEXT REFERENCES hiring_needs(id), resume_id TEXT REFERENCES resumes(id), gmail_message_id TEXT UNIQUE, gmail_thread_id TEXT, stage TEXT NOT NULL CHECK(stage IN ('Screening','Initial Interview','Final Interview','Requirements','Onboarding','Hired')), status TEXT NOT NULL CHECK(status IN ('New','For Review','Approved','In Progress','Hired','Rejected','Withdrawn','No Response','Talent Pool')), payload TEXT NOT NULL)",
+  "CREATE INDEX IF NOT EXISTS applications_thread_idx ON applications(gmail_thread_id)",
+  "CREATE TABLE IF NOT EXISTS talent_pool_memberships (applicant_id TEXT PRIMARY KEY REFERENCES applicants(id), started_at TEXT NOT NULL, expires_at TEXT NOT NULL, grace_expires_at TEXT NOT NULL, updated_by TEXT)",
+  "CREATE INDEX IF NOT EXISTS talent_pool_membership_expiry_idx ON talent_pool_memberships(grace_expires_at)",
   "CREATE TABLE IF NOT EXISTS intake_window (application_id TEXT PRIMARY KEY REFERENCES applications(id), state TEXT NOT NULL, received_at TEXT NOT NULL)",
   "CREATE INDEX IF NOT EXISTS intake_window_order ON intake_window(state,received_at,application_id)",
+  "CREATE TABLE IF NOT EXISTS application_retention (application_id TEXT PRIMARY KEY REFERENCES applications(id), category TEXT NOT NULL, started_at TEXT NOT NULL, expires_at TEXT NOT NULL, reason TEXT NOT NULL)",
+  "CREATE INDEX IF NOT EXISTS application_retention_expiry_idx ON application_retention(expires_at,category)",
+  "CREATE TABLE IF NOT EXISTS hiring_need_retention (hiring_need_id TEXT PRIMARY KEY REFERENCES hiring_needs(id), started_at TEXT NOT NULL, expires_at TEXT NOT NULL, reason TEXT NOT NULL)",
+  "CREATE INDEX IF NOT EXISTS hiring_need_retention_expiry_idx ON hiring_need_retention(expires_at)",
+  "CREATE TABLE IF NOT EXISTS retention_policies (name TEXT PRIMARY KEY, days INTEGER NOT NULL, updated_at TEXT NOT NULL)",
+  "CREATE TABLE IF NOT EXISTS retention_cleanup_metrics (month TEXT NOT NULL, metric TEXT NOT NULL, count INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL, PRIMARY KEY(month,metric))",
   "CREATE TABLE IF NOT EXISTS interviews (id TEXT PRIMARY KEY, application_id TEXT NOT NULL REFERENCES applications(id), payload TEXT NOT NULL)",
   "CREATE TABLE IF NOT EXISTS application_requirements (id TEXT NOT NULL, application_id TEXT NOT NULL REFERENCES applications(id), payload TEXT NOT NULL, PRIMARY KEY(id,application_id))",
   "CREATE TABLE IF NOT EXISTS screening_results (application_id TEXT PRIMARY KEY REFERENCES applications(id), payload TEXT NOT NULL)",
@@ -54,15 +70,37 @@ async function databaseTransaction<T>(
   fn: (tx: Transaction) => Promise<T>,
   options: { readOnly?: boolean; lockKey?: number } = {},
 ): Promise<T> {
+  if (process.env.VERCEL && process.env.PERSISTENCE_PROVIDER === "sheets")
+    throw new SafeError(
+      "Legacy spreadsheet persistence is disabled in production. Configure the Aiven DATABASE_URL and PERSISTENCE_PROVIDER=postgres.",
+      503,
+    );
   if (sheetsPrimary()) return sheetsTransaction(schema, fn, !!options.readOnly);
-  if (
-    process.env.DATABASE_URL &&
-    process.env.PERSISTENCE_PROVIDER !== "local"
-  ) {
+  const connectionUrl =
+    process.env.DATABASE_POOL_URL || process.env.DATABASE_URL;
+  if (connectionUrl && process.env.PERSISTENCE_PROVIDER !== "local") {
+    const aiven = connectionUrl.includes(".aivencloud.com");
+    const aivenCa = process.env.AIVEN_CA_CERT?.replaceAll("\\n", "\n");
+    if (aiven && !aivenCa)
+      throw new SafeError(
+        "AIVEN_CA_CERT is required for verified TLS to the Aiven PostgreSQL service.",
+        503,
+      );
     if (!globalDb.djPool) {
+      let connectionString = connectionUrl;
+      if (aiven) {
+        // node-postgres lets sslmode in a URI replace parts of the explicit
+        // TLS object. Keep the endpoint/user/password from the URI and apply
+        // the service CA through one unambiguous, verified TLS configuration.
+        const uri = new URL(connectionString);
+        uri.searchParams.delete("sslmode");
+        uri.searchParams.delete("sslrootcert");
+        connectionString = uri.toString();
+      }
       globalDb.djPool = new Pool({
-        connectionString: process.env.DATABASE_URL,
-        max: 5,
+        connectionString,
+        ...(aivenCa ? { ssl: { ca: aivenCa, rejectUnauthorized: true } } : {}),
+        max: process.env.VERCEL ? 2 : 5,
         connectionTimeoutMillis: 10000,
         statement_timeout: 30000,
         query_timeout: 35000,
@@ -84,6 +122,23 @@ async function databaseTransaction<T>(
       );
       if (!Object.values(present.rows[0]).every(Boolean))
         await globalDb.djPool!.query(schema.join("; "));
+      // One Gmail thread can legitimately contain multiple application
+      // messages. Only the individual message id is an idempotency key.
+      await globalDb.djPool!.query(
+        "ALTER TABLE applications DROP CONSTRAINT IF EXISTS applications_gmail_thread_id_key",
+      );
+      await globalDb.djPool!.query(`
+        DO $$ BEGIN
+          IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='applications_stage_valid') THEN
+            ALTER TABLE applications ADD CONSTRAINT applications_stage_valid
+              CHECK (stage IN ('Screening','Initial Interview','Final Interview','Requirements','Onboarding','Hired'));
+          END IF;
+          IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='applications_status_valid') THEN
+            ALTER TABLE applications ADD CONSTRAINT applications_status_valid
+              CHECK (status IN ('New','For Review','Approved','In Progress','Hired','Rejected','Withdrawn','No Response','Talent Pool'));
+          END IF;
+        END $$
+      `);
     })().catch((error) => {
       globalDb.djSchemaReady = undefined;
       throw error;
@@ -117,7 +172,7 @@ async function databaseTransaction<T>(
   }
   if (process.env.VERCEL)
     throw new SafeError(
-      "Configure verified Google Sheets persistence before deploying. Local storage is not supported on Vercel.",
+      "Configure DATABASE_URL for the authoritative PostgreSQL service. Local storage is not supported on Vercel.",
       503,
     );
   const run = (globalDb.djDbQueue || Promise.resolve()).then(async () => {

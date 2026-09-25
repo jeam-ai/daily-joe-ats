@@ -15,6 +15,31 @@ export type ApplicationStatus =
   | "Withdrawn"
   | "No Response"
   | "Talent Pool";
+export interface ApplicationWorkspaceSummary {
+  total: number;
+  active: number;
+  queued: number;
+  liveQueue: number;
+  byStatus: Partial<Record<ApplicationStatus, number>>;
+  currentMonthByStatus: Partial<Record<ApplicationStatus, number>>;
+  interviewsThisMonth: number;
+  interviewDecisions: number;
+  incompleteRequirements: number;
+  noResponseAwaiting: number;
+  activeByHiringNeed: Record<string, number>;
+  upcomingInterviews: {
+    id: string;
+    applicationId: string;
+    applicantName: string;
+    position: string;
+    stage: string;
+    scheduledAt: string;
+  }[];
+}
+export interface ApplicationSummaryByDataset {
+  real: ApplicationWorkspaceSummary;
+  demo: ApplicationWorkspaceSummary;
+}
 export type ScreeningOutcome =
   "Meets Criteria" | "Requires Review" | "Criteria Not Met";
 export interface Applicant {
@@ -135,6 +160,11 @@ export interface Application {
   gmailThreadId?: string;
   hiredAt?: string;
   talentPoolAddedAt?: string;
+  talentPoolExpiredAt?: string;
+  retentionCategory?: string;
+  retentionStartedAt?: string;
+  retentionExpiresAt?: string;
+  retentionReason?: string;
   orientationDate?: string;
   commitmentDate?: string;
   onboardingStatus: "Pending Orientation" | "Scheduled" | "Completed";
@@ -226,6 +256,7 @@ export interface AppState {
   syncStatus?: string;
   version: 1;
   applications: Application[];
+  applicationSummary?: ApplicationSummaryByDataset;
   hiringNeeds: HiringNeed[];
   qualifications: QualificationTemplate[];
   requirementTemplates: Requirement[];

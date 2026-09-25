@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Download,
   ChartNoAxesCombined,
@@ -10,28 +10,35 @@ import {
 import { useApp } from "./provider";
 import { Button, Card, Select, Badge, EmptyState, LoadingSkeleton } from "./ui";
 import { ReportDetails } from "./report-details";
-import { monthKey } from "@/lib/dates";
+import { requestJson } from "@/lib/client-request";
+import type { RecruitmentReport, ReportBucket } from "@/types/reports";
 export function Reports() {
   const { state, dataset, notify } = useApp();
   const [range, setRange] = useState("all");
+  const [report, setReport] = useState<RecruitmentReport | null>(null);
+  const [reportError, setReportError] = useState("");
+  useEffect(() => {
+    const abort = new AbortController();
+    setReport(null);
+    setReportError("");
+    requestJson<RecruitmentReport>(`/api/reports/recruitment?range=${range}`, {
+      signal: abort.signal,
+    })
+      .then(setReport)
+      .catch((error) => {
+        if (!abort.signal.aborted) setReportError((error as Error).message);
+      });
+    return () => abort.abort();
+  }, [range, dataset, state?.revision]);
   if (!state) return <LoadingSkeleton />;
-  const apps = state.applications.filter(
-    (a) =>
-      range === "all" ||
-      Date.now() - new Date(a.appliedAt).getTime() < Number(range) * 86400000,
-  );
+  const data = report;
   const group = (key: "position" | "location" | "stage" | "status") =>
-    Object.entries(
-      apps.reduce(
-        (acc, a) => ({ ...acc, [a[key]]: (acc[a[key]] || 0) + 1 }),
-        {} as Record<string, number>,
-      ),
-    );
+    data?.groups[key] || [];
   function exportReport() {
     const rows = [
       ["Dimension", "Category", "Count"],
       ...(["position", "location", "stage", "status"] as const).flatMap((k) =>
-        group(k).map(([v, n]) => [k, v, String(n)]),
+        group(k).map(({ name, count }) => [k, name, String(count)]),
       ),
     ];
     const text = rows
@@ -54,21 +61,13 @@ export function Reports() {
     setTimeout(() => URL.revokeObjectURL(url), 1000);
     notify("Recruitment report downloaded.");
   }
-  const months = Array.from({ length: 6 }, (_, i) => {
-    const currentMonth = monthKey(Date.now(), state.preferences.timezone);
-    const date = new Date(`${currentMonth}-15T12:00:00Z`);
-    date.setUTCMonth(date.getUTCMonth() - 5 + i);
-    const key = date.toISOString().slice(0, 7);
-    return {
-      label: date.toLocaleDateString("en-US", {
-        timeZone: "UTC",
-        month: "long",
-      }),
-      count: apps.filter(
-        (a) => monthKey(a.appliedAt, state.preferences.timezone) === key,
-      ).length,
-    };
-  });
+  const months = (data?.months || []).map(({ key, count }) => ({
+    label: new Date(`${key}-15T12:00:00Z`).toLocaleDateString("en-US", {
+      timeZone: "UTC",
+      month: "long",
+    }),
+    count,
+  }));
   return (
     <>
       <div className="page-heading">
@@ -89,7 +88,7 @@ export function Reports() {
           </Select>
           <Button
             variant="secondary"
-            disabled={dataset === "demo" || !apps.length}
+            disabled={dataset === "demo" || !data?.total}
             title={
               dataset === "demo"
                 ? "Exit Demo to export production reports"
@@ -102,7 +101,11 @@ export function Reports() {
           </Button>
         </div>
       </div>
-      {!apps.length ? (
+      {reportError ? (
+        <EmptyState title="Report unavailable" description={reportError} />
+      ) : !data ? (
+        <LoadingSkeleton />
+      ) : !data.total ? (
         <EmptyState
           title="No reports for this period"
           description="Select a wider date range."
@@ -111,22 +114,10 @@ export function Reports() {
         <>
           <div className="report-metrics">
             {[
-              ["Applications", apps.length, UsersRound],
-              [
-                "Hired",
-                apps.filter((a) => a.status === "Hired").length,
-                UserCheck,
-              ],
-              [
-                "Talent pool",
-                apps.filter((a) => a.status === "Talent Pool").length,
-                Bookmark,
-              ],
-              [
-                "Interview pipeline",
-                apps.filter((a) => a.stage.includes("Interview")).length,
-                ChartNoAxesCombined,
-              ],
+              ["Applications", data.total, UsersRound],
+              ["Hired", data.hired, UserCheck],
+              ["Talent pool", data.talentPool, Bookmark],
+              ["Interview pipeline", data.interviewPipeline, ChartNoAxesCombined],
             ].map(([label, count, Icon]) => {
               const I = Icon as typeof UsersRound;
               return (
@@ -170,9 +161,7 @@ export function Reports() {
               <h2>Screening outcomes</h2>
               {["Meets Criteria", "Requires Review", "Criteria Not Met"].map(
                 (s, i) => {
-                  const count = apps.filter(
-                    (a) => a.screening.outcome === s,
-                  ).length;
+                  const count = data.screening.find((item) => item.name === s)?.count || 0;
                   return (
                     <div className="report-bar" key={s}>
                       <div>
@@ -181,7 +170,7 @@ export function Reports() {
                       </div>
                       <div className={`report-track color-${i}`}>
                         <i
-                          style={{ width: `${(count / apps.length) * 100}%` }}
+                          style={{ width: `${(count / data.total) * 100}%` }}
                         />
                       </div>
                     </div>
@@ -203,16 +192,14 @@ export function Reports() {
                         ? "Application outcomes"
                         : `Applications by ${key}`}
                   </h2>
-                  {group(key).map(([name, count]) => (
+                  {group(key).map(({ name, count }: ReportBucket) => (
                     <div className="report-bar" key={name}>
                       <div>
                         <span>{name}</span>
                         <strong>{count}</strong>
                       </div>
                       <div className="report-track">
-                        <i
-                          style={{ width: `${(count / apps.length) * 100}%` }}
-                        />
+                        <i style={{ width: `${(count / data.total) * 100}%` }} />
                       </div>
                     </div>
                   ))}
@@ -222,7 +209,7 @@ export function Reports() {
           </div>
         </>
       )}
-      <ReportDetails state={state} range={range} />
+      {data && data.total > 0 && <ReportDetails data={data} />}
     </>
   );
 }

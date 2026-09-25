@@ -35,6 +35,7 @@ type Input =
       id: string;
       rules: unknown;
       aliases: Record<string, string>;
+      cutoff?: { start: string; end: string };
     };
 export type TimekeepingJob = {
   id: string;
@@ -219,6 +220,7 @@ export async function runTimekeepingJob(id: string, user: User) {
             input.aliases,
             user,
             progress,
+            input.cutoff,
           ),
       120000,
     );
@@ -239,6 +241,11 @@ export async function runTimekeepingJob(id: string, user: User) {
       );
       if (current?.runId !== job.runId) return;
       await putRecord(tx, "timekeeping_jobs", id, job);
+      if (input.kind === "upload")
+        await tx.query(
+          "DELETE FROM records WHERE collection='timekeeping_inputs' AND id=$1",
+          [id],
+        );
       await audit(tx, user.email, "timekeeping.job_completed", undefined, {
         jobId: id,
         kind: job.kind,

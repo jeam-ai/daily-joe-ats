@@ -51,9 +51,12 @@ export function IntakeSyncStatus() {
           value.status === "capacity"
             ? 60000
             : ["checking", "processing"].includes(value.status)
-              ? 3000
+              // A Sheets status check is still an authenticated gateway read.
+              // Let the active commit finish; the visible progress bar keeps
+              // moving without creating contention that looks like a failure.
+              ? 10000
               : value.pending.length || value.page
-                ? 4000
+                ? 6000
                 : 120000;
         setError("");
         if (
@@ -75,8 +78,13 @@ export function IntakeSyncStatus() {
               : old,
           );
         }
-      } catch (e) {
-        if (!stopped) setError((e as Error).message);
+      } catch {
+        if (!stopped)
+          setError(
+            job
+              ? "Gmail status could not be refreshed just now. The saved sync will retry safely."
+              : "Gmail status is temporarily unavailable. Retry in a moment; no applicant data was changed.",
+          );
       } finally {
         if (!stopped) timer = setTimeout(() => void tick(), delay);
       }

@@ -33,7 +33,7 @@ test("Sheets storage accepts the resume checksum field while rejecting unknown r
   assert.ok(databaseColumns.resumes.includes("sha256"));
   assert.ok(!databaseColumns.resumes.includes("unexpected_field"));
 });
-test("100 active / 500 retained boundaries promote the next newest eligible record without deleting history", () => {
+test("100 active / 500 live queue keeps older history outside queue without stopping intake", () => {
   const applications = Array.from(
     { length: INTAKE_QUEUE_LIMIT },
     (_, i) =>
@@ -46,18 +46,28 @@ test("100 active / 500 retained boundaries promote the next newest eligible reco
         status: "New",
       }) as Application,
   );
-  assert.equal(intakeCapacity(applications).full, true);
+  assert.equal(intakeCapacity(applications).full, false);
   balanceIntakeWindow(applications);
   assert.equal(
     applications.filter((a) => a.queueState === "Active").length,
     100,
   );
   assert.equal(applications[399].queueState, "Queued");
+  applications.push({
+    ...applications[0],
+    id: "outside",
+    appliedAt: new Date(2025, 0, 1).toISOString(),
+  });
+  balanceIntakeWindow(applications);
+  assert.equal(
+    applications.find((a) => a.id === "outside")?.queueState,
+    "Closed",
+  );
   applications[499].status = "Rejected";
   balanceIntakeWindow(applications);
   assert.equal(applications[399].queueState, "Active");
-  assert.equal(intakeCapacity(applications).available, 1);
-  assert.equal(applications.length, INTAKE_QUEUE_LIMIT);
+  assert.equal(intakeCapacity(applications).full, false);
+  assert.equal(applications.length, INTAKE_QUEUE_LIMIT + 1);
 });
 test("professional name formatting preserves initials, accents and compound surnames without guessing ambiguous order", () => {
   assert.equal(formalName("JESSA D. BABILONIA"), "Jessa D. Babilonia");

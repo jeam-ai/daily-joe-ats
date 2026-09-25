@@ -218,7 +218,7 @@ export async function POST(request: Request, { params }: Context) {
     }
     return Response.json({
       message: "Resume evidence saved. HR review is required.",
-      syncStatus: "Changes committed to Google Sheets.",
+      syncStatus: "Changes saved to the ATS database.",
     });
   } catch (e) {
     if (documentApplicant && (!(e instanceof SafeError) || e.status !== 409))

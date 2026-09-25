@@ -14,11 +14,7 @@ import {
   putRecord,
 } from "@/lib/server/database";
 import { getState } from "@/lib/server/repository";
-import {
-  intakeCapacity,
-  canManage,
-  INTAKE_QUEUE_LIMIT,
-} from "@/lib/data-policy";
+import { canManage } from "@/lib/data-policy";
 import { SafeError } from "@/lib/server/config";
 import type { User } from "@/types";
 
@@ -98,6 +94,17 @@ export async function intakeStatus() {
       delete state.runId;
       delete state.leaseUntil;
     }
+    // This was an old manual-preview message that could be retained by a
+    // previously interrupted automatic run. Automatic intake now retains a
+    // ready email/document fallback instead of producing this review item.
+    // Do not keep presenting obsolete work as a current Gmail failure.
+    state.issues = state.issues.filter(
+      (issue) =>
+        !(
+          issue.message === "Import preview" &&
+          /Preview time limit reached/i.test(issue.reason)
+        ),
+    );
     return state;
   });
 }
@@ -132,10 +139,7 @@ export async function syncIntake(
     }
     if (!force && (job.consecutiveFailures || 0) >= 3) return null;
     if (force) job.consecutiveFailures = 0;
-    const capacityFreed =
-      job.status === "capacity" && !intakeCapacity(workspace.applications).full;
-    if (!force && !capacityFreed && job.retryAt && job.retryAt > now)
-      return null;
+    if (!force && job.retryAt && job.retryAt > now) return null;
     Object.assign(job, {
       runId,
       // Keep the lease close to the bounded worker budget. If a host stops a
@@ -204,14 +208,6 @@ export async function syncIntake(
       job.pending = [...new Set([...fresh, ...job.pending])];
       job.headCheckedAt = now;
       await checkpoint();
-    }
-    // Continue checking new message IDs, but do not read documents or consume
-    // the historical cursor while retained eligible intake is at capacity.
-    if (intakeCapacity((await readTransaction(getState)).applications).full) {
-      job.pending = job.pending.slice(0, INTAKE_QUEUE_LIMIT);
-      job.status = "capacity";
-      job.message = `Intake capacity is full: ${INTAKE_QUEUE_LIMIT} eligible applications retained, with 100 active. Gmail monitoring continues. Close an application to make room; unimported messages remain in Gmail.`;
-      return;
     }
     if (!job.pending.length) {
       const page = await gmail<{
@@ -286,14 +282,6 @@ export async function syncIntake(
         preview.automaticPreview,
       );
       job.imported = result.imported;
-    }
-    const full = intakeCapacity(
-      (await readTransaction(getState)).applications,
-    ).full;
-    if (full) {
-      job.status = "capacity";
-      job.message = `Intake capacity reached (${INTAKE_QUEUE_LIMIT}). Remaining messages are retained in Gmail and will be retried when space becomes available.`;
-      return;
     }
     const retryIds = preview.issues.filter((i) =>
       /Failed to retrieve|time limit|Failed to read/.test(i.reason),

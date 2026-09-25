@@ -6,6 +6,7 @@ import { z } from "zod";
 import {
   analyzeOdooAsync,
   ODOO_ANALYSIS_VERSION,
+  odooDate,
   parseOdooReports,
   reviewStatuses,
   type OdooAnalysis,
@@ -48,6 +49,7 @@ export type OdooBatch = OdooAnalysis & {
   uploadedAt: string;
   analyzedAt: string;
   fingerprint: string;
+  // Metadata only: the prior cutoff analysis itself is removed on replacement.
   previousBatchId?: string;
 };
 async function saveExceptions(tx: Transaction, batch: OdooBatch) {
@@ -79,7 +81,6 @@ type Upload = {
   actor: string;
   expiresAt: number;
   reports: OdooReports;
-  files: { name: string; bytes: string }[];
 };
 export function requireTimekeeping(user: User) {
   if (!["Admin", "HR Generalist", "Office Assistant"].includes(user.role))
@@ -101,7 +102,7 @@ export async function readOdooWorkbook(bytes: Buffer, filename: string) {
       "We couldn't read this workbook. Export an unlocked, undamaged .xlsx copy from Odoo.",
     );
   }
-  const sheet = book.worksheets.find((s) => s.rowCount > 3);
+  const sheet = book.worksheets.find((s) => s.rowCount >= 2);
   if (!sheet || sheet.rowCount > 12000 || sheet.columnCount > 100)
     throw new SafeError(
       "Choose an Odoo report with up to 12,000 rows and 100 columns.",
@@ -163,10 +164,6 @@ export async function previewOdoo(
           actor: user.email,
           expiresAt: Date.now() + 1800000,
           reports,
-          files: [attendance, pivot].map((f) => ({
-            name: f.name,
-            bytes: f.bytes.toString("base64"),
-          })),
         },
         config().encryptionKey,
       ),
@@ -221,6 +218,7 @@ export async function analyzeOdooUpload(
   aliases: Record<string, string>,
   user: User,
   progress?: (processed: number, total: number) => Promise<void>,
+  cutoff?: { start: string; end: string },
 ) {
   requireTimekeeping(user);
   const rules = odooRulesSchema.safeParse(input);
@@ -243,11 +241,35 @@ export async function analyzeOdooUpload(
         "This preview belongs to another user or has expired. Upload both files again.",
         409,
       );
+    const period = cutoff || upload.reports.period;
+    if (
+      odooDate(period.start) !== period.start ||
+      odooDate(period.end) !== period.end ||
+      period.start > period.end ||
+      Date.parse(period.end) - Date.parse(period.start) > 93 * 86400000
+    )
+      throw new SafeError("Choose a valid payroll cutoff start and end date.");
+    if (
+      period.start > upload.reports.period.start ||
+      period.end < upload.reports.period.end
+    )
+      throw new SafeError(
+        "The selected cutoff must include every dated record in both reports.",
+      );
+    const reports = {
+      ...upload.reports,
+      period: {
+        ...upload.reports.period,
+        start: period.start,
+        end: period.end,
+      },
+    };
     const fingerprint = createHash("sha256")
       .update(
         JSON.stringify({
           version: ODOO_ANALYSIS_VERSION,
           hashes: upload.reports.sources.map((s) => s.hash),
+          period: reports.period,
           rules: rules.data,
           aliases: Object.entries(aliases).sort(),
         }),
@@ -255,12 +277,7 @@ export async function analyzeOdooUpload(
       .digest("hex");
     let analysis: OdooAnalysis;
     try {
-      analysis = await analyzeOdooAsync(
-        upload.reports,
-        rules.data,
-        aliases,
-        progress,
-      );
+      analysis = await analyzeOdooAsync(reports, rules.data, aliases, progress);
     } catch (e) {
       throw new SafeError((e as Error).message);
     }
@@ -297,15 +314,37 @@ export async function analyzeOdooUpload(
         batch.id,
         seal(batch, config().encryptionKey),
       );
-      await putRecord(
-        tx,
-        "odoo_sources",
-        batch.id,
-        seal(upload.files, config().encryptionKey),
-      );
       await putRecord(tx, "odoo_fingerprints", fingerprint, batch.id);
       await saveExceptions(tx, batch);
       await putRecord(tx, "odoo_cutoffs", cutoff, batch.id);
+      // A cutoff has exactly one saved analysis. The parsed result is retained;
+      // raw uploads and the replaced analysis are not used as a file archive.
+      await tx.query(
+        "DELETE FROM records WHERE collection='odoo_uploads' AND id=$1",
+        [id],
+      );
+      if (previousBatchId && previousBatchId !== batch.id) {
+        await tx.query(
+          "DELETE FROM records WHERE collection IN ('odoo_batches','odoo_sources','odoo_index') AND id=$1",
+          [previousBatchId],
+        );
+        await tx.query(
+          "DELETE FROM records WHERE collection='odoo_exceptions' AND id LIKE $1",
+          [`${previousBatchId}:%`],
+        );
+        await tx.query(
+          "DELETE FROM records WHERE collection='odoo_reviews' AND payload LIKE $1",
+          [`%\"batchId\":\"${previousBatchId}\"%`],
+        );
+        await tx.query(
+          "DELETE FROM records WHERE collection='odoo_fingerprints' AND payload=$1",
+          [JSON.stringify(previousBatchId)],
+        );
+        await tx.query(
+          "INSERT INTO retention_cleanup_metrics(month,metric,count,updated_at) VALUES($1,$2,1,$3) ON CONFLICT(month,metric) DO UPDATE SET count=retention_cleanup_metrics.count+1,updated_at=excluded.updated_at",
+          [now.slice(0, 7), "timekeeping_analyses_replaced", now],
+        );
+      }
       const flagged = batch.records.filter(
         (r) => r.review.status === "For Review",
       ).length;
@@ -336,7 +375,7 @@ export async function analyzeOdooUpload(
         id: batch.id,
         cutoff,
         version: batch.version,
-        previousBatchId,
+        replacedBatchId: previousBatchId || undefined,
         flagged,
       });
       return batch;

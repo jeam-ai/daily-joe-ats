@@ -1,12 +1,17 @@
 import { formalName } from "@/lib/names";
-import { intakeCapacity, INTAKE_QUEUE_LIMIT } from "@/lib/data-policy";
+import { INTAKE_QUEUE_LIMIT } from "@/lib/data-policy";
 import { defaultEmailTemplate } from "@/lib/email-templates";
 import { unresolved } from "./diagnostics";
 import type { DiagnosticIssue } from "@/types/operations";
 import { writeAudit } from "./audit";
 import { buildTracker } from "./tracker";
 import "server-only";
-import type { AppState, User } from "@/types";
+import type {
+  AppState,
+  Application,
+  ApplicationWorkspaceSummary,
+  User,
+} from "@/types";
 import {
   transaction,
   readTransaction,
@@ -29,7 +34,9 @@ import {
   isVisible,
   activeIntake,
   balanceIntakeWindow,
+  eligibleIntake,
 } from "@/lib/data-policy";
+import { monthKey } from "@/lib/dates";
 export async function getState(tx: Transaction): Promise<AppState> {
   const stored = await readRecord<AppState>(tx, "workspace", "main");
   // Capacity counts active production applicants; historical records are retained.
@@ -206,6 +213,57 @@ export async function saveState(
       );
     }
   }
+  // Talent Pool membership is a person-level lifecycle, separate from any
+  // individual application. Keep its normalized row in sync with active pool
+  // applications without resetting an HR-retained expiry on ordinary edits.
+  const activeTalent = new Map<string, string>();
+  for (const a of state.applications)
+    if (
+      a.status === "Talent Pool" &&
+      !a.talentPoolExpiredAt &&
+      !a.deletedAt &&
+      !a.isDemo
+    ) {
+      const startedAt = a.talentPoolAddedAt || a.appliedAt;
+      if (
+        !activeTalent.has(a.applicant.id) ||
+        startedAt > activeTalent.get(a.applicant.id)!
+      )
+        activeTalent.set(a.applicant.id, startedAt);
+    }
+  const memberships = await tx.query(
+    "SELECT applicant_id FROM talent_pool_memberships",
+  );
+  for (const row of memberships)
+    if (!activeTalent.has(String(row.applicant_id)))
+      await tx.query(
+        "DELETE FROM talent_pool_memberships WHERE applicant_id=$1",
+        [row.applicant_id],
+      );
+  if (activeTalent.size) {
+    const configured = await tx.query(
+      "SELECT name,days FROM retention_policies WHERE name IN ('talent_pool_days','talent_pool_grace_days')",
+    );
+    const days = Number(
+      configured.find((row) => row.name === "talent_pool_days")?.days || 30,
+    );
+    const grace = Number(
+      configured.find((row) => row.name === "talent_pool_grace_days")?.days ||
+        10,
+    );
+    for (const [applicantId, startedAt] of activeTalent) {
+      const expiresAt = new Date(
+        Date.parse(startedAt) + days * 86400000,
+      ).toISOString();
+      const graceExpiresAt = new Date(
+        Date.parse(expiresAt) + grace * 86400000,
+      ).toISOString();
+      await tx.query(
+        "INSERT INTO talent_pool_memberships(applicant_id,started_at,expires_at,grace_expires_at,updated_by) VALUES($1,$2,$3,$4,$5) ON CONFLICT(applicant_id) DO NOTHING",
+        [applicantId, startedAt, expiresAt, graceExpiresAt, null],
+      );
+    }
+  }
   if (options.sync === false) return;
   const real = productionState(state);
   await putRecord(tx, "tracker", "snapshot", {
@@ -257,6 +315,20 @@ export async function publicState(user: User) {
   return readTransaction(async (tx) => {
     const s = await getState(tx);
     s.notifications = deriveNotifications(s);
+    const retention = await tx.query(
+      "SELECT application_id,category,started_at,expires_at,reason FROM application_retention",
+    );
+    const retentionByApplication = new Map(
+      retention.map((row) => [String(row.application_id), row]),
+    );
+    for (const application of s.applications) {
+      const row = retentionByApplication.get(application.id);
+      if (!row) continue;
+      application.retentionCategory = String(row.category);
+      application.retentionStartedAt = String(row.started_at);
+      application.retentionExpiresAt = String(row.expires_at);
+      application.retentionReason = String(row.reason);
+    }
     if (
       user.role === "Admin" ||
       user.role === "HR Generalist" ||
@@ -294,9 +366,109 @@ export async function publicState(user: User) {
   });
 }
 export function visibleState(s: AppState, user: User): AppState {
+  const visible = s.applications.filter(isVisible);
+  const summarize = (
+    applications: Application[],
+  ): ApplicationWorkspaceSummary => {
+    const timezone = s.preferences.timezone || "Asia/Manila";
+    const thisMonth = monthKey(Date.now(), timezone);
+    const eligible = applications
+      .filter(eligibleIntake)
+      .sort(
+        (a, b) =>
+          Date.parse(b.appliedAt) - Date.parse(a.appliedAt) ||
+          b.id.localeCompare(a.id),
+      );
+    const byStatus: ApplicationWorkspaceSummary["byStatus"] = {};
+    const currentMonthByStatus: ApplicationWorkspaceSummary["currentMonthByStatus"] =
+      {};
+    const activeByHiringNeed: Record<string, number> = {};
+    const upcomingInterviews: ApplicationWorkspaceSummary["upcomingInterviews"] =
+      [];
+    let interviewsThisMonth = 0;
+    let interviewDecisions = 0;
+    let incompleteRequirements = 0;
+    let noResponseAwaiting = 0;
+    const now = Date.now();
+    for (const application of applications) {
+      byStatus[application.status] = (byStatus[application.status] || 0) + 1;
+      const appliedThisMonth =
+        monthKey(application.appliedAt, timezone) === thisMonth;
+      if (appliedThisMonth)
+        currentMonthByStatus[application.status] =
+          (currentMonthByStatus[application.status] || 0) + 1;
+      if (
+        appliedThisMonth &&
+        application.stage.includes("Interview") &&
+        activeIntake(application)
+      )
+        interviewsThisMonth++;
+      if (
+        application.interviews.some(
+          (interview) => interview.status === "Attended",
+        )
+      )
+        interviewDecisions++;
+      if (application.hiringNeedId && activeIntake(application))
+        activeByHiringNeed[application.hiringNeedId] =
+          (activeByHiringNeed[application.hiringNeedId] || 0) + 1;
+      if (
+        application.stage === "Requirements" &&
+        application.requirements.some((r) => r.status !== "Complete")
+      )
+        incompleteRequirements++;
+      if (
+        application.status === "No Response" &&
+        now - Date.parse(application.lastActivity) > 172800000
+      )
+        noResponseAwaiting++;
+      for (const interview of application.interviews) {
+        if (
+          Date.parse(interview.scheduledAt) > now &&
+          ["Scheduled", "Confirmed"].includes(interview.status)
+        )
+          upcomingInterviews.push({
+            id: interview.id,
+            applicationId: application.id,
+            applicantName: application.applicant.name,
+            position: application.position,
+            stage: interview.stage,
+            scheduledAt: interview.scheduledAt,
+          });
+      }
+    }
+    return {
+      total: applications.length,
+      active: applications.filter(activeIntake).length,
+      queued: eligible.filter((a) => a.queueState === "Queued").length,
+      liveQueue: Math.min(eligible.length, INTAKE_QUEUE_LIMIT),
+      byStatus,
+      currentMonthByStatus,
+      interviewsThisMonth,
+      interviewDecisions,
+      incompleteRequirements,
+      noResponseAwaiting,
+      activeByHiringNeed,
+      upcomingInterviews: upcomingInterviews
+        .sort((a, b) => a.scheduledAt.localeCompare(b.scheduledAt))
+        .slice(0, 3),
+    };
+  };
+  const real = visible.filter((a) => !a.isDemo);
+  const demo = visible.filter((a) => a.isDemo);
+  const applicationSummary = { real: summarize(real), demo: summarize(demo) };
+  const previewLimit = 50;
   return {
     ...s,
-    applications: s.applications.filter(isVisible),
+    applications: [
+      ...real
+        .sort((a, b) => Date.parse(b.appliedAt) - Date.parse(a.appliedAt))
+        .slice(0, previewLimit),
+      ...demo
+        .sort((a, b) => Date.parse(b.appliedAt) - Date.parse(a.appliedAt))
+        .slice(0, previewLimit),
+    ],
+    applicationSummary,
     currentUser: user,
     demoAvailable: user.role === "Admin" && demoEnabled(),
   };
@@ -424,7 +596,19 @@ export async function updateState(
         "Use Data Management to restore archived applicants.",
         403,
       );
-    next.applications.push(...archived);
+    // Keep the workspace request bounded: updates apply to the preview while
+    // unsubmitted records remain server-authoritative. Archived records stay
+    // hidden and are restored only through the data-management endpoint.
+    const submittedIds = new Set(
+      next.applications.map((application) => application.id),
+    );
+    next.applications.push(
+      ...before.applications.filter(
+        (application) =>
+          !submittedIds.has(application.id) && !application.deletedAt,
+      ),
+      ...archived,
+    );
     if (dataset === "demo") {
       const sharedKeys = [
         "users",
@@ -541,16 +725,6 @@ export async function updateState(
         if (!changed(b, a)) continue;
         assertEditor(user, b);
         validateApplicationChange(b, a, confirmed);
-        if (
-          intakeCapacity(next.applications).retained >
-          Math.max(
-            INTAKE_QUEUE_LIMIT,
-            intakeCapacity(before.applications).retained,
-          )
-        )
-          throw new DomainError(
-            `Intake capacity is full (${INTAKE_QUEUE_LIMIT} eligible applications).`,
-          );
         if (
           changed(b.applicant, a.applicant) ||
           b.position !== a.position ||

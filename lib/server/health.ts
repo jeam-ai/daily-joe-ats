@@ -548,7 +548,7 @@ async function performChecks(): Promise<HealthSnapshot> {
       );
       return {
         status: "Healthy",
-        detail: `${real.filter((a) => a.queueState === "Active").length} active · ${real.filter((a) => a.queueState === "Queued").length} queued · ${real.filter((a) => a.queueState === "Closed").length} closed. Active membership is ordered by received time and capped at 100.`,
+        detail: `${real.filter((a) => a.queueState === "Active").length} active · ${real.filter((a) => a.queueState === "Queued").length} queued in the newest-500 live queue. The active HR view is capped at 100.`,
         href: "/applications",
         action: "View applications",
       };

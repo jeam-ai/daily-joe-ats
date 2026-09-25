@@ -8,10 +8,13 @@ import {
   previewOdoo,
   analyzeOdooUpload,
   getOdooBatch,
+  listOdooBatches,
   reviewOdoo,
   exportOdoo,
 } from "../../lib/server/odoo";
 import { defaultOdooRules } from "../../lib/odoo";
+import { readRecord, readTransaction } from "../../lib/server/database";
+import { unseal } from "../../lib/auth/security";
 import type { User } from "../../types";
 delete process.env.DATABASE_URL;
 delete process.env.VERCEL;
@@ -67,6 +70,10 @@ test("combined Odoo uploads persist reviews, deduplicate exact reports, version 
   );
   const p = await previewOdoo(raw, pivot, user),
     b = await analyzeOdooUpload(p.id, defaultOdooRules, {}, user);
+  const previewPayload = await readTransaction((tx) =>
+    readRecord<string>(tx, "odoo_uploads", p.id),
+  );
+  assert.equal(previewPayload, null);
   const reviewed = await reviewOdoo(
     {
       id: b.id,
@@ -107,6 +114,22 @@ test("combined Odoo uploads persist reviews, deduplicate exact reports, version 
   );
   assert.notEqual(changed.id, b.id);
   assert.equal(changed.previousBatchId, b.id);
+  assert.deepEqual(
+    (await listOdooBatches(user)).map((item) => item.id),
+    [changed.id],
+  );
+  await assert.rejects(getOdooBatch(b.id, user), /Analysis not found/);
+  assert.equal(
+    (
+      await readTransaction((tx) =>
+        tx.query(
+          "SELECT id FROM records WHERE collection='odoo_reviews' AND payload LIKE $1",
+          [`%\"batchId\":\"${b.id}\"%`],
+        ),
+      )
+    ).length,
+    0,
+  );
   const xlsx = await exportOdoo(reviewed, false),
     book = new ExcelJS.Workbook();
   await book.xlsx.load(xlsx as never);
@@ -131,4 +154,77 @@ test("combined Odoo uploads persist reviews, deduplicate exact reports, version 
     (await exportOdoo(reviewed, true)).toString(),
     /approved schedule adjustment/,
   );
+});
+
+test("explicit payroll dates identify a cutoff even when its edge days have no entries", async () => {
+  const raw = await file("Attendance.xlsx", [
+    [
+      "Employee",
+      "Check In",
+      "Check Out",
+      "Worked Hours",
+      "Over Time",
+      "Extra Hours",
+    ],
+    ["QA Example", "2026-09-02 09:00:00", "2026-09-02 17:00:00", 8, 0, 0],
+  ]);
+  const pivot = await file("Pivot.xlsx", [
+    [null, "September 2026"],
+    [null, "Worked Hours", "Expected Hours", "Difference", "Balance"],
+    ["QA Example", 8, 8, 0, 0],
+    ["02 Sep 2026", 8, 8, 0, 0],
+  ]);
+  const first = await previewOdoo(raw, pivot, user);
+  const encrypted = await readTransaction((tx) =>
+    readRecord<string>(tx, "odoo_uploads", first.id),
+  );
+  const stored = unseal<Record<string, unknown>>(
+    encrypted!,
+    process.env.TOKEN_ENCRYPTION_KEY!,
+  );
+  assert.equal("files" in stored, false);
+  await assert.rejects(
+    analyzeOdooUpload(first.id, defaultOdooRules, {}, user, undefined, {
+      start: "2026-09-03",
+      end: "2026-09-15",
+    }),
+    /include every dated record/,
+  );
+  const cutoff = { start: "2026-09-01", end: "2026-09-15" };
+  const saved = await analyzeOdooUpload(
+    first.id,
+    defaultOdooRules,
+    {},
+    user,
+    undefined,
+    cutoff,
+  );
+  assert.equal(saved.period.start, cutoff.start);
+  assert.equal(saved.period.end, cutoff.end);
+  const second = await previewOdoo(raw, pivot, user);
+  const replacement = await analyzeOdooUpload(
+    second.id,
+    { ...defaultOdooRules, discrepancyMinutes: 2 },
+    {},
+    user,
+    undefined,
+    cutoff,
+  );
+  assert.equal(replacement.previousBatchId, saved.id);
+  const active = await listOdooBatches(user);
+  assert.equal(
+    active.filter(
+      (item) =>
+        item.period.start === cutoff.start && item.period.end === cutoff.end,
+    ).length,
+    1,
+  );
+  assert.equal(
+    active.find(
+      (item) =>
+        item.period.start === cutoff.start && item.period.end === cutoff.end,
+    )?.id,
+    replacement.id,
+  );
+  await assert.rejects(getOdooBatch(saved.id, user), /Analysis not found/);
 });

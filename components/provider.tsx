@@ -23,6 +23,7 @@ type Context = {
     fn: (a: Application) => Application,
     confirmed?: boolean,
   ) => Promise<boolean>;
+  ensureApplication: (id: string) => Promise<void>;
   notify: (message: string, tone?: "success" | "error" | "info") => void;
   refresh: () => Promise<void>;
   saving: boolean;
@@ -48,6 +49,7 @@ export function AppProvider({
     [loading, setLoading] = useState(true),
     [saving, setSaving] = useState(false);
   const ref = useRef<AppState | null>(null);
+  const detailCache = useRef(new Map<string, Application>());
   const cacheKey = email ? `djc-workspace:${email.toLowerCase()}` : "";
   const [dataset, setDataset] = useState<"real" | "demo">("real");
   useEffect(() => {
@@ -69,7 +71,7 @@ export function AppProvider({
   }
   const hasDemo =
     !!state?.hiringNeeds.some((n) => n.isDemo) ||
-    !!state?.applications.some((a) => a.isDemo);
+    (state?.applicationSummary?.demo.total || 0) > 0;
   const viewState = useMemo(
     () =>
       state
@@ -103,13 +105,23 @@ export function AppProvider({
       const data = await r.json();
       if (!r.ok) throw Error(data.error);
       if (request !== generation.current) return;
-      ref.current = data;
-      setState(data);
+      const merged = {
+        ...data,
+        applications: [
+          ...data.applications,
+          ...[...detailCache.current.values()].filter(
+            (application) =>
+              !data.applications.some((item: Application) => item.id === application.id),
+          ),
+        ],
+      } as AppState;
+      ref.current = merged;
+      setState(merged);
       if (cacheKey)
         try {
           sessionStorage.setItem(
             cacheKey,
-            JSON.stringify({ savedAt: Date.now(), state: data }),
+            JSON.stringify({ savedAt: Date.now(), state: merged }),
           );
         } catch {}
       setError("");
@@ -121,7 +133,7 @@ export function AppProvider({
   }, [cacheKey]);
   useLayoutEffect(() => {
     // A short-lived, same-user cache lets the shell and current page render
-    // immediately during a cold Sheets read. A background refresh always
+    // immediately from a recent same-user cache. A background refresh always
     // replaces it with the current server-authoritative state.
     if (cacheKey)
       try {
@@ -176,8 +188,18 @@ export function AppProvider({
         });
         const data = await r.json();
         if (!r.ok) throw Error(data.error);
-        ref.current = data;
-        setState(data);
+        const merged = {
+          ...data,
+          applications: [
+            ...data.applications,
+            ...[...detailCache.current.values()].filter(
+              (application) =>
+                !data.applications.some((item: Application) => item.id === application.id),
+            ),
+          ],
+        } as AppState;
+        ref.current = merged;
+        setState(merged);
         notify(
           data.syncStatus?.startsWith("Failed")
             ? `Saved. ${data.syncStatus}`
@@ -197,29 +219,80 @@ export function AppProvider({
     [refresh, notify, dataset],
   );
   const updateApplication = useCallback(
-    (id: string, fn: (a: Application) => Application, confirmed = false) =>
-      update(
+    async (id: string, fn: (a: Application) => Application, confirmed = false) => {
+      const current = ref.current?.applications.find((item) => item.id === id) ||
+        detailCache.current.get(id);
+      if (!current) {
+        notify("Applicant details are still loading. Try again in a moment.", "info");
+        return false;
+      }
+      const changed = fn(current);
+      const saved = await update(
         (s) => ({
           ...s,
-          applications: s.applications.map((a) => (a.id === id ? fn(a) : a)),
+          applications: [
+            ...s.applications.filter((item) => item.id !== id),
+            changed,
+          ],
         }),
         confirmed,
-      ),
-    [update],
+      );
+      if (saved) {
+        detailCache.current.set(id, changed);
+        if (ref.current) {
+          const merged = {
+            ...ref.current,
+            applications: ref.current.applications.map((item) =>
+              item.id === id ? changed : item,
+            ),
+          };
+          ref.current = merged;
+          setState(merged);
+        }
+      }
+      return saved;
+    },
+    [update, notify],
   );
+  const ensureApplication = useCallback(async (id: string) => {
+    if (ref.current?.applications.some((item) => item.id === id)) return;
+    const cached = detailCache.current.get(id);
+    if (cached) {
+      const next = ref.current;
+      if (next && !next.applications.some((item) => item.id === id)) {
+        const merged = { ...next, applications: [...next.applications, cached] };
+        ref.current = merged;
+        setState(merged);
+      }
+      return;
+    }
+    const response = await clientFetch(`/api/applicants/${encodeURIComponent(id)}`, {
+      cache: "no-store",
+    });
+    const application = await response.json();
+    if (!response.ok) throw Error(application.error || "Applicant not found.");
+    detailCache.current.set(id, application as Application);
+    const next = ref.current;
+    if (next && !next.applications.some((item) => item.id === id)) {
+      const merged = { ...next, applications: [...next.applications, application] };
+      ref.current = merged;
+      setState(merged);
+    }
+  }, []);
   return (
     <AppContext.Provider
       value={{
         state: viewState,
         update,
         updateApplication,
+        ensureApplication,
         notify,
         refresh,
         saving,
         dataset,
         setDataset: switchDataset,
         hasDemo,
-        demoCount: state?.applications.filter((a) => a.isDemo).length || 0,
+        demoCount: state?.applicationSummary?.demo.total || 0,
       }}
     >
       {error && (

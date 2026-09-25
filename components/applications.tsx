@@ -23,12 +23,10 @@ import {
   Tabs,
   LoadingSkeleton,
 } from "./ui";
-import { isActive } from "@/lib/recruitment";
 import type { Application } from "@/types";
 import {
   canManage,
   canEdit,
-  activeIntake,
   INTAKE_QUEUE_LIMIT,
 } from "@/lib/data-policy";
 import { requestJson, downloadFile } from "@/lib/client-request";
@@ -99,29 +97,7 @@ export function Applications({ talent = false }: { talent?: boolean }) {
             ).toISOString()
           : "",
   }).toString();
-  // The provider already has the bounded active/queued workspace in memory.
-  // Avoid a second Sheets-backed list request for the default page; reserve
-  // server pagination for a real search, filter, date range, or later page.
-  const canUseWorkspaceListing =
-    page === 1 &&
-    !q &&
-    !needFilter &&
-    !status &&
-    !stage &&
-    !position &&
-    !location &&
-    !screening &&
-    !date &&
-    !experience &&
-    !employmentStatus &&
-    !urgency;
   useEffect(() => {
-    if (canUseWorkspaceListing) {
-      setListing(undefined);
-      setListError("");
-      setListLoading(false);
-      return;
-    }
     const abort = new AbortController();
     setListLoading(true);
     setListError("");
@@ -144,32 +120,11 @@ export function Applications({ talent = false }: { talent?: boolean }) {
       clearTimeout(timer);
       abort.abort();
     };
-  }, [canUseWorkspaceListing, queryParams, dataset, state?.revision, reload]);
+  }, [queryParams, dataset, state?.revision, reload]);
   if (!state) return <LoadingSkeleton />;
   const selectedNeed = state.hiringNeeds.find((need) => need.id === needFilter);
-  const immediateRows = (canUseWorkspaceListing ? state.applications : [])
-      .filter((application) => {
-        if (talent) return application.status === "Talent Pool";
-        if (tab === "All applications") return true;
-        if (tab === "Active")
-          return isActive(application) && application.queueState === "Active";
-        if (tab === "Queued") return application.queueState === "Queued";
-        if (tab === "Interviews")
-          return ["Initial Interview", "Final Interview"].includes(
-            application.stage,
-          );
-        if (tab === "Pre-employment")
-          return application.stage === "Requirements";
-        if (tab === "Onboarding") return application.stage === "Onboarding";
-        if (tab === "Hired")
-          return (
-            application.stage === "Hired" || application.status === "Hired"
-          );
-        return true;
-      })
-      .sort((a, b) => b.appliedAt.localeCompare(a.appliedAt)),
-    rows = listing?.applications || immediateRows.slice(0, 20),
-    total = listing?.total ?? immediateRows.length;
+  const rows = listing?.applications || [],
+    total = listing?.total ?? 0;
   const pageCount = Math.max(1, Math.ceil(total / 20)),
     currentPage = listing?.page || page,
     visible = rows;
@@ -253,12 +208,11 @@ export function Applications({ talent = false }: { talent?: boolean }) {
         {!talent && dataset === "real" && (
           <p className="padded fine-print">
             Latest 100 active applications ·{" "}
-            {state.applications.filter(activeIntake).length} active ·{" "}
-            {state.applications.filter((a) => a.queueState === "Queued").length}{" "}
-            queued. New applications enter the active window; older applications
-            remain available in Queued. Intake retains up to{" "}
-            {INTAKE_QUEUE_LIMIT} eligible applications; closed records remain in
-            history.
+            {state.applicationSummary?.[dataset].active ?? 0} active ·{" "}
+            {state.applicationSummary?.[dataset].queued ?? 0} queued within the{" "}
+            {" "}{INTAKE_QUEUE_LIMIT}-application live queue. Gmail intake continues
+            beyond the queue; older records receive retention review and protected
+            active applications remain available.
           </p>
         )}
         {!talent && (
@@ -530,6 +484,32 @@ export function Applications({ talent = false }: { talent?: boolean }) {
                     </Link>
                     {a.isDemo && <Badge tone="amber">DEMO</Badge>}
                     {a.queueState === "Queued" && <Badge>Queued</Badge>}
+                    {a.retentionCategory === "outside_live_queue" &&
+                      a.retentionExpiresAt && (
+                        <small className="retention-inline">
+                          Outside live queue — deletion in{" "}
+                          {Math.max(
+                            0,
+                            Math.ceil(
+                              (Date.parse(a.retentionExpiresAt) - Date.now()) /
+                                86400000,
+                            ),
+                          )}{" "}
+                          days
+                        </small>
+                      )}
+                    {talent && !a.talentPoolExpiredAt && (
+                      <small className="retention-inline">
+                        {Math.ceil(
+                          (Date.parse(a.talentPoolAddedAt || a.appliedAt) +
+                            30 * 86400000 -
+                            Date.now()) /
+                            86400000,
+                        ) > 0
+                          ? `Talent Pool expires in ${Math.ceil((Date.parse(a.talentPoolAddedAt || a.appliedAt) + 30 * 86400000 - Date.now()) / 86400000)} days`
+                          : `Talent Pool retention expires in ${Math.max(0, Math.ceil((Date.parse(a.talentPoolAddedAt || a.appliedAt) + 40 * 86400000 - Date.now()) / 86400000))} days`}
+                      </small>
+                    )}
                   </td>
                   <td>
                     {a.position}
@@ -625,7 +605,7 @@ export function Applications({ talent = false }: { talent?: boolean }) {
             description={
               talent
                 ? "Candidates you save to the talent pool will appear here for future openings."
-                : state.applications.length
+                : total > 0
                   ? "No applicants match these filters. Clear filters to see all applications."
                   : "Import applications from Daily Joe Careers Gmail or add an applicant manually to get started."
             }

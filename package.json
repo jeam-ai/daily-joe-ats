@@ -11,7 +11,8 @@
     "test:smoke": "node tests/api-smoke.mjs",
     "format": "prettier --write app components lib types tests next.config.ts",
     "format:check": "prettier --check app components lib types tests next.config.ts",
-    "test:server": "node --conditions=react-server --import tsx --test tests/server/*.test.ts"
+    "test:server": "node --conditions=react-server --import tsx --test tests/server/*.test.ts",
+    "db:aiven:init": "node --conditions=react-server --import tsx scripts/aiven-init-schema.ts"
   },
   "dependencies": {
     "@google/genai": "^2.23.0",

@@ -1,5 +1,6 @@
 "use client";
 import Link from "next/link";
+import { useEffect, useState } from "react";
 import { greetingName } from "@/lib/identity";
 import {
   ArrowUpRight,
@@ -18,6 +19,7 @@ import {
   ChevronRight,
   TriangleAlert,
   Sun,
+  Database,
 } from "lucide-react";
 import { useApp } from "./provider";
 import {
@@ -31,10 +33,37 @@ import {
   LoadingSkeleton,
   EmptyState,
 } from "./ui";
-import { isActive } from "@/lib/recruitment";
-import { formatDate, formatTime, monthKey } from "@/lib/dates";
+import { formatDate, formatTime } from "@/lib/dates";
+import { requestJson } from "@/lib/client-request";
+type RetentionSnapshot = {
+  dryRun: boolean;
+  queue: {
+    active: number;
+    queued: number;
+    retentionPending: number;
+    rejectedOrWithdrawnPending: number;
+  };
+  talentPoolExpiring: number;
+  hiringNeedsExpiring: number;
+  expiredHiringNeedsPending: number;
+  activityRecordsPending: number;
+  storagePercent: number | null;
+  storageLevel: string;
+  metrics: { month: string; metric: string; count: number }[];
+};
 export function Dashboard() {
-  const { state } = useApp();
+  const { state, dataset } = useApp();
+  const [retention, setRetention] = useState<RetentionSnapshot | null>(null);
+  useEffect(() => {
+    if (state?.currentUser?.role !== "Admin") return;
+    const abort = new AbortController();
+    requestJson<RetentionSnapshot>("/api/system/retention", {
+      signal: abort.signal,
+    })
+      .then(setRetention)
+      .catch(() => undefined);
+    return () => abort.abort();
+  }, [state?.currentUser?.role, state?.revision]);
   if (!state) return <LoadingSkeleton />;
   const now = new Date();
   const timezone = state.preferences.timezone || "Asia/Manila";
@@ -45,113 +74,91 @@ export function Dashboard() {
       hourCycle: "h23",
     }).format(now),
   );
+  const summary = state.applicationSummary?.[dataset];
   const apps = state.applications;
-  const monthly = apps.filter(
-    (a) =>
-      monthKey(a.appliedAt, state.preferences.timezone) ===
-      monthKey(now, state.preferences.timezone),
+  const recentApps = [...apps].sort((a, b) =>
+    b.appliedAt.localeCompare(a.appliedAt),
   );
+  const monthly = summary?.currentMonthByStatus || {};
   const metrics = [
-    ["Total Applications", monthly.length, UsersRound, "All applications", ""],
+    ["Total Applications", Object.values(monthly).reduce((sum, count) => sum + (count || 0), 0), UsersRound, "Received this month", ""],
     [
       "New",
-      monthly.filter((a) => a.status === "New").length,
+      monthly.New || 0,
       Inbox,
       "Ready for a first look",
       "New",
     ],
     [
       "For Review",
-      monthly.filter((a) => a.status === "For Review").length,
+      monthly["For Review"] || 0,
       ScanEye,
       "Your perspective matters",
       "For Review",
     ],
     [
       "Approved",
-      monthly.filter((a) => a.status === "Approved").length,
+      monthly.Approved || 0,
       CheckCheck,
       "Moving forward",
       "Approved",
     ],
     [
       "Interviews",
-      monthly.filter((a) => a.stage.includes("Interview") && isActive(a))
-        .length,
+      summary?.interviewsThisMonth || 0,
       CalendarDays,
       "Conversations in progress",
       "interviews",
     ],
     [
       "Hired",
-      monthly.filter((a) => a.status === "Hired").length,
+      monthly.Hired || 0,
       UserCheck,
       "New beginnings",
       "Hired",
     ],
     [
       "Rejected",
-      monthly.filter((a) => a.status === "Rejected").length,
+      monthly.Rejected || 0,
       UserX,
       "Applications closed",
       "Rejected",
     ],
     [
       "Withdrawn",
-      monthly.filter((a) => a.status === "Withdrawn").length,
+      monthly.Withdrawn || 0,
       Undo2,
       "Candidate withdrawals",
       "Withdrawn",
     ],
   ] as const;
-  const upcoming = apps
-    .flatMap((a) =>
-      a.interviews
-        .filter(
-          (i) =>
-            new Date(i.scheduledAt) > now &&
-            ["Scheduled", "Confirmed"].includes(i.status),
-        )
-        .map((i) => ({ a, i })),
-    )
-    .sort((x, y) => x.i.scheduledAt.localeCompare(y.i.scheduledAt))
-    .slice(0, 3);
+  const upcoming = summary?.upcomingInterviews || [];
   const attention = [
     {
       title: "Applications awaiting review",
       description: "Help the next chapter begin.",
-      count: apps.filter((a) => a.status === "For Review").length,
+      count: summary?.byStatus["For Review"] || 0,
       href: "/applications?status=For%20Review",
       icon: ScanEye,
     },
     {
       title: "Interview decisions",
       description: "Keep good conversations moving.",
-      count: apps.filter((a) =>
-        a.interviews.some((i) => i.status === "Attended"),
-      ).length,
+      count: summary?.interviewDecisions || 0,
       href: "/applications?view=interviews",
       icon: CalendarDays,
     },
     {
       title: "Incomplete requirements",
       description: "A few details still to follow up.",
-      count: apps.filter(
-        (a) =>
-          a.stage === "Requirements" &&
-          a.requirements.some((r) => r.status !== "Complete"),
-      ).length,
+      count: summary?.incompleteRequirements || 0,
       href: "/applications?stage=Requirements",
       icon: CheckCheck,
     },
     {
       title: "Waiting for a response",
       description: "2+ days · review before taking action.",
-      count: apps.filter(
-        (a) =>
-          a.status === "No Response" &&
-          Date.now() - new Date(a.lastActivity).getTime() > 172800000,
-      ).length,
+      count: summary?.noResponseAwaiting || 0,
       href: "/applications?status=No%20Response",
       icon: Clock3,
     },
@@ -251,12 +258,7 @@ export function Dashboard() {
                       <strong>{need.slots - need.filled} open slots</strong>
                       <span>
                         {
-                          apps.filter(
-                            (a) =>
-                              a.position === need.position &&
-                              a.location === need.location &&
-                              isActive(a),
-                          ).length
+                          summary?.activeByHiringNeed[need.id] || 0
                         }{" "}
                         in pipeline
                       </span>
@@ -284,7 +286,7 @@ export function Dashboard() {
               </Link>
             </div>
             <div className="recent-list">
-              {apps.slice(0, 4).map((a) => (
+              {recentApps.slice(0, 4).map((a) => (
                 <Link
                   key={a.id}
                   href={`/applications/${a.id}`}
@@ -305,6 +307,76 @@ export function Dashboard() {
           </Card>
         </div>
         <div>
+          {state.currentUser?.role === "Admin" && retention && (
+            <Card className="retention-card">
+              <div className="card-heading">
+                <div>
+                  <h2>
+                    <Database size={18} /> System Retention
+                  </h2>
+                  <p>
+                    {retention.dryRun
+                      ? "Dry run · no records are permanently deleted"
+                      : "Scheduled cleanup is active"}
+                  </p>
+                </div>
+                {retention.storagePercent !== null && (
+                  <Badge
+                    tone={
+                      retention.storageLevel === "critical"
+                        ? "red"
+                        : retention.storageLevel === "healthy"
+                          ? "green"
+                          : "orange"
+                    }
+                  >
+                    Storage {retention.storagePercent}%
+                  </Badge>
+                )}
+              </div>
+              <div className="retention-summary">
+                <span>
+                  <strong>{retention.queue.retentionPending}</strong>{" "}
+                  applications outside live queue
+                </span>
+                <span>
+                  <strong>{retention.talentPoolExpiring}</strong> Talent Pool
+                  records expiring soon
+                </span>
+                <span>
+                  <strong>
+                    {retention.hiringNeedsExpiring +
+                      retention.expiredHiringNeedsPending}
+                  </strong>{" "}
+                  Hiring Needs due or in grace
+                </span>
+                <span>
+                  <strong>{retention.activityRecordsPending}</strong> activity
+                  records due for cleanup
+                </span>
+              </div>
+              <p className="fine-print">
+                Live queue: {retention.queue.active + retention.queue.queued} ·
+                active HR view: {retention.queue.active}
+              </p>
+              <div className="retention-metrics">
+                <strong>Cleanup totals this month</strong>
+                {retention.metrics
+                  .filter(
+                    (item) =>
+                      item.month === new Date().toISOString().slice(0, 7),
+                  )
+                  .map((item) => (
+                    <span key={item.metric}>
+                      {item.metric.replaceAll("_", " ")}: {item.count}
+                    </span>
+                  ))}
+                {!retention.metrics.some(
+                  (item) => item.month === new Date().toISOString().slice(0, 7),
+                ) && <span>No cleanup actions recorded this month.</span>}
+              </div>
+            </Card>
+          )}
           <Card className="attention-card">
             <div className="card-heading">
               <div>
@@ -362,33 +434,33 @@ export function Dashboard() {
               <CalendarDays size={19} />
             </div>
             {upcoming.length ? (
-              upcoming.map(({ a, i }) => (
+              upcoming.map((interview) => (
                 <Link
-                  key={i.id}
+                  key={interview.id}
                   className="interview-row"
-                  href={`/applications/${a.id}`}
+                  href={`/applications/${interview.applicationId}`}
                 >
                   <div className="calendar-tile">
                     <span>
-                      {new Date(i.scheduledAt).toLocaleDateString("en-US", {
+                      {new Date(interview.scheduledAt).toLocaleDateString("en-US", {
                         timeZone: timezone,
                         month: "long",
                       })}
                     </span>
                     <strong>
-                      {new Date(i.scheduledAt).toLocaleDateString("en-US", {
+                      {new Date(interview.scheduledAt).toLocaleDateString("en-US", {
                         timeZone: timezone,
                         day: "numeric",
                       })}
                     </strong>
                   </div>
                   <div>
-                    <strong>{a.applicant.name}</strong>
+                    <strong>{interview.applicantName}</strong>
                     <span>
-                      {i.stage} · {a.position}
+                      {interview.stage} · {interview.position}
                     </span>
                     <small>
-                      {formatTime(i.scheduledAt, state.preferences)}
+                      {formatTime(interview.scheduledAt, state.preferences)}
                     </small>
                   </div>
                   <ChevronRight size={15} />

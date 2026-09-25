@@ -1,8 +1,3 @@
-import {
-  activeIntake,
-  intakeCapacity,
-  INTAKE_QUEUE_LIMIT,
-} from "@/lib/data-policy";
 import "server-only";
 import { formalName } from "@/lib/names";
 import { z } from "zod";
@@ -47,11 +42,6 @@ export async function createApplicant(input: unknown, user: User) {
     );
     if (previous) return previous;
     const state = await getState(tx);
-    if (intakeCapacity(state.applications).full)
-      throw new SafeError(
-        `Intake capacity is full (${INTAKE_QUEUE_LIMIT} eligible applications). Complete or close an application before adding another.`,
-        409,
-      );
     if (
       state.applications.some(
         (a) => a.applicant.email.toLowerCase() === values.email.toLowerCase(),
@@ -255,14 +245,6 @@ export async function restoreApplicant(id: string, user: User) {
       (a) => a.id === id && a.deletedAt && !a.isDemo,
     );
     if (!a) throw new SafeError("Archived applicant not found.", 404);
-    if (
-      !["Hired", "Rejected", "Withdrawn", "Talent Pool"].includes(a.status) &&
-      intakeCapacity(state.applications).full
-    )
-      throw new SafeError(
-        "Intake capacity is full. Close an eligible application before restoring this record.",
-        409,
-      );
     delete a.deletedAt;
     delete a.deletedBy;
     delete a.deletionReason;

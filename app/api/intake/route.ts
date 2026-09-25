@@ -41,7 +41,7 @@ export async function POST(req: Request) {
     after(() => runExtractionJobs());
     return Response.json({
       ...result,
-      syncStatus: "Changes committed to Google Sheets.",
+      syncStatus: "Changes saved to the ATS database.",
     });
   } catch (e) {
     return safeError(e);

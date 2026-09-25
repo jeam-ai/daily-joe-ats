@@ -1,7 +1,7 @@
 "use client";
 import { IntakeSyncStatus } from "./intake-sync";
 import Link from "next/link";
-import { canManage, activeIntake } from "@/lib/data-policy";
+import { canManage } from "@/lib/data-policy";
 import { DemoControls } from "./system-settings";
 import { usePathname, useRouter } from "next/navigation";
 import { useState, useEffect, useRef } from "react";
@@ -167,7 +167,7 @@ function Frame({
               <span>{label}</span>
               {label === "Applications" && (
                 <span className="nav-count">
-                  {state ? state.applications.length : "…"}
+                  {state ? state.applicationSummary?.[dataset].liveQueue ?? 0 : "…"}
                 </span>
               )}
             </Link>
@@ -222,11 +222,7 @@ function Frame({
             </form>
             <Badge tone="blue">
               {dataset === "demo" ? "DEMO" : "LIVE WORKSPACE"} ·{" "}
-              {!state
-                ? "…"
-                : dataset === "demo"
-                  ? state.applications.length
-                  : state.applications.filter(activeIntake).length}{" "}
+              {!state ? "…" : state.applicationSummary?.[dataset].active ?? 0}{" "}
               / 100 active
             </Badge>
             <Link

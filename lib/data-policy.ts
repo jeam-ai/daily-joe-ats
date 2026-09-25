@@ -1,15 +1,20 @@
 import type { AppState, Application, User } from "@/types";
 
 export const ACTIVE_APPLICATION_LIMIT = 100;
-// Keep the active workspace fast while retaining a bounded, ordered intake
-// backlog. Closed records remain in audit history and do not consume capacity.
+// The dashboard emphasizes a small working window, while the live recruitment
+// queue retains the newest 500. Gmail intake is intentionally never capped.
 export const INTAKE_QUEUE_LIMIT = 500;
 export const intakeCapacity = (applications: Application[]) => {
-  const retained = applications.filter(eligibleIntake).length;
+  const retained = Math.min(
+    applications.filter(eligibleIntake).length,
+    INTAKE_QUEUE_LIMIT,
+  );
   return {
     retained,
+    // Kept for existing callers. This is informational only: a full live
+    // queue moves older records into retention; it never stops Gmail intake.
     available: Math.max(0, INTAKE_QUEUE_LIMIT - retained),
-    full: retained >= INTAKE_QUEUE_LIMIT,
+    full: false,
   };
 };
 
@@ -37,7 +42,8 @@ export const eligibleIntake = (a: Application) =>
   a.stage !== "Hired";
 
 export const activeIntake = (a: Application) =>
-  eligibleIntake(a) && a.queueState !== "Queued";
+  eligibleIntake(a) &&
+  (a.queueState === undefined || a.queueState === "Active");
 export function balanceIntakeWindow(applications: Application[]) {
   const eligible = applications
     .filter(eligibleIntake)
@@ -46,6 +52,7 @@ export function balanceIntakeWindow(applications: Application[]) {
         Date.parse(b.appliedAt) - Date.parse(a.appliedAt) ||
         b.id.localeCompare(a.id),
     );
+  const live = new Set(eligible.slice(0, INTAKE_QUEUE_LIMIT).map((a) => a.id));
   const active = new Set(
     eligible.slice(0, ACTIVE_APPLICATION_LIMIT).map((a) => a.id),
   );
@@ -54,10 +61,15 @@ export function balanceIntakeWindow(applications: Application[]) {
       a.queueState = eligibleIntake(a)
         ? active.has(a.id)
           ? "Active"
-          : "Queued"
+          : live.has(a.id)
+            ? "Queued"
+            : "Closed"
         : "Closed";
   return {
     active: active.size,
-    queued: Math.max(0, eligible.length - ACTIVE_APPLICATION_LIMIT),
+    queued: Math.max(
+      0,
+      Math.min(eligible.length, INTAKE_QUEUE_LIMIT) - ACTIVE_APPLICATION_LIMIT,
+    ),
   };
 }

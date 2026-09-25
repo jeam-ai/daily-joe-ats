@@ -156,6 +156,7 @@ export const applicationSchema = z.object({
   gmailThreadId: text.optional(),
   hiredAt: text.optional(),
   talentPoolAddedAt: text.optional(),
+  talentPoolExpiredAt: text.optional(),
   orientationDate: text.optional(),
   commitmentDate: text.optional(),
   onboardingStatus: z.enum(["Pending Orientation", "Scheduled", "Completed"]),
@@ -421,6 +422,23 @@ export function deriveNotifications(state: AppState) {
   ) => result.push({ id, title, description, href, date, read: read.has(id) });
   for (const a of state.applications) {
     if (a.deletedAt) continue;
+    if (a.status === "Talent Pool" && !a.talentPoolExpiredAt) {
+      const started = Date.parse(a.talentPoolAddedAt || a.appliedAt);
+      const poolExpiry = started + 30 * 86400000;
+      const days = Math.ceil((poolExpiry - Date.now()) / 86400000);
+      if (days <= 7)
+        add(
+          `talent-retention-${a.id}`,
+          days <= 0
+            ? "Talent Pool retention grace period"
+            : "Talent Pool expiry approaching",
+          days <= 0
+            ? `${a.applicant.name} is in the 10-day Talent Pool grace period. Retain applicant to reset the pool.`
+            : `${a.applicant.name} will leave the Talent Pool in ${days} day${days === 1 ? "" : "s"}.`,
+          `/applications/${a.id}`,
+          a.talentPoolAddedAt || a.appliedAt,
+        );
+    }
     if (a.source === "Gmail" && !a.isDemo)
       add(
         `new-${a.id}`,
@@ -497,6 +515,20 @@ export function deriveNotifications(state: AppState) {
         `/hiring-needs?edit=${n.id}`,
         n.targetDate,
       );
+  for (const n of state.hiringNeeds) {
+    const days = Math.ceil((Date.parse(n.targetDate) - Date.now()) / 86400000);
+    if (!Number.isFinite(days) || n.status === "Closed") continue;
+    if (days <= 0 || days === 3 || days === 7)
+      add(
+        `need-target-${n.id}-${days <= 0 ? "due" : days}`,
+        days <= 0
+          ? "Hiring need target date reached"
+          : `Hiring need target in ${days} days`,
+        `${n.position} · ${n.location}. Extend, reopen, or close this hiring need before retention begins.`,
+        `/hiring-needs?edit=${n.id}`,
+        n.targetDate,
+      );
+  }
   return result.map((notification) => ({
     ...notification,
     isDemo:

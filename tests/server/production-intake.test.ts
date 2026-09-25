@@ -200,11 +200,16 @@ test("automatic intake resumes beyond ten, maintains latest 100 with an older qu
     );
     assert.equal(saved.preferences.theme, "dark");
     assert.equal(
-      saved.applications.length,
+      saved.applicationSummary?.real.total,
       100 + AUTOMATIC_INTAKE_BATCH_SIZE,
-      "a preference save from an old form preserves imported applicants",
+      "a preference save preserves every server-side applicant beyond the bounded preview",
     );
-    assert.equal(saved.applications[0].status, "Rejected");
+    assert.ok(
+      (await transaction(getState)).applications.some(
+        (application) => application.status === "Rejected",
+      ),
+      "the server-side applicant omitted from the workspace preview remains intact",
+    );
     await assert.rejects(
       updatePreferences(
         saved.preferences,

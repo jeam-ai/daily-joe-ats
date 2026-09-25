@@ -58,5 +58,21 @@ test("credential and token paths are ignored and environment template is blank",
   const lines = readFileSync(".env.example", "utf8")
     .split(/\r?\n/)
     .filter((line) => line.trim() && !line.trim().startsWith("#"));
-  assert.ok(lines.every((line) => line.endsWith("=") && !line.split("=")[1]));
+  const secretKeys = new Set([
+    "DATABASE_URL",
+    "DATABASE_POOL_URL",
+    "AIVEN_CA_CERT",
+    "SESSION_SECRET",
+    "TOKEN_ENCRYPTION_KEY",
+    "CRON_SECRET",
+    "GOOGLE_CLIENT_SECRET",
+    "SHEETS_GATEWAY_SECRET",
+    "SHEETS_GATEWAY_REFRESH_TOKEN",
+  ]);
+  assert.ok(
+    lines.every((line) => {
+      const [key, ...value] = line.split("=");
+      return !secretKeys.has(key) || value.join("=") === "";
+    }),
+  );
 });

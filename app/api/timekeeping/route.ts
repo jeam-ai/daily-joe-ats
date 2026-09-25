@@ -121,6 +121,7 @@ export async function POST(request: Request) {
           id: String(body.id),
           rules: body.rules,
           aliases: aliases.data,
+          cutoff: body.cutoff,
         },
         user,
       );
