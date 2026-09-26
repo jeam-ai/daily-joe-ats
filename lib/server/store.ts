@@ -51,8 +51,10 @@ export function withStore<T>(
   fn: (s: Store) => T | Promise<T>,
   persist = true,
 ): Promise<T> {
+  let step = "start";
   return transaction(
     async (tx) => {
+      step = "read_secure_record";
       const encrypted = await readRecord<string>(tx, "secure", "auth");
       const store = encrypted
         ? unseal<Store>(encrypted, config().encryptionKey)
@@ -60,8 +62,10 @@ export function withStore<T>(
           ? ({ sessions: {}, events: [], requests: {} } as Store)
           : await read();
       const count = store.events.length;
+      step = "update_store";
       const result = await fn(store);
-      if (persist)
+      if (persist) {
+        step = "write_audit";
         for (const event of store.events.slice(count))
           await writeAudit(
             tx,
@@ -70,17 +74,34 @@ export function withStore<T>(
             undefined,
             event.metadata,
           );
-      if (persist || (!encrypted && !process.env.DATABASE_URL))
+      }
+      if (persist || (!encrypted && !process.env.DATABASE_URL)) {
+        step = "write_secure_record";
         await putRecord(
           tx,
           "secure",
           "auth",
           seal(store, config().encryptionKey),
         );
+      }
+      step = "commit";
       return result;
     },
     { readOnly: !persist },
-  );
+  ).catch((error: unknown) => {
+    // PostgreSQL SQLSTATE and a fixed operation label are enough to diagnose
+    // a failed session write. Never log the SQL, encrypted store or tokens.
+    const code =
+      error && typeof error === "object" && "code" in error
+        ? String(error.code)
+        : "";
+    console.error("Secure store transaction failed", {
+      step,
+      ...(persist ? { operation: "write" } : { operation: "read" }),
+      ...(/^[0-9A-Z]{5}$/.test(code) ? { sqlstate: code } : {}),
+    });
+    throw error;
+  });
 }
 export function recordEvent(
   store: { events: IntegrationEvent[] },
