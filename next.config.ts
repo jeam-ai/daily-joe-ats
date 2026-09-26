@@ -14,6 +14,10 @@ const config: NextConfig = {
     "/api/**": [
       "./node_modules/@napi-rs/canvas/**/*",
       "./node_modules/@napi-rs/canvas-linux-x64-gnu/**/*",
+      // PDF.js loads its fake worker through a runtime import that tracing
+      // cannot infer from pdf.mjs. Without it, deployed PDF text extraction
+      // fails even though the parser itself is present.
+      "./node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs",
     ],
   },
   // Local operational state and temporary credentials must never be copied
