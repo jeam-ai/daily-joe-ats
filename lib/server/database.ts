@@ -30,8 +30,18 @@ function isAivenConnection(value: string | undefined) {
 }
 
 function postgresConnectionUrl() {
+  // A dedicated Aiven secret avoids an old Vercel storage integration
+  // shadowing DATABASE_URL on Preview deployments.
+  const dedicated = process.env.AIVEN_DATABASE_URL;
   const direct = process.env.DATABASE_URL;
   const pooled = process.env.DATABASE_POOL_URL;
+  if (dedicated) {
+    if (isAivenConnection(dedicated)) return dedicated;
+    throw new SafeError(
+      "AIVEN_DATABASE_URL must point to the configured Aiven PostgreSQL service.",
+      503,
+    );
+  }
   // A legacy Vercel storage integration may still inject DATABASE_POOL_URL.
   // When Aiven's CA is configured, never silently connect to another provider.
   if (
@@ -40,6 +50,11 @@ function postgresConnectionUrl() {
   ) {
     if (isAivenConnection(pooled)) return pooled;
     if (isAivenConnection(direct)) return direct;
+    console.error("Aiven database URL unavailable", {
+      databaseUrlConfigured: !!direct,
+      poolUrlConfigured: !!pooled,
+      aivenCaConfigured: true,
+    });
     throw new SafeError(
       "DATABASE_URL must point to the configured Aiven PostgreSQL service.",
       503,
