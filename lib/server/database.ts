@@ -19,6 +19,35 @@ const globalDb = globalThis as typeof globalThis & {
   djDbQueue?: Promise<unknown>;
   djSchemaReady?: Promise<void>;
 };
+
+function isAivenConnection(value: string | undefined) {
+  if (!value) return false;
+  try {
+    return new URL(value).hostname.toLowerCase().endsWith(".aivencloud.com");
+  } catch {
+    return false;
+  }
+}
+
+function postgresConnectionUrl() {
+  const direct = process.env.DATABASE_URL;
+  const pooled = process.env.DATABASE_POOL_URL;
+  // A legacy Vercel storage integration may still inject DATABASE_POOL_URL.
+  // When Aiven's CA is configured, never silently connect to another provider.
+  if (
+    process.env.PERSISTENCE_PROVIDER === "postgres" &&
+    process.env.AIVEN_CA_CERT
+  ) {
+    if (isAivenConnection(pooled)) return pooled;
+    if (isAivenConnection(direct)) return direct;
+    throw new SafeError(
+      "DATABASE_URL must point to the configured Aiven PostgreSQL service.",
+      503,
+    );
+  }
+  return pooled || direct;
+}
+
 const schema = [
   "CREATE TABLE IF NOT EXISTS records (collection TEXT NOT NULL, id TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(collection,id))",
   "CREATE TABLE IF NOT EXISTS audit_logs (id TEXT PRIMARY KEY, occurred_at TEXT NOT NULL, actor TEXT NOT NULL, action TEXT NOT NULL, application_id TEXT, payload TEXT NOT NULL)",
@@ -76,10 +105,9 @@ async function databaseTransaction<T>(
       503,
     );
   if (sheetsPrimary()) return sheetsTransaction(schema, fn, !!options.readOnly);
-  const connectionUrl =
-    process.env.DATABASE_POOL_URL || process.env.DATABASE_URL;
+  const connectionUrl = postgresConnectionUrl();
   if (connectionUrl && process.env.PERSISTENCE_PROVIDER !== "local") {
-    const aiven = connectionUrl.includes(".aivencloud.com");
+    const aiven = isAivenConnection(connectionUrl);
     const aivenCa = process.env.AIVEN_CA_CERT?.replaceAll("\\n", "\n");
     if (aiven && !aivenCa)
       throw new SafeError(
@@ -105,6 +133,10 @@ async function databaseTransaction<T>(
         statement_timeout: 30000,
         query_timeout: 35000,
         idle_in_transaction_session_timeout: 60000,
+      });
+      console.info("PostgreSQL pool configured", {
+        provider: aiven ? "aiven" : "other",
+        pooled: connectionUrl === process.env.DATABASE_POOL_URL,
       });
       // Idle provider disconnects must not become uncaught process exceptions.
       globalDb.djPool.on("error", () => bufferFailure("database.unavailable"));
