@@ -22,13 +22,15 @@ export async function GET(request: Request) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   await drainEmailOutbox();
   const started = Date.now();
+  const activity = syncGmailThreadActivity().catch(() =>
+    reportIssue("gmail.sync"),
+  );
   for (let i = 0; i < 20 && Date.now() - started < 150000; i++) {
     await syncIntake(undefined, i > 0, 210000 - (Date.now() - started));
     const job = await intakeStatus();
     if (job.status !== "complete" || (!job.pending.length && !job.page)) break;
   }
-  if (Date.now() - started < 160000)
-    await syncGmailThreadActivity().catch(() => reportIssue("gmail.sync"));
+  await activity;
   if (Date.now() - started < 90000) await recoverOneDeferredDocument();
   if (Date.now() - started < 150000)
     await refreshStoredEvidenceBatch(25).catch(() =>

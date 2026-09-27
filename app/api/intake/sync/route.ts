@@ -37,14 +37,17 @@ export async function POST(request: Request) {
       });
     after(async () => {
       const started = Date.now();
+      // Thread replies must not wait behind a long application-import backlog.
+      const activity = syncGmailThreadActivity().catch(() =>
+        reportIssue("gmail.sync"),
+      );
       // Gmail sync is deliberately small and resumable. A later poll takes
       // the next durable slice, which is more reliable than one long task in
       // a serverless `after` lifecycle.
       await syncIntake(user, force, 75000).catch(() =>
         reportIssue("gmail.sync"),
       );
-      if (Date.now() - started < 85000)
-        await syncGmailThreadActivity().catch(() => reportIssue("gmail.sync"));
+      await activity;
       if (Date.now() - started < 85000)
         await runExtractionJobs(1).catch(() => reportIssue("ai.provider"));
       if (Date.now() - started < 100000)

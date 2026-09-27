@@ -78,7 +78,10 @@ export function Reports() {
         <div>
           <div className="eyebrow">THE BIGGER PICTURE</div>
           <h1>Reports</h1>
-          <p>Understand your pipeline. Plan your next steps.</p>
+          <p>
+            Counts cover the selected period, including retained history. The
+            500-item live queue is a separate working view.
+          </p>
         </div>
         <div className="inline-actions">
           <Select
@@ -118,7 +121,13 @@ export function Reports() {
         <>
           <div className="report-metrics">
             {[
-              ["Applications", data.total, UsersRound],
+              [
+                range === "all"
+                  ? "All-time applications"
+                  : "Applications in period",
+                data.total,
+                UsersRound,
+              ],
               ["Hired", data.hired, UserCheck],
               ["Talent pool", data.talentPool, Bookmark],
               [
