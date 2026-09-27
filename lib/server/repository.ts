@@ -187,13 +187,23 @@ export async function saveState(
   }
   // Group identical upserts into portable multi-row statements. This avoids
   // hundreds of network round trips for one workspace save.
-  const groups = new Map<string, unknown[][]>();
-  for (const statement of statements)
-    groups.set(statement.sql, [
-      ...(groups.get(statement.sql) || []),
-      statement.values,
-    ]);
-  for (const [sql, records] of groups) {
+  const groups = new Map<string, Map<string, unknown[]>>();
+  for (const statement of statements) {
+    let records = groups.get(statement.sql);
+    if (!records) {
+      records = new Map();
+      groups.set(statement.sql, records);
+    }
+    // Multiple applications may refer to one applicant. PostgreSQL rejects
+    // an ON CONFLICT DO UPDATE when the same key appears twice in one INSERT
+    // (SQLSTATE 21000). Keep the last row, matching sequential-upsert behavior.
+    const key = statement.sql.includes("ON CONFLICT(id,application_id)")
+      ? JSON.stringify(statement.values.slice(0, 2))
+      : String(statement.values[0]);
+    records.set(key, statement.values);
+  }
+  for (const [sql, grouped] of groups) {
+    const records = [...grouped.values()];
     const marker = /VALUES\([^)]*\)/.exec(sql);
     if (!marker) throw new DomainError("Invalid internal upsert statement");
     for (let offset = 0; offset < records.length; offset += 200) {
