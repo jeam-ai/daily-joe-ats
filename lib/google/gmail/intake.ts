@@ -22,6 +22,7 @@ import { seal, unseal } from "@/lib/auth/security";
 import type { Application, QualificationRule, User } from "@/types";
 
 const MAX_PREVIEW_MESSAGES = 40;
+export const MAX_GMAIL_IMPORT_BATCH_SIZE = 15;
 export { screenResumeAgainstCriteria } from "@/lib/screening";
 import {
   screenResumeAgainstCriteria,
@@ -204,7 +205,7 @@ export async function previewImport(
     seen = new Set(state.applications.map((a) => a.gmailMessageId));
   {
     for (const message of messages) {
-      if (rows.length >= 10) break;
+      if (rows.length >= MAX_GMAIL_IMPORT_BATCH_SIZE) break;
       const header = (name: string) =>
         message.payload.headers.find((h) => h.name.toLowerCase() === name)
           ?.value || "";
@@ -476,10 +477,12 @@ export async function confirmImport(
     const state = await getState(tx);
     if (
       !selections.length ||
-      selections.length > 10 ||
+      selections.length > MAX_GMAIL_IMPORT_BATCH_SIZE ||
       new Set(selections.map((s) => s.messageId)).size !== selections.length
     )
-      throw new SafeError("Select between 1 and 10 unique applications.");
+      throw new SafeError(
+        `Select between 1 and ${MAX_GMAIL_IMPORT_BATCH_SIZE} unique applications.`,
+      );
     let imported = 0;
     const issues = [...preview.issues];
     for (const selection of selections) {

@@ -2,7 +2,11 @@ import { after } from "next/server";
 import { runExtractionJobs } from "@/lib/server/ai-extraction";
 import { z } from "zod";
 import { requireOrigin, requireUser } from "@/lib/auth/session";
-import { previewImport, confirmImport } from "@/lib/google/gmail/intake";
+import {
+  MAX_GMAIL_IMPORT_BATCH_SIZE,
+  previewImport,
+  confirmImport,
+} from "@/lib/google/gmail/intake";
 import { SafeError } from "@/lib/server/config";
 import { safeError } from "@/lib/server/response";
 export const maxDuration = 300;
@@ -28,7 +32,7 @@ export async function POST(req: Request) {
               hiringNeedId: z.string().max(200),
             }),
           )
-          .max(10),
+          .max(MAX_GMAIL_IMPORT_BATCH_SIZE),
       })
       .safeParse(body);
     if (!parsed.success) throw new SafeError("Invalid import confirmation.");

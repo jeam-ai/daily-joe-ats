@@ -3,9 +3,7 @@
   "framework": "nextjs",
   "buildCommand": "npm run build",
   "installCommand": "npm ci",
-  "regions": [
-    "sin1"
-  ],
+  "regions": ["sin1"],
   "functions": {
     "app/api/intake/route.ts": {
       "maxDuration": 300
@@ -20,7 +18,7 @@
   "crons": [
     {
       "path": "/api/cron/intake",
-      "schedule": "0 0 * * *"
+      "schedule": "*/2 * * * *"
     },
     {
       "path": "/api/cron/cleanup",

@@ -51,8 +51,8 @@ test("paused intake reports its real state and never contacts Gmail even when fo
     globalThis.fetch = original;
   }
 });
-test("automatic intake resumes beyond ten, maintains latest 100 with an older queue, preserves rejected history and never sends mail", async () => {
-  assert.equal(AUTOMATIC_INTAKE_BATCH_SIZE, 10);
+test("automatic intake uses safe batches, maintains latest 100 with an older queue, preserves rejected history and never sends mail", async () => {
+  assert.equal(AUTOMATIC_INTAKE_BATCH_SIZE, 15);
   const initial = initialState();
   initial.qualifications.push({
     id: "unassigned-test",
@@ -138,6 +138,10 @@ test("automatic intake resumes beyond ten, maintains latest 100 with an older qu
       AUTOMATIC_INTAKE_BATCH_SIZE,
       "lease prevents concurrent duplicate batches",
     );
+    const cooldown = await intakeStatus();
+    assert.equal(cooldown.phase, "cooldown");
+    assert.ok(cooldown.nextSyncAt! > Date.now());
+    assert.equal(cooldown.nextPhase, "backfill");
     assert.equal(
       Number(
         (
@@ -151,7 +155,7 @@ test("automatic intake resumes beyond ten, maintains latest 100 with an older qu
       0,
       "automatic intake does not persist temporary preview files",
     );
-    for (let i = 1; i < 100 / AUTOMATIC_INTAKE_BATCH_SIZE; i++)
+    while ((await transaction(getState)).applications.length < 100)
       await syncIntake(undefined, true);
     s = await transaction(getState);
     assert.equal(s.applications.filter(activeIntake).length, 100);
@@ -171,21 +175,21 @@ test("automatic intake resumes beyond ten, maintains latest 100 with an older qu
     await syncIntake(undefined, true);
     assert.equal((await intakeStatus()).status, "complete");
     s = await transaction(getState);
-    assert.equal(s.applications.length, 100 + AUTOMATIC_INTAKE_BATCH_SIZE);
+    assert.equal(s.applications.length, 110);
     assert.equal(
       s.applications.filter((a) => a.queueState === "Queued").length,
-      AUTOMATIC_INTAKE_BATCH_SIZE,
+      10,
     );
     s.applications[0].status = "Rejected";
     await transaction((tx) => saveState(tx, s));
     await syncIntake();
     s = await transaction(getState);
-    assert.equal(s.applications.length, 100 + AUTOMATIC_INTAKE_BATCH_SIZE);
+    assert.equal(s.applications.length, 110);
     assert.equal(s.applications.filter(activeIntake).length, 100);
     assert.equal(s.applications[0].status, "Rejected");
     assert.equal(
       new Set(s.applications.map((a) => a.gmailMessageId)).size,
-      100 + AUTOMATIC_INTAKE_BATCH_SIZE,
+      110,
     );
     assert.equal(sends, 0);
     assert.ok(
@@ -198,7 +202,7 @@ test("automatic intake resumes beyond ten, maintains latest 100 with an older qu
     assert.equal(saved.preferences.theme, "dark");
     assert.equal(
       saved.applicationSummary?.real.total,
-      100 + AUTOMATIC_INTAKE_BATCH_SIZE,
+      110,
       "a preference save preserves every server-side applicant beyond the bounded preview",
     );
     assert.ok(

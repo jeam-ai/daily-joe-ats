@@ -25,11 +25,10 @@ export async function GET(request: Request) {
   const activity = syncGmailThreadActivity().catch(() =>
     reportIssue("gmail.sync"),
   );
-  for (let i = 0; i < 20 && Date.now() - started < 150000; i++) {
-    await syncIntake(undefined, i > 0, 210000 - (Date.now() - started));
-    const job = await intakeStatus();
-    if (job.status !== "complete" || (!job.pending.length && !job.page)) break;
-  }
+  // One durable batch per scheduler invocation. The sync itself records a
+  // two-minute cooldown; a scheduler must never force through it and create
+  // concurrent Aiven writes.
+  await syncIntake(undefined, false, 210000 - (Date.now() - started));
   await activity;
   if (Date.now() - started < 90000) await recoverOneDeferredDocument();
   if (Date.now() - started < 150000)

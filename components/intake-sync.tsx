@@ -12,11 +12,17 @@ export function IntakeSyncStatus() {
     [job, setJob] = useState<IntakeSync | null>(null),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false),
+    [now, setNow] = useState(() => Date.now()),
     last = useRef("");
   const enabled = dataset === "real" && canManage(state?.currentUser);
   const paused = !!state?.intakePaused;
   const working =
     busy || ["checking", "processing"].includes(job?.status || "");
+  const coolingDown = !working && !!job?.nextSyncAt && job.nextSyncAt > now;
+  const secondsToNext = coolingDown
+    ? Math.max(0, Math.ceil((job!.nextSyncAt! - now) / 1000))
+    : 0;
+  const nextSyncLabel = `${String(Math.floor(secondsToNext / 60)).padStart(2, "0")}:${String(secondsToNext % 60).padStart(2, "0")}`;
   const progress = busy
     ? 10
     : job?.status === "checking"
@@ -38,6 +44,11 @@ export function IntakeSyncStatus() {
     }
     return value;
   }
+  useEffect(() => {
+    if (!coolingDown) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [coolingDown]);
   useEffect(() => {
     if (!enabled || paused) return;
     let stopped = false,
@@ -61,12 +72,14 @@ export function IntakeSyncStatus() {
               ? // The server lease owns the work. Status reads do not need to
                 // poll every few seconds while a document batch is processing.
                 30000
-              : value.pending.length || value.page
-                ? 20000
-                // A visible HR workspace is the live intake monitor. Keep a
-                // light status pulse so newly received applications do not
-                // wait for a manual refresh or the daily server cron.
-                : 30000;
+              : value.nextSyncAt && value.nextSyncAt > Date.now()
+                ? Math.max(1000, value.nextSyncAt - Date.now() + 100)
+                : value.pending.length || value.page
+                  ? 5000
+                  : // A visible HR workspace is the live intake monitor. Keep a
+                    // light status pulse so newly received applications do not
+                    // wait for a manual refresh or the daily server cron.
+                    30000;
         setError("");
         if (
           !["checking", "processing", "authorization", "paused"].includes(
@@ -122,6 +135,28 @@ export function IntakeSyncStatus() {
             ? "Paused — applications will not be imported until intake is resumed."
             : error || job?.message || "Checking sync status…"}
         </span>
+        {job?.batchLimit && (
+          <small>
+            {job.lastBatchPhase === "backfill"
+              ? "Backfill intake"
+              : "Latest intake"}
+            : {job.batchImported || 0} / {job.batchLimit}
+          </small>
+        )}
+        {(job?.page || job?.nextPhase === "backfill") && (
+          <small>
+            Backfill remaining: {job.page ? "checking next page" : "queued"}
+          </small>
+        )}
+        {coolingDown && (
+          <div className="intake-cooldown" role="status">
+            <strong>Next safe sync in {nextSyncLabel}</strong>
+            <small>
+              Waiting for the prior database save to finish — preventing
+              concurrent Aiven writes and duplicate imports.
+            </small>
+          </div>
+        )}
         {working && (
           <div className="intake-progress-wrap">
             <small>{progressLabel}</small>
@@ -165,6 +200,7 @@ export function IntakeSyncStatus() {
             variant="secondary"
             disabled={
               busy ||
+              coolingDown ||
               (!error && ["checking", "processing"].includes(job?.status || ""))
             }
             onClick={async () => {

@@ -5,7 +5,13 @@ import {
 } from "@/lib/server/diagnostics";
 import { matchHiringNeed } from "@/lib/intake-matching";
 import "server-only";
-import { previewImport, confirmImport, official, gmail } from "./intake";
+import {
+  MAX_GMAIL_IMPORT_BATCH_SIZE,
+  previewImport,
+  confirmImport,
+  official,
+  gmail,
+} from "./intake";
 import { accessToken } from "./service";
 import {
   retryableTransaction,
@@ -47,11 +53,22 @@ export type IntakeSync = {
   errorCode?: string;
   headCheckedAt?: number;
   seenIds?: string[];
+  batchLimit?: number;
+  batchChecked?: number;
+  batchImported?: number;
+  phase?: "latest" | "backfill" | "cooldown" | "idle";
+  lastBatchPhase?: "latest" | "backfill";
+  nextPhase?: "latest" | "backfill";
+  nextSyncAt?: number;
 };
-// Process up to ten messages per automatic pass. Resume extraction has a
+// Process up to fifteen messages per automatic pass. Resume extraction has a
 // separate deadline/fallback so a slow document cannot hold the whole batch;
 // the browser/cron continues any remaining durable queue on later passes.
-export const AUTOMATIC_INTAKE_BATCH_SIZE = 10;
+export const AUTOMATIC_INTAKE_BATCH_SIZE = MAX_GMAIL_IMPORT_BATCH_SIZE;
+// A successful batch deliberately leaves room for Aiven to finish its prior
+// transaction. The checkpoint is durable, so a browser, cron, or later login
+// can safely resume without duplicate Gmail imports.
+export const INTAKE_COOLDOWN_MS = 2 * 60 * 1000;
 // Background work may be stopped by a serverless host before its advertised
 // route limit. A durable job can be safely reclaimed after this interval: its
 // application writes use stable Gmail IDs and its checkpoint rejects an older
@@ -114,7 +131,7 @@ export async function syncIntake(
   requestedBy?: User,
   force = false,
   budgetMs = 210000,
-) : Promise<IntakeSync | undefined> {
+): Promise<IntakeSync | undefined> {
   const workspace = await readTransaction(getState);
   if (workspace.intakePaused) return undefined;
   const actor = requestedBy
@@ -142,6 +159,8 @@ export async function syncIntake(
     }
     if (!force && (job.consecutiveFailures || 0) >= 3) return null;
     if (force) job.consecutiveFailures = 0;
+    // Automatic browser and cron passes honor the successful-save cooldown.
+    // `force` is reserved for an explicit operator recovery action.
     if (!force && job.retryAt && job.retryAt > now) return null;
     Object.assign(job, {
       runId,
@@ -154,7 +173,13 @@ export async function syncIntake(
       message: "Checking the official mailbox…",
       imported: 0,
       checked: 0,
+      batchLimit: AUTOMATIC_INTAKE_BATCH_SIZE,
+      batchChecked: 0,
+      batchImported: 0,
+      phase: "latest",
     });
+    delete job.nextSyncAt;
+    delete job.nextPhase;
     await putRecord(tx, "jobs", "gmail", job);
     return job;
   });
@@ -201,7 +226,9 @@ export async function syncIntake(
     // this branch guarantees the saved historical backlog finishes next.
     if (!job.pending.length && job.page) {
       stage = "mailbox-page";
-      job.message = "Backfilling older matching applications from the official mailbox…";
+      job.phase = "backfill";
+      job.message =
+        "Backfilling older matching applications from the official mailbox…";
       const page = await gmail<{
         messages?: { id: string }[];
         nextPageToken?: string;
@@ -222,8 +249,12 @@ export async function syncIntake(
     // Revisit the mailbox head independently once the prior historical page
     // has been scheduled. This gives new arrivals priority without allowing
     // them to permanently hide older matching messages.
-    if (!job.pending.length && (!job.headCheckedAt || now - job.headCheckedAt > 30000)) {
+    if (
+      !job.pending.length &&
+      (!job.headCheckedAt || now - job.headCheckedAt > 30000)
+    ) {
       stage = "mailbox-head";
+      job.phase = "latest";
       const head = await gmail<{
         messages?: { id: string }[];
         nextPageToken?: string;
@@ -256,10 +287,12 @@ export async function syncIntake(
     const ids = job.pending.slice(0, AUTOMATIC_INTAKE_BATCH_SIZE);
     if (!ids.length) {
       job.status = "complete";
+      job.phase = "idle";
       job.message = "Mailbox checked. No new eligible applications.";
       return job;
     }
     job.status = "processing";
+    job.lastBatchPhase = job.phase === "backfill" ? "backfill" : "latest";
     job.message = `Reading and validating ${ids.length} application${ids.length === 1 ? "" : "s"}…`;
     await checkpoint();
     stage = "message-preview";
@@ -274,6 +307,7 @@ export async function syncIntake(
       automatic: true,
     });
     job.checked = preview.scanned;
+    job.batchChecked = preview.scanned;
     // Public preview rows deliberately omit email body and resume content.
     // Automatic intake retains its in-memory preview only for this one
     // transaction so matching can use the submitted message without storing
@@ -317,6 +351,7 @@ export async function syncIntake(
         preview.automaticPreview,
       );
       job.imported = result.imported;
+      job.batchImported = result.imported;
     }
     const retryIds = preview.issues.filter((i) =>
       /Failed to retrieve|time limit|Failed to read/.test(i.reason),
@@ -337,13 +372,25 @@ export async function syncIntake(
       .filter((issue) => !issue.reason.startsWith("Duplicate"))
       .slice(-40);
     job.status = retryBatch ? "error" : "complete";
-    job.message = retryBatch
-      ? "Some messages could not be read. Retry to resume this batch."
-      : retryIds.length
-        ? "Unreadable attachments need HR review. Other applications will continue importing automatically."
-        : job.imported
-          ? `${job.imported} new application${job.imported === 1 ? "" : "s"} imported. ${job.pending.length || job.page ? "More messages will be checked automatically." : "Mailbox check complete."}`
-          : "No new eligible applications in this batch.";
+    const remaining = job.pending.length > 0 || !!job.page;
+    if (!retryBatch && remaining) {
+      job.phase = "cooldown";
+      job.nextPhase = job.page ? "backfill" : "latest";
+      job.nextSyncAt = Date.now() + INTAKE_COOLDOWN_MS;
+      job.message =
+        "Waiting briefly so the database can finish the prior save safely.";
+    } else {
+      job.phase = "idle";
+      delete job.nextPhase;
+      delete job.nextSyncAt;
+      job.message = retryBatch
+        ? "Some messages could not be read. Retry to resume this batch."
+        : retryIds.length
+          ? "Unreadable attachments need HR review. Other applications will continue importing automatically."
+          : job.imported
+            ? `${job.imported} new application${job.imported === 1 ? "" : "s"} imported. Mailbox check complete.`
+            : "No new eligible applications in this batch.";
+    }
   } catch (error) {
     const e = error as SafeError;
     const errorCode = (error as { code?: unknown } | null)?.code;
@@ -403,14 +450,15 @@ export async function syncIntake(
     job.completedAt = new Date().toISOString();
     job.leaseUntil = 0;
     job.retryAt =
+      job.nextSyncAt ||
       Date.now() +
-      (job.status === "error"
-        ? 120000
-        : job.status === "capacity"
-          ? 30000
-          : job.pending.length || job.page
-            ? 5000
-            : 30000);
+        (job.status === "error"
+          ? 120000
+          : job.status === "capacity"
+            ? 30000
+            : job.pending.length || job.page
+              ? INTAKE_COOLDOWN_MS
+              : 30000);
     await checkpoint().catch(() => {});
   }
   return job;
