@@ -335,25 +335,25 @@ export function Dashboard() {
                 )}
               </div>
               <div className="retention-summary">
-                <span>
-                  <strong>{retention.queue.retentionPending}</strong>{" "}
-                  applications outside live queue
-                </span>
-                <span>
-                  <strong>{retention.talentPoolExpiring}</strong> Talent Pool
-                  records expiring soon
-                </span>
-                <span>
+                <div className="retention-summary-row">
+                  <strong>{retention.queue.retentionPending}</strong>
+                  <span>Applications outside live queue</span>
+                </div>
+                <div className="retention-summary-row">
+                  <strong>{retention.talentPoolExpiring}</strong>
+                  <span>Talent Pool records expiring soon</span>
+                </div>
+                <div className="retention-summary-row">
                   <strong>
                     {retention.hiringNeedsExpiring +
                       retention.expiredHiringNeedsPending}
-                  </strong>{" "}
-                  Hiring Needs due or in grace
-                </span>
-                <span>
-                  <strong>{retention.activityRecordsPending}</strong> activity
-                  records due for cleanup
-                </span>
+                  </strong>
+                  <span>Hiring Needs due or in grace</span>
+                </div>
+                <div className="retention-summary-row">
+                  <strong>{retention.activityRecordsPending}</strong>
+                  <span>Activity records due for cleanup</span>
+                </div>
               </div>
               <p className="fine-print">
                 Live queue: {retention.queue.active + retention.queue.queued} ·

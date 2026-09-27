@@ -2726,65 +2726,6 @@ textarea::placeholder {
   color: var(--orange);
   background: var(--orange-bg);
 }
-.stage-legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: center;
-  margin: 12px 0 24px;
-  font-size: 12px;
-}
-.stage-legend.compact {
-  margin: 12px 22px 20px;
-  padding: 4px 0 16px;
-  border-bottom: 1px solid var(--line);
-}
-.stage-key {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--muted);
-  white-space: nowrap;
-}
-.stage-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 999px;
-  display: inline-block;
-  box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 12%, transparent);
-}
-.stage-dot.blue {
-  background: var(--info-bg);
-  color: var(--text-secondary);
-}
-.stage-dot.purple {
-  background: var(--purple-bg);
-  color: var(--purple);
-}
-.stage-dot.orange {
-  background: var(--orange-bg);
-  color: var(--orange);
-}
-.stage-dot.amber {
-  background: var(--warning-bg);
-  color: var(--warning);
-}
-.stage-dot.green {
-  background: var(--success-bg);
-  color: var(--success);
-}
-.stage-dot.deep-green {
-  background: var(--success-bg);
-  color: var(--success);
-}
-.stage-dot.red {
-  background: var(--danger-bg);
-  color: var(--danger);
-}
-.stage-dot.neutral {
-  background: var(--surface-subtle);
-  color: var(--text-secondary);
-}
 .badge.purple {
   background: var(--purple-bg);
   color: var(--purple);

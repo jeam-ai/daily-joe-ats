@@ -222,7 +222,7 @@ export function Applications({ talent = false }: { talent?: boolean }) {
             Preferences.
           </p>
         )}
-        <StageLegend compact />
+        <StageLegend />
         {!talent && dataset === "real" && (
           <p className="padded fine-print">
             Latest 100 active applications ·{" "}

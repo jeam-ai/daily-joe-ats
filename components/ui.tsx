@@ -92,19 +92,18 @@ const stageLegend = [
   ["Rejected", "red"],
   ["Withdrawn", "neutral"],
 ] as const;
-export function StageLegend({ compact = false }: { compact?: boolean }) {
+export function StageLegend() {
   return (
-    <div
-      className={`stage-legend ${compact ? "compact" : ""}`}
-      aria-label="Recruitment stage legend"
-    >
+    <div className="stage-legend" aria-label="Recruitment stage legend">
       <strong>Stage guide</strong>
-      {stageLegend.map(([stage, tone]) => (
-        <span className={`stage-key ${tone}`} key={stage}>
-          <i className={`stage-dot ${tone}`} aria-hidden="true" />
-          {stage}
-        </span>
-      ))}
+      <div className="stage-legend-items">
+        {stageLegend.map(([stage, tone]) => (
+          <span className={`stage-key ${tone}`} key={stage}>
+            <i className="stage-dot" aria-hidden="true" />
+            {stage}
+          </span>
+        ))}
+      </div>
     </div>
   );
 }
