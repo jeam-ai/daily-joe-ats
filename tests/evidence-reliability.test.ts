@@ -486,3 +486,15 @@ test("missing baseline templates are repaired before applicant evidence is scree
   assert.equal(barista?.rules?.length, 4);
   assert.ok(state.locations.some((location) => location.name === "General Trias, Cavite"));
 });
+
+test("legacy subject-gated Gmail filters are upgraded so labelled no-subject applications are included", () => {
+  const state = initialState();
+  state.intakeQuery =
+    "has:attachment {subject:application subject:resume} -in:spam -in:trash";
+
+  assert.ok(ensureRecruitmentConfiguration(state) > 0);
+  assert.equal(
+    state.intakeQuery,
+    'label:"HR - Applications" -in:spam -in:trash -in:sent',
+  );
+});

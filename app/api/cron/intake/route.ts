@@ -26,7 +26,7 @@ export async function GET(request: Request) {
     reportIssue("gmail.sync"),
   );
   // One durable batch per scheduler invocation. The sync itself records a
-  // two-minute cooldown; a scheduler must never force through it and create
+  // one-minute cooldown; a scheduler must never force through it and create
   // concurrent Aiven writes.
   await syncIntake(undefined, false, 210000 - (Date.now() - started));
   await activity;

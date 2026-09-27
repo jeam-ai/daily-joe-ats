@@ -85,7 +85,9 @@ export const AUTOMATIC_INTAKE_BATCH_SIZE = MAX_GMAIL_IMPORT_BATCH_SIZE;
 // A successful batch deliberately leaves room for Aiven to finish its prior
 // transaction. The checkpoint is durable, so a browser, cron, or later login
 // can safely resume without duplicate Gmail imports.
-export const INTAKE_COOLDOWN_MS = 2 * 60 * 1000;
+// One minute after a confirmed commit gives Aiven time to release the prior
+// write while keeping current applicants moving through the queue promptly.
+export const INTAKE_COOLDOWN_MS = 60 * 1000;
 // Version 2 intentionally rebases the old durable cursor once. Earlier
 // versions could continue an historical page before checking Gmail's newest
 // messages. The rebase discards only unimported queue pointers; applications

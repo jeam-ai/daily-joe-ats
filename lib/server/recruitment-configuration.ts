@@ -103,6 +103,22 @@ const labeledIntakeQuery =
   'label:"HR - Applications" -in:spam -in:trash -in:sent';
 
 /**
+ * Older releases encouraged subject and attachment gates. Those gates are not
+ * safe for this mailbox: an application can be deliberately labelled by HR
+ * while using a person's name, a branch name, or no subject at all. Treat
+ * those shipped-style filters as legacy even if spacing or one of the subject
+ * terms was edited, but leave a real label-based HR query alone.
+ */
+function isRestrictiveLegacyIntakeQuery(query: string) {
+  const normalized = query.trim().toLowerCase();
+  if (!normalized || normalized === legacyIntakeQuery) return true;
+  if (/\blabel\s*:/.test(normalized)) return false;
+  return /\bsubject\s*:\s*(application|applying|resume|cv)\b/.test(
+    normalized,
+  );
+}
+
+/**
  * Repair only absent/empty baseline configuration. Existing HR-authored rules
  * and locations always win; each non-demo hiring need also supplies a valid
  * location entry when it is not already configured.
@@ -110,12 +126,9 @@ const labeledIntakeQuery =
 export function ensureRecruitmentConfiguration(state: AppState) {
   let updated = 0;
   // The old subject-only query skipped valid applications titled with a name,
-  // branch, or no subject. Upgrade only that shipped default; an HR-authored
-  // custom Gmail query is never overwritten.
-  if (
-    !state.intakeQuery?.trim() ||
-    state.intakeQuery.trim() === legacyIntakeQuery
-  ) {
+  // branch, or no subject. Upgrade every variation of that legacy filter. A
+  // deliberately authored label-based HR query remains untouched.
+  if (isRestrictiveLegacyIntakeQuery(state.intakeQuery || "")) {
     state.intakeQuery = labeledIntakeQuery;
     updated++;
   }
