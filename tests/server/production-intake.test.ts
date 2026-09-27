@@ -52,6 +52,7 @@ test("paused intake reports its real state and never contacts Gmail even when fo
   }
 });
 test("automatic intake resumes beyond ten, maintains latest 100 with an older queue, preserves rejected history and never sends mail", async () => {
+  assert.equal(AUTOMATIC_INTAKE_BATCH_SIZE, 10);
   const initial = initialState();
   initial.qualifications.push({
     id: "unassigned-test",
@@ -93,7 +94,7 @@ test("automatic intake resumes beyond ten, maintains latest 100 with an older qu
     if (url.includes("messages?")) {
       const second = url.includes("pageToken=next");
       return Response.json({
-        messages: Array.from({ length: second ? 5 : 100 }, (_, i) => ({
+        messages: Array.from({ length: second ? 10 : 100 }, (_, i) => ({
           id: String(i + (second ? 100 : 0)),
         })),
         nextPageToken: second ? undefined : "next",

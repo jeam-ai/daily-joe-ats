@@ -47,11 +47,10 @@ export type IntakeSync = {
   headCheckedAt?: number;
   seenIds?: string[];
 };
-// Resume extraction (especially OCR) is the expensive part of intake. Keep
-// automatic batches small enough to finish, persist, and release their lease
-// inside a serverless invocation; the browser/cron immediately continues the
-// remaining durable queue.
-export const AUTOMATIC_INTAKE_BATCH_SIZE = 3;
+// Process up to ten messages per automatic pass. Resume extraction has a
+// separate deadline/fallback so a slow document cannot hold the whole batch;
+// the browser/cron continues any remaining durable queue on later passes.
+export const AUTOMATIC_INTAKE_BATCH_SIZE = 10;
 // Background work may be stopped by a serverless host before its advertised
 // route limit. A durable job can be safely reclaimed after this interval: its
 // application writes use stable Gmail IDs and its checkpoint rejects an older
