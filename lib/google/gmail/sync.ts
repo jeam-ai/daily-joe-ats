@@ -115,13 +115,15 @@ async function backfillStorageStatus() {
   try {
     const result = await readTransaction(async (tx) => {
       const storage = Number(
-        (await tx.query("SELECT pg_database_size(current_database()) AS bytes"))[0]
-          ?.bytes || 0,
+        (
+          await tx.query("SELECT pg_database_size(current_database()) AS bytes")
+        )[0]?.bytes || 0,
       );
       const connectionLimit = aivenConfigured()
         ? String(
-            (await tx.query("SELECT current_setting('max_connections') AS n"))[0]
-              ?.n || "",
+            (
+              await tx.query("SELECT current_setting('max_connections') AS n")
+            )[0]?.n || "",
           )
         : "";
       const configuredLimit = Number(process.env.DB_STORAGE_LIMIT_BYTES || 0);
@@ -131,7 +133,10 @@ async function backfillStorageStatus() {
     });
     return result !== null && result >= BACKFILL_STORAGE_WARNING
       ? { blocked: true as const, percent: Math.round(result * 100) }
-      : { blocked: false as const, percent: result ? Math.round(result * 100) : undefined };
+      : {
+          blocked: false as const,
+          percent: result ? Math.round(result * 100) : undefined,
+        };
   } catch {
     return { blocked: true as const };
   }
@@ -226,7 +231,7 @@ export async function syncIntake(
   force = false,
   budgetMs = 210000,
 ): Promise<IntakeSync | undefined> {
-  const workspace = await readTransaction(getState);
+  let workspace = await readTransaction(getState);
   if (workspace.intakePaused) return undefined;
   const actor = requestedBy
     ? workspace.users?.find((u) => u.email === requestedBy.email && u.active)
@@ -313,6 +318,9 @@ export async function syncIntake(
     return job;
   });
   if (!claimed) return undefined;
+  // Configuration repair can upgrade the shipped legacy Gmail filter. Reload
+  // it before asking Gmail so the very first sync uses the corrected query.
+  workspace = await readTransaction(getState);
   const job = claimed;
   async function checkpoint() {
     await retryableTransaction(async (tx) => {
@@ -344,10 +352,12 @@ export async function syncIntake(
     if (job.query !== query) {
       job.pending = [];
       delete job.page;
+      delete job.seenIds;
       delete job.latestPending;
       delete job.backfillPending;
       delete job.nextBackfillAt;
       delete job.backfillPausedReason;
+      delete job.lastNewEligibleAt;
       job.query = query;
     }
     job.message = "Finding new eligible applications in the official mailbox…";
@@ -360,10 +370,7 @@ export async function syncIntake(
       messages?: { id: string }[];
       nextPageToken?: string;
     }>(token, `messages?maxResults=100&q=${encodeURIComponent(query)}`);
-    const queued = new Set([
-      ...job.pending,
-      ...(job.backfillPending || []),
-    ]);
+    const queued = new Set([...job.pending, ...(job.backfillPending || [])]);
     const known = new Set([
       ...workspace.applications.map((a) => a.gmailMessageId),
       ...(job.seenIds || []),
@@ -558,9 +565,7 @@ export async function syncIntake(
       .slice(-40);
     job.status = retryBatch ? "error" : "complete";
     const remaining =
-      job.pending.length > 0 ||
-      !!job.backfillPending?.length ||
-      !!job.page;
+      job.pending.length > 0 || !!job.backfillPending?.length || !!job.page;
     if (!retryBatch && remaining) {
       if (job.latestPending?.length) {
         job.phase = "cooldown";

@@ -1310,15 +1310,25 @@ fieldset {
 }
 .intake-sync {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
-  gap: 18px;
-  padding: 12px 16px;
+  gap: 22px;
+  padding: 16px 18px;
   border: 1px solid var(--border);
   background: var(--surface);
   border-radius: 12px;
   margin-bottom: 20px;
   font-size: 12px;
+}
+.intake-summary {
+  min-width: 0;
+  flex: 1;
+}
+.intake-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
 }
 .intake-sync strong,
 .intake-sync span,
@@ -1329,21 +1339,71 @@ fieldset {
   color: var(--text-secondary);
   margin-top: 3px;
 }
-.intake-sync small {
-  color: var(--text-muted);
-  margin-top: 3px;
+.intake-state {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: var(--info-bg);
+  color: var(--info);
+  padding: 5px 9px;
+  font-size: 11px;
+  font-weight: 700;
+}
+.intake-state.attention {
+  background: var(--warning-bg);
+  color: var(--warning);
+}
+.intake-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0;
+  margin-top: 13px;
+}
+.intake-metrics span {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  color: var(--text-secondary);
+  margin: 0;
+  padding: 0 14px;
+  border-left: 1px solid var(--border);
+}
+.intake-metrics span:first-child {
+  padding-left: 0;
+  border-left: 0;
+}
+.intake-metrics b {
+  color: var(--text-primary);
+  font-size: 11px;
+}
+.intake-note {
+  margin: 11px 0 0;
+  color: var(--text-secondary);
+}
+.intake-details {
+  max-width: 650px;
+  margin-top: 10px;
+  color: var(--text-secondary);
+}
+.intake-details p {
+  margin: 7px 0 0;
+}
+.intake-details ul {
+  margin: 7px 0 0;
+}
+.intake-sync > .button-row {
+  padding-top: 3px;
+}
+.intake-sync > .button-row .button {
+  white-space: nowrap;
 }
 .intake-progress-wrap {
-  width: min(520px, 62vw);
-  margin-top: 9px;
+  width: min(480px, 62vw);
+  margin-top: 10px;
 }
 .intake-progress-wrap progress {
   display: block;
   height: 7px;
   margin-top: 6px;
-}
-.intake-sync details {
-  max-width: 650px;
 }
 summary {
   cursor: pointer;
@@ -1352,6 +1412,9 @@ summary {
   .intake-sync {
     align-items: flex-start;
     flex-direction: column;
+  }
+  .intake-metrics span {
+    padding: 0 10px;
   }
   .odoo-comparison {
     grid-template-columns: 1fr;

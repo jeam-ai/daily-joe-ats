@@ -78,12 +78,29 @@ const baselineTemplates: QualificationTemplate[] = [
 ];
 
 const baselineLocations = [
-  { id: "naga", name: "Naga City", city: "Naga City", province: "Camarines Sur" },
-  { id: "santa-rosa", name: "Santa Rosa, Laguna", city: "Santa Rosa", province: "Laguna" },
+  {
+    id: "naga",
+    name: "Naga City",
+    city: "Naga City",
+    province: "Camarines Sur",
+  },
+  {
+    id: "santa-rosa",
+    name: "Santa Rosa, Laguna",
+    city: "Santa Rosa",
+    province: "Laguna",
+  },
 ];
 
 const key = (value: string) =>
-  value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+const legacyIntakeQuery =
+  "has:attachment {subject:application subject:applying subject:resume subject:cv} -in:spam -in:trash -in:sent";
+const labeledIntakeQuery =
+  'label:"HR - Applications" -in:spam -in:trash -in:sent';
 
 /**
  * Repair only absent/empty baseline configuration. Existing HR-authored rules
@@ -92,6 +109,16 @@ const key = (value: string) =>
  */
 export function ensureRecruitmentConfiguration(state: AppState) {
   let updated = 0;
+  // The old subject-only query skipped valid applications titled with a name,
+  // branch, or no subject. Upgrade only that shipped default; an HR-authored
+  // custom Gmail query is never overwritten.
+  if (
+    !state.intakeQuery?.trim() ||
+    state.intakeQuery.trim() === legacyIntakeQuery
+  ) {
+    state.intakeQuery = labeledIntakeQuery;
+    updated++;
+  }
   for (const baseline of baselineTemplates) {
     const existing = state.qualifications.find(
       (template) => key(template.position) === key(baseline.position),
@@ -110,7 +137,10 @@ export function ensureRecruitmentConfiguration(state: AppState) {
   }
   state.locations ||= [];
   const addLocation = (name: string, city: string, province: string) => {
-    if (!name.trim() || state.locations!.some((location) => key(location.name) === key(name)))
+    if (
+      !name.trim() ||
+      state.locations!.some((location) => key(location.name) === key(name))
+    )
       return;
     state.locations!.push({
       id: `system-${key(name).replaceAll(" ", "-")}`.slice(0, 100),
@@ -130,7 +160,11 @@ export function ensureRecruitmentConfiguration(state: AppState) {
       /not clearly stated|not verified|unassigned/i.test(need.location)
     )
       continue;
-    addLocation(need.location.trim(), parts[0] || need.location.trim(), parts.slice(1).join(", "));
+    addLocation(
+      need.location.trim(),
+      parts[0] || need.location.trim(),
+      parts.slice(1).join(", "),
+    );
   }
   return updated;
 }

@@ -38,6 +38,24 @@ export function IntakeSyncStatus() {
       : job?.status === "checking"
         ? "Checking Gmail for eligible applications"
         : "Reading and validating the current application batch";
+  const statusLabel = paused
+    ? "Paused"
+    : error
+      ? "Needs attention"
+      : queuedForDatabase
+        ? "Queued"
+        : working
+          ? job?.status === "processing"
+            ? "Importing"
+            : "Checking Gmail"
+          : job?.imported
+            ? `${job.imported} imported`
+            : "Monitoring";
+  const historyLabel = job?.backfillPausedReason
+    ? "On hold"
+    : job?.lastBatchPhase === "backfill"
+      ? "Processed"
+      : "Standby";
   async function check() {
     const value = await requestJson<IntakeSync>("/api/intake/sync");
     setJob(value);
@@ -79,12 +97,12 @@ export function IntakeSyncStatus() {
                 ? Math.max(1000, value.nextSyncAt - Date.now() + 100)
                 : value.nextBackfillAt && value.nextBackfillAt > Date.now()
                   ? 30000
-                : value.pending.length || value.page
-                  ? 5000
-                  : // A visible HR workspace is the live intake monitor. Keep a
-                    // light status pulse so newly received applications do not
-                    // wait for a manual refresh or the daily server cron.
-                    30000;
+                  : value.pending.length || value.page
+                    ? 5000
+                    : // A visible HR workspace is the live intake monitor. Keep a
+                      // light status pulse so newly received applications do not
+                      // wait for a manual refresh or the daily server cron.
+                      30000;
         setError("");
         if (
           !["checking", "processing", "authorization", "paused"].includes(
@@ -138,57 +156,54 @@ export function IntakeSyncStatus() {
   if (!enabled) return null;
   return (
     <div className="intake-sync" aria-label="Automatic Gmail intake">
-      <div>
-        <strong>Gmail intake</strong>
-        <span role="status">
-          {paused
-            ? "Paused — applications will not be imported until intake is resumed."
-            : error || job?.message || "Checking sync status…"}
-        </span>
-        {job?.batchLimit && (
-          <small>
-            {job.lastBatchPhase === "backfill"
-              ? "Backfill intake"
-              : "Latest intake"}
-            : {job.batchImported || 0} / {job.batchLimit}
-          </small>
-        )}
-        {(job?.page || job?.nextPhase === "backfill") && (
-          <small>
-            Backfill remaining: {job.page ? "checking next page" : "queued"}
-          </small>
-        )}
-        {job?.backfillPausedReason && (
-          <small>
-            Historical intake: {job.backfillPausedReason}
-          </small>
-        )}
-        {job?.backfillImportedThisWeek !== undefined && (
-          <small>
-            Historical intake this week: {job.backfillImportedThisWeek} / 60
-          </small>
-        )}
-        {coolingDown && (
-          <div className="intake-cooldown" role="status">
-            <strong>Next safe sync in {nextSyncLabel}</strong>
-            <small>
-              Waiting for the prior database save to finish — preventing
-              concurrent Aiven writes and duplicate imports.
-            </small>
+      <div className="intake-summary">
+        <div className="intake-heading">
+          <div>
+            <strong>Gmail intake</strong>
+            <span>Newest applications are checked first.</span>
           </div>
-        )}
-        {queuedForDatabase && (
-          <div className="intake-cooldown" role="status">
-            <strong>Next batch is queued for the ATS database</strong>
-            <small>
-              The previous intake is still being confirmed. The browser will
-              extend the wait and retry safely; no duplicate import is made.
-            </small>
-          </div>
+          <b
+            className={`intake-state ${error ? "attention" : ""}`}
+            role="status"
+          >
+            {statusLabel}
+          </b>
+        </div>
+        <div className="intake-metrics" aria-label="Gmail intake summary">
+          <span>
+            <b>Latest</b>
+            {job?.batchImported || 0} / {job?.batchLimit || 15}
+          </span>
+          <span>
+            <b>History</b>
+            {historyLabel}
+          </span>
+          <span>
+            <b>This week</b>
+            {job?.backfillImportedThisWeek || 0} / 60
+          </span>
+          {job?.completedAt && (
+            <span>
+              <b>Checked</b>
+              {formatDate(job.completedAt, state?.preferences, true)}
+            </span>
+          )}
+        </div>
+        {(error ||
+          job?.backfillPausedReason ||
+          coolingDown ||
+          queuedForDatabase) && (
+          <p className="intake-note" role="status">
+            {error ||
+              (coolingDown
+                ? `Next safe latest sync in ${nextSyncLabel}.`
+                : queuedForDatabase
+                  ? "Waiting for the prior database save."
+                  : job?.backfillPausedReason)}
+          </p>
         )}
         {working && (
           <div className="intake-progress-wrap">
-            <small>{progressLabel}</small>
             <progress
               max={100}
               value={progress}
@@ -197,23 +212,21 @@ export function IntakeSyncStatus() {
             />
           </div>
         )}
-        {job?.completedAt && (
-          <small>
-            Last check: {formatDate(job.completedAt, state?.preferences, true)}
-          </small>
-        )}
-        {job?.issues.length ? (
-          <details>
-            <summary>{job.issues.length} intake items to review</summary>
-            <ul>
-              {job.issues.map((issue, i) => (
-                <li key={i}>
-                  {issue.message}: {issue.reason}
-                </li>
-              ))}
-            </ul>
+        {(job?.issues.length || job?.message) && (
+          <details className="intake-details">
+            <summary>View intake details</summary>
+            <p>{job?.message}</p>
+            {job?.issues.length ? (
+              <ul>
+                {job.issues.map((issue, i) => (
+                  <li key={i}>
+                    {issue.message}: {issue.reason}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
           </details>
-        ) : null}
+        )}
       </div>
       <div className="button-row">
         {paused ? (

@@ -29,8 +29,7 @@ export function initialState(): AppState {
     notifications: [],
     importLimit: 100,
     importValidated: false,
-    intakeQuery:
-      "has:attachment {subject:application subject:applying subject:resume subject:cv} -in:spam -in:trash -in:sent",
+    intakeQuery: 'label:"HR - Applications" -in:spam -in:trash -in:sent',
     locations: [
       {
         id: "naga",
