@@ -167,6 +167,7 @@ export async function syncIntake(
       await putRecord(tx, "jobs", "gmail", job);
     });
   }
+  let stage = "mailbox-authorization";
   try {
     if (job.consecutiveFailures) await recoveryAttempt("gmail.timeout");
     const connection = await official(),
@@ -192,6 +193,7 @@ export async function syncIntake(
     // Revisit the mailbox head independently of the older-page cursor.
     // New arrivals must not wait behind a full window or a large backlog.
     if (!job.headCheckedAt || now - job.headCheckedAt > 30000) {
+      stage = "mailbox-head";
       const head = await gmail<{
         messages?: { id: string }[];
         nextPageToken?: string;
@@ -209,6 +211,7 @@ export async function syncIntake(
       await checkpoint();
     }
     if (!job.pending.length) {
+      stage = "mailbox-page";
       const page = await gmail<{
         messages?: { id: string }[];
         nextPageToken?: string;
@@ -229,6 +232,7 @@ export async function syncIntake(
     job.status = "processing";
     job.message = `Reading and validating ${ids.length} application${ids.length === 1 ? "" : "s"}…`;
     await checkpoint();
+    stage = "message-preview";
     const preview = await previewImport(actor, {
       ids,
       // Leave enough time for the preview, normalized application rows and
@@ -265,6 +269,7 @@ export async function syncIntake(
       };
     });
     // Re-read the grant before committing; disconnecting stops pending imports.
+    stage = "mailbox-authorization-recheck";
     const currentConnection = await official();
     if (currentConnection.connectedAt !== connection.connectedAt)
       throw new SafeError(
@@ -272,6 +277,7 @@ export async function syncIntake(
         409,
       );
     if (selections.length) {
+      stage = "application-commit";
       const result = await confirmImport(
         actor,
         preview.id,
@@ -310,6 +316,13 @@ export async function syncIntake(
           : "No new eligible applications in this batch.";
   } catch (error) {
     const e = error as SafeError;
+    const errorCode = (error as { code?: unknown } | null)?.code;
+    console.error("Gmail intake worker failed", {
+      stage,
+      type: error instanceof Error ? error.name : typeof error,
+      code: typeof errorCode === "string" ? errorCode.slice(0, 32) : undefined,
+      status: error instanceof SafeError ? error.status : undefined,
+    });
     job.errorCode =
       error instanceof SafeError
         ? `safe-${error.status}`
