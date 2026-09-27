@@ -114,7 +114,14 @@ export function ApplicantInformation({
     );
   };
   const display = (key: string, value?: string) => {
-    if (missingInformation(value))
+    if (missingInformation(value)) {
+      const latestStatus = extraction?.[0]?.status;
+      if (latestStatus === "Queued" || latestStatus === "Running")
+        return "Scanning submitted resume, email, and subject…";
+      if (latestStatus === "Completed")
+        return "Undetected after resume, email, subject, and final AI review.";
+      if (latestStatus === "Failed")
+        return "Automatic review could not confirm this field. Complete it manually if known.";
       return key === "position"
         ? "Applied position was not clearly stated in the submission."
         : key === "location"
@@ -122,6 +129,7 @@ export function ApplicantInformation({
           : key === "residence"
             ? "Residence was not clearly stated in submitted information."
             : "Not clearly stated in submitted information";
+    }
     const normalized = formalFact(key, value!);
     return key === "experienceDetails" &&
       !/[.!?]$/.test(normalized) &&
