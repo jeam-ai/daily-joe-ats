@@ -26,6 +26,16 @@ function providerFailure(error: unknown) {
   if (!data || typeof data !== "object" || !("error" in data))
     return "authorization";
   const code = data.error;
+  // These provider codes are safe configuration diagnostics: they never
+  // include an authorization code, token, client secret, or Google account.
+  // Keep the login response generic while making production remediation
+  // unambiguous in the server log.
+  if (
+    code === "invalid_client" ||
+    code === "unauthorized_client" ||
+    code === "redirect_uri_mismatch"
+  )
+    console.error("Google OAuth token exchange rejected", { code });
   if (
     code === "invalid_client" ||
     code === "unauthorized_client" ||
