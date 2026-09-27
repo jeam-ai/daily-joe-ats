@@ -49,6 +49,8 @@ export function ApplicantInformation({
     };
   }, [a.id, state?.revision]);
   const need = state?.hiringNeeds.find((n) => n.id === a.hiringNeedId);
+  const branchMatchedFromResidence =
+    a.information?.fields.assignedBranch?.source === "Residence match";
   const rows = [
     ["name", "Full name", applicantDisplayName(a)],
     ["email", "Email", a.applicant.email],
@@ -96,14 +98,19 @@ export function ApplicantInformation({
       .filter(Boolean);
   const educationItem = (item: string) => {
     const formatted = formalFact("education", item);
-    const dated = /^(.*?)\s+(\d{4}–(?:\d{4}|Present))$/.exec(formatted);
-    return dated ? (
-      <>
-        <strong>{dated[1]}</strong>
-        <span className="information-period">{dated[2]}</span>
-      </>
-    ) : (
-      formatted
+    const dated = /^(.*?)\s*[—–-]\s*(\d{4}–(?:\d{4}|Present))$/.exec(formatted);
+    const [title, ...details] = (dated?.[1] || formatted)
+      .split(/\s+·\s+/)
+      .map((part) => part.trim())
+      .filter(Boolean);
+    return (
+      <span className="education-record">
+        <strong>{title}</strong>
+        {!!details.length && (
+          <span className="education-details">{details.join(" · ")}</span>
+        )}
+        {dated && <span className="information-period">{dated[2]}</span>}
+      </span>
     );
   };
   const display = (key: string, value?: string) => {
@@ -113,8 +120,8 @@ export function ApplicantInformation({
         : key === "location"
           ? "Preferred work location was not clearly stated."
           : key === "residence"
-            ? "Residence not confirmed from submitted information."
-            : "Not stated in submitted information";
+            ? "Residence was not clearly stated in submitted information."
+            : "Not clearly stated in submitted information";
     const normalized = formalFact(key, value!);
     return key === "experienceDetails" &&
       !/[.!?]$/.test(normalized) &&
@@ -171,7 +178,10 @@ export function ApplicantInformation({
             </div>
             <dl className="information-grid">
               {section.rows.map(([key, label, value]) => (
-                <div className="information-item" key={key}>
+                <div
+                  className={`information-item information-item-${key}`}
+                  key={key}
+                >
                   <dt>{label}</dt>
                   <dd
                     className={
@@ -272,9 +282,35 @@ export function ApplicantInformation({
           </div>
         )}
         {extractionError && <p className="fine-print">{extractionError}</p>}
-        <h3>Recruitment assignment</h3>
-        <p>{need ? `${need.position} — ${need.location}` : "Unassigned"}</p>
-        <p>Assigned branch: {a.assignedBranch || "Unassigned"}</p>
+        <section
+          className="recruitment-assignment"
+          aria-label="Recruitment assignment"
+        >
+          <div>
+            <h3>Recruitment assignment</h3>
+            <p>
+              Operational assignment stays separate from submitted preferences.
+            </p>
+          </div>
+          <div className="assignment-facts">
+            <p>
+              <strong>Hiring need</strong>
+              <span>
+                {need ? `${need.position} — ${need.location}` : "Unassigned"}
+              </span>
+            </p>
+            <p>
+              <strong>Assigned branch</strong>
+              <span>{a.assignedBranch || "Unassigned"}</span>
+              {branchMatchedFromResidence && (
+                <small>
+                  Auto-assigned because the submitted residence matches this
+                  configured location.
+                </small>
+              )}
+            </p>
+          </div>
+        </section>
         {a.editedAt && (
           <p className="fine-print">
             Edited by {a.editedBy} · {new Date(a.editedAt).toLocaleString()}

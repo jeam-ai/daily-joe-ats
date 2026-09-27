@@ -143,6 +143,16 @@ export function applyRecoveredResumeEvidence(
     else application.applicant[key] = formalFact(key, value);
     if (incoming.fields[key]) fields[key] = incoming.fields[key];
   }
+  if (
+    evidence.residenceLocation &&
+    (!application.assignedBranch ||
+      /^unassigned$/i.test(application.assignedBranch)) &&
+    !fields.assignedBranch?.verifiedBy
+  ) {
+    application.assignedBranch = evidence.residenceLocation;
+    if (incoming.fields.assignedBranch)
+      fields.assignedBranch = incoming.fields.assignedBranch;
+  }
   application.information.conflicts = [
     ...new Set([
       ...application.information.conflicts.filter(
@@ -176,6 +186,16 @@ export function extractionReasons(a: Application) {
     !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(a.applicant.email)
   )
     reasons.push("Email needs verification");
+  if (missingInformation(a.applicant.education))
+    reasons.push("Education needs extraction");
+  if (missingInformation(a.applicant.availability))
+    reasons.push("Availability needs extraction");
+  if (missingInformation(a.applicant.experienceDetails))
+    reasons.push("Experience needs extraction");
+  if (missingInformation(a.applicant.skills))
+    reasons.push("Skills need extraction");
+  if (missingInformation(a.applicant.certifications))
+    reasons.push("Certifications need extraction");
   // OCR warnings are review signals, not a reason to spend limited AI quota.
   // Gemini is reserved for actual gaps remaining after deterministic resume,
   // email-body, and subject parsing has run.

@@ -29,7 +29,8 @@ const sparse = (warnings?: string[]) =>
     /very little readable text was extracted/i.test(warning),
   );
 const OCR_UPGRADE = "bundled-english-v1";
-const EVIDENCE_PARSER_VERSION = "general-trias-certifications-v4";
+const EVIDENCE_PARSER_VERSION =
+  "structured-education-strengths-residence-branch-v5";
 
 // Re-evaluate saved text after a deterministic parser improvement. This does
 // not fetch Gmail, write files, call AI, or touch HR-verified fields/stages.
@@ -104,6 +105,7 @@ export async function refreshStoredEvidenceBatch(limit = 25, onlyId?: string) {
         information: application.information,
         position: application.position,
         location: application.location,
+        assignedBranch: application.assignedBranch,
       });
       applyRecoveredResumeEvidence(
         application,
@@ -122,6 +124,7 @@ export async function refreshStoredEvidenceBatch(limit = 25, onlyId?: string) {
           information: application.information,
           position: application.position,
           location: application.location,
+          assignedBranch: application.assignedBranch,
         })
       ) {
         updated++;

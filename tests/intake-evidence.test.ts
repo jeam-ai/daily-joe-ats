@@ -134,6 +134,27 @@ test("built-in parsing covers every profile field before using email fallback", 
   assert.equal(result.sources.availability, "Email body");
   assert.equal(result.sources.email, "Gmail sender");
 });
+test("structured education, key strengths, and a configured residence branch are recovered without AI", () => {
+  const result = intakeEvidence({
+    subject: "Application for Barista",
+    locations: ["Naga City", "Santa Rosa, Laguna"],
+    resume:
+      "Address: Zone 3, Concepcion Pequena, Naga City\nTERTIARY:\nBicol State College of Applied Sciences and Technology\nNaga City Camarines Sur, Philippines\nBachelor of Technical Teacher Education\nMajor in Food Service Management\n2015- 2019\nSECONDARY:\nSan Pascual National High School\nSan Pascual Burias Masbate\n2012-2015\nKEY STRENGTHS\nAbility to work independently\nGood interpersonal skills\nFlexible and adaptable\nExtensive experience working with multidisciplinary teams",
+  });
+  assert.equal(result.residenceLocation, "Naga City");
+  assert.equal(
+    result.location,
+    "Preferred work location was not clearly stated in the submitted application.",
+  );
+  assert.match(result.education, /Bicol State College/i);
+  assert.match(result.education, /Food Service Management/i);
+  assert.match(result.education, /2015–2019/);
+  assert.match(result.education, /2012–2015/);
+  assert.match(result.skills, /Ability to work independently/i);
+  assert.match(result.skills, /Good interpersonal skills/i);
+  assert.equal(result.sources.skills, "Resume");
+  assert.equal(result.sources.assignedBranch, "Residence match");
+});
 test("email-body labels fill all profile fields when no readable resume exists", () => {
   const result = intakeEvidence({
     subject: "Mia Example - Job Application",

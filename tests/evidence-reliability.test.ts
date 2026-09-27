@@ -114,6 +114,38 @@ test("resume contact locality and lowercase submitted facts are displayed formal
     "Vanessa Francisco Luna",
   );
 });
+test("a configured location in a residence auto-assigns only an empty branch", () => {
+  const evidence = intakeEvidence({
+    subject: "Application for Barista",
+    locations: ["Naga City", "Santa Rosa, Laguna"],
+    resume:
+      "Address: Zone 3, Concepcion Pequena, Naga City\nKEY STRENGTHS\nCustomer service",
+  });
+  const application = {
+    applicant: { name: "Fictional Applicant", location: "Not verified" },
+    assignedBranch: "",
+    information: { fields: {}, conflicts: [] },
+    position: "Barista",
+    location:
+      "Preferred work location was not clearly stated in the submitted application.",
+  } as unknown as Application;
+  applyRecoveredResumeEvidence(application, evidence);
+  assert.equal(application.assignedBranch, "Naga City");
+  assert.equal(
+    application.information?.fields.assignedBranch?.source,
+    "Residence match",
+  );
+  assert.match(application.location, /not clearly stated/i);
+  application.assignedBranch = "Santa Rosa, Laguna";
+  applyRecoveredResumeEvidence(application, evidence);
+  assert.equal(application.assignedBranch, "Santa Rosa, Laguna");
+  const santaRosa = intakeEvidence({
+    subject: "Application for Barista",
+    locations: ["Naga City", "Santa Rosa, Laguna"],
+    resume: "Residence: Barangay Balibago, Santa Rosa, Laguna",
+  });
+  assert.equal(santaRosa.residenceLocation, "Santa Rosa, Laguna");
+});
 test("built-in resume sections recover skills and job history without AI", () => {
   const result = intakeEvidence({
     subject: "Job application",

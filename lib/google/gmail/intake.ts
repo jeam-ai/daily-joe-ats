@@ -649,6 +649,7 @@ export async function confirmImport(
         ...(resumeId ? { resumeId, resumeHash: r.hash } : {}),
         extraction: r.extraction,
         source: "Gmail",
+        assignedBranch: extracted.residenceLocation || undefined,
         assignedTo: user.email,
         onboardingStatus: "Pending Orientation",
       };

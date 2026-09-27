@@ -86,7 +86,7 @@ test("professional name formatting preserves initials, accents and compound surn
     lastName: "Dela Cruz Jr.",
   });
 });
-test("AI fallback is reserved for missing profile fields while demo is excluded", () => {
+test("AI fallback covers every missing profile field while demo is excluded", () => {
   const a = {
     lastActivity: "2026-09-01T00:00:00.000Z",
     id: "fixture",
@@ -112,9 +112,15 @@ test("AI fallback is reserved for missing profile fields while demo is excluded"
     location: "Naga City",
     extraction: { method: "text", confidence: 80, warnings: [] },
   } as Application;
-  assert.deepEqual(extractionReasons(a), []);
+  assert.deepEqual(extractionReasons(a), [
+    "Education needs extraction",
+    "Availability needs extraction",
+    "Experience needs extraction",
+    "Skills need extraction",
+    "Certifications need extraction",
+  ]);
   a.extraction!.confidence = 81;
-  assert.deepEqual(extractionReasons(a), []);
+  assert.equal(extractionReasons(a).length, 5);
   a.applicant.phone = "";
   assert.ok(extractionReasons(a).some((r) => r.includes("Phone")));
   a.isDemo = true;
