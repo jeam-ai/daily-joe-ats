@@ -23,6 +23,7 @@ import { recordIssue, reportIssue, resolveIssue } from "./diagnostics";
 import { extractResume } from "./documents";
 import { getState, saveState, audit } from "./repository";
 import { loadResumeBytes } from "./resume-source";
+import { ensureRecruitmentConfiguration } from "./recruitment-configuration";
 
 const deferred = (warnings?: string[]) =>
   !!warnings?.some((warning) =>
@@ -34,13 +35,14 @@ const sparse = (warnings?: string[]) =>
   );
 const OCR_UPGRADE = "bundled-english-v1";
 const EVIDENCE_PARSER_VERSION =
-  "residence-preference-clean-education-qualification-v8";
+  "residence-preference-clean-education-qualification-v9";
 
 // Re-evaluate saved text after a deterministic parser improvement. This does
 // not fetch Gmail, write files, call AI, or touch HR-verified fields/stages.
 export async function refreshStoredEvidenceBatch(limit = 25, onlyId?: string) {
   return transaction(async (tx) => {
     const state = await getState(tx);
+    const configured = ensureRecruitmentConfiguration(state);
     const normalized = canonicalizeStoredLocations(state);
     const processed =
       (await readRecord<Record<string, string>>(
@@ -73,6 +75,9 @@ export async function refreshStoredEvidenceBatch(limit = 25, onlyId?: string) {
             `${item.resumeId || "email"}:${EVIDENCE_PARSER_VERSION}:${vocabulary}`,
       )
       .slice(0, Math.max(1, Math.min(limit, 25)));
+    // Keep the public count scoped to applicant evidence changes. Configuration
+    // repair is audited separately and must not make a profile refresh look as
+    // though several applicant records were altered.
     let updated = normalized;
     for (const application of candidates) {
       processed[application.id] =
@@ -178,7 +183,11 @@ export async function refreshStoredEvidenceBatch(limit = 25, onlyId?: string) {
         canonical: "General Trias",
         correctedReferences: normalized,
       });
-    if (updated) await saveState(tx, state, { sync: false });
+    if (configured)
+      await audit(tx, "System", "settings.recruitment_configuration_repaired", undefined, {
+        updated: configured,
+      });
+    if (updated || configured) await saveState(tx, state, { sync: false });
     return { examined: candidates.length, updated };
   });
 }

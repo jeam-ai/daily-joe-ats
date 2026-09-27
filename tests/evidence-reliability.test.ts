@@ -5,6 +5,8 @@ import {
   qualificationRulesForPosition,
   screenResumeAgainstCriteria,
 } from "../lib/screening";
+import { ensureRecruitmentConfiguration } from "../lib/server/recruitment-configuration";
+import { initialState } from "../lib/server/initial-state";
 import { evidenceInformation } from "../lib/applicant-information";
 import { applyRecoveredResumeEvidence } from "../lib/applicant-information";
 import type { Application } from "../types";
@@ -458,4 +460,29 @@ test("minor extraction warnings do not suppress readable resume screening", () =
   )[0];
   assert.equal(result.result, "Met");
   assert.match(result.evidence, /Equivalent resume evidence/);
+});
+test("missing baseline templates are repaired before applicant evidence is screened", () => {
+  const state = initialState();
+  state.qualifications = state.qualifications.filter(
+    (template) => template.position !== "Barista",
+  );
+  state.locations = [];
+  state.hiringNeeds.push({
+    id: "real-need",
+    position: "Barista",
+    location: "General Trias, Cavite",
+    status: "Open",
+    slots: 1,
+    filled: 0,
+    urgency: "Medium",
+    targetDate: "",
+    qualifications: "",
+    questions: "",
+  });
+  assert.ok(ensureRecruitmentConfiguration(state) >= 3);
+  const barista = state.qualifications.find(
+    (template) => template.position === "Barista",
+  );
+  assert.equal(barista?.rules?.length, 4);
+  assert.ok(state.locations.some((location) => location.name === "General Trias, Cavite"));
 });

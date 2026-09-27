@@ -26,9 +26,15 @@ import {
   buildInsight,
   qualificationRulesForPosition,
 } from "@/lib/screening";
+import {
+  baselineQualificationTemplates,
+  ensureRecruitmentConfiguration,
+} from "./recruitment-configuration";
 
 export function sampleQualifications(): QualificationTemplate[] {
-  return ["Barista", "Team Leader", "Supervisor", "Other"].map((position) => {
+  return [...baselineQualificationTemplates(), "Other"].map((template) => {
+    const position = typeof template === "string" ? template : template.position;
+    if (typeof template !== "string") return template;
     const labels =
       position === "Barista"
         ? [
@@ -73,7 +79,7 @@ export async function installSampleConfiguration(user: User) {
     throw new SafeError("Administrator access required.", 403);
   return transaction(async (tx) => {
     const state = await getState(tx);
-    let count = 0;
+    let count = ensureRecruitmentConfiguration(state);
     for (const template of sampleQualifications()) {
       const existing = state.qualifications.find(
         (q) => q.position === template.position,

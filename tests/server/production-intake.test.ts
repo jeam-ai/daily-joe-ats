@@ -56,7 +56,7 @@ test("automatic intake resumes beyond ten, maintains latest 100 with an older qu
   const initial = initialState();
   initial.qualifications.push({
     id: "unassigned-test",
-    position: "Barista",
+    position: "Counter Staff",
     minimum: "Unassigned template must not be assessed",
     preferred: "",
     criteria: "",
@@ -162,16 +162,12 @@ test("automatic intake resumes beyond ten, maintains latest 100 with an older qu
     assert.ok(
       s.notifications
         .filter((n) => n.id.startsWith("new-"))
-        .every((n) =>
-          n.description.includes(
-            "Assign a hiring need to review qualifications",
-          ),
-        ),
+        .every((n) => n.description.includes("qualifications appear met")),
     );
     assert.ok(
       s.applications.every((a) => !a.hiringNeedId && a.status === "New"),
     );
-    assert.ok(s.applications.every((a) => a.screening.criteria.length === 0));
+    assert.ok(s.applications.every((a) => a.screening.criteria.length === 4));
     await syncIntake(undefined, true);
     assert.equal((await intakeStatus()).status, "complete");
     s = await transaction(getState);

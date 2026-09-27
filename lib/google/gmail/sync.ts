@@ -13,9 +13,10 @@ import {
   readRecord,
   putRecord,
 } from "@/lib/server/database";
-import { getState } from "@/lib/server/repository";
+import { getState, saveState } from "@/lib/server/repository";
 import { canManage } from "@/lib/data-policy";
 import { SafeError } from "@/lib/server/config";
+import { ensureRecruitmentConfiguration } from "@/lib/server/recruitment-configuration";
 import type { User } from "@/types";
 
 export type IntakeSync = {
@@ -123,6 +124,9 @@ export async function syncIntake(
   const runId = crypto.randomUUID(),
     now = Date.now();
   const claimed = await retryableTransaction(async (tx) => {
+    const configuredState = await getState(tx);
+    const repaired = ensureRecruitmentConfiguration(configuredState);
+    if (repaired) await saveState(tx, configuredState, { sync: false });
     const job = (await readRecord<IntakeSync>(tx, "jobs", "gmail")) || empty();
     const startedAt = job.startedAt ? Date.parse(job.startedAt) : 0;
     const staleWorker =
