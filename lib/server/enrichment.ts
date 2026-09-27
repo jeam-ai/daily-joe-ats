@@ -281,7 +281,12 @@ export async function enrichApplicants(user: User, ids: string[]) {
       a.information.conflicts = info.conflicts;
       a.originalSubject ||= p.source.subject.slice(0, 200);
       const need = state.hiringNeeds.find((n) => n.id === a.hiringNeedId);
-      const rules = need?.criteria || [];
+      const rules =
+        need?.criteria ||
+        state.qualifications.find(
+          (template) => template.position === a.position,
+        )?.rules ||
+        [];
       if (a.screening.method !== "hr" && !a.screening.completedAt) {
         const criteria = screenResumeAgainstCriteria(
           p.text,

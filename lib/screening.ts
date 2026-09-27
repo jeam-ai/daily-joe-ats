@@ -9,7 +9,7 @@ export function screenResumeAgainstCriteria(
       .trim()
       .split(/\s+/)
       .map((v) => v.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
-      .join("\\s+");
+      .join("(?:\\s+|[-/.,]+)");
     let match =
       expression && reliable ? new RegExp(expression, "i").exec(text) : null;
     // Conservative aliases accept equivalent wording only when evidence states the
@@ -52,7 +52,17 @@ export function screenResumeAgainstCriteria(
         }
       } else if (!duration && /customer[ -]service/.test(required))
         match =
-          /\b(?:customer[ -]facing (?:work|role|responsibilities)|assisted customers|served customers|handled customer (?:orders|inquiries))\b/i.exec(
+          /\b(?:customer[ -]facing (?:work|role|responsibilities)|assisted customers|served customers|handled customer (?:orders|inquiries)|customer[- ]oriented|service crew|retail customer service)\b/i.exec(
+            text,
+          );
+      else if (!duration && /high\s+school.*(?:graduate|equivalent)|(?:graduate|equivalent).*high\s+school/.test(required))
+        match =
+          /\b(?:high\s+school\s+(?:graduate|graduated)|senior\s+high(?:\s+school)?|secondary\s+school)\b/i.exec(
+            text,
+          );
+      else if (!duration && /cash\s+handling|cashier/.test(required))
+        match =
+          /\b(?:cash\s+handling|cashier|processed\s+cash|cash\s+transactions?)\b/i.exec(
             text,
           );
     }

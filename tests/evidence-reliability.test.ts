@@ -142,7 +142,7 @@ test("a configured location in a residence auto-assigns only an empty branch", (
     application.information?.fields.assignedBranch?.source,
     "Residence match",
   );
-  assert.match(application.location, /not clearly stated/i);
+  assert.equal(application.location, "Naga City");
   application.assignedBranch = "Santa Rosa, Laguna";
   applyRecoveredResumeEvidence(application, evidence);
   assert.equal(application.assignedBranch, "Santa Rosa, Laguna");
@@ -379,4 +379,15 @@ test("equivalent role wording still requires stated duration and absent content 
     screenResumeAgainstCriteria("", rules)[0].result,
     "Not Assessed",
   );
+});
+test("qualification checks accept direct equivalent resume wording without inventing evidence", () => {
+  const results = screenResumeAgainstCriteria(
+    "Senior High School graduate\nProcessed cash transactions accurately\nService Crew assisting customers",
+    [
+      { id: "school", label: "High school graduate or equivalent", kind: "Minimum", absenceFails: false },
+      { id: "cash", label: "Cash handling", kind: "Minimum", absenceFails: false },
+      { id: "service", label: "Customer service experience", kind: "Minimum", absenceFails: false },
+    ],
+  );
+  assert.deepEqual(results.map((result) => result.result), ["Met", "Met", "Met"]);
 });

@@ -30,7 +30,7 @@ const sparse = (warnings?: string[]) =>
   );
 const OCR_UPGRADE = "bundled-english-v1";
 const EVIDENCE_PARSER_VERSION =
-  "timeline-education-address-qualification-v6";
+  "residence-preference-clean-education-name-v7";
 
 // Re-evaluate saved text after a deterministic parser improvement. This does
 // not fetch Gmail, write files, call AI, or touch HR-verified fields/stages.
@@ -106,6 +106,7 @@ export async function refreshStoredEvidenceBatch(limit = 25, onlyId?: string) {
         position: application.position,
         location: application.location,
         assignedBranch: application.assignedBranch,
+        screening: application.screening,
       });
       applyRecoveredResumeEvidence(
         application,
@@ -118,6 +119,35 @@ export async function refreshStoredEvidenceBatch(limit = 25, onlyId?: string) {
         }),
       );
       if (
+        application.screening.method !== "hr" &&
+        !application.screening.completedAt
+      ) {
+        const rules =
+          state.hiringNeeds.find((need) => need.id === application.hiringNeedId)
+            ?.criteria ||
+          state.qualifications.find(
+            (template) => template.position === application.position,
+          )?.rules ||
+          [];
+        const criteria = screenResumeAgainstCriteria(
+          text,
+          rules,
+          !application.extraction?.warnings.length,
+        );
+        application.screening = {
+          criteria,
+          method: "rules",
+          completedAt: "",
+          outcome: "Requires Review",
+          insight: buildInsight(
+            criteria,
+            application.position,
+            application.location,
+            !!text.trim(),
+          ),
+        };
+      }
+      if (
         before !==
         JSON.stringify({
           applicant: application.applicant,
@@ -125,6 +155,7 @@ export async function refreshStoredEvidenceBatch(limit = 25, onlyId?: string) {
           position: application.position,
           location: application.location,
           assignedBranch: application.assignedBranch,
+          screening: application.screening,
         })
       ) {
         updated++;

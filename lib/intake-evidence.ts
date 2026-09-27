@@ -53,6 +53,14 @@ const availabilityPattern =
 const fieldSeparator = "[:|–—-]";
 const sectionBoundary =
   /^(?:contact(?:\s+(?:information|details))?|personal (?:information|details)|education(?:al(?: background| attainment)?)?|academic background|academic qualifications?|skills?(?:\s+(?:and|&|\/|and)\s+competenc(?:y|ies))?|(?:core|key|technical|professional|personal)\s+(?:skills?|strengths?|competenc(?:y|ies)|qualifications?)|competenc(?:y|ies)|strengths?|expertise|qualifications?|personal\s+attributes?|certifications?|certificates?|licenses?|credentials?|experience|relevant experience|job experience|work experience|employment(?: history)?|professional experience|work history|career history|work background|career summary|references|about me|objectives?|profile|summary)\s*(?::.*)?$/i;
+const cleanOcrName = (value: string) =>
+  value
+    .replace(/\b\p{Lu}*0\p{Lu}*\b/gu, (word) => word.replaceAll("0", "O"))
+    .replace(/(\p{L})0(?=\p{L}|\b)/gu, "$1o");
+const genericProfileName = (value: string) =>
+  /\b(?:place\s+of\s+birth|date\s+of\s+birth|civil\s+status|marital\s+status|nationality|gender|\bsingle\b)\b/i.test(
+    value,
+  );
 export function intakeEvidence(input: {
   subject: string;
   body?: string;
@@ -210,18 +218,20 @@ export function intakeEvidence(input: {
       ?.replace(/\s+(?:po|please)$/i, "")
       .replace(/[.!?]+$/, "")
       .trim();
+    const cleaned = candidate ? cleanOcrName(candidate) : undefined;
     if (
-      !candidate ||
-      !plausiblePersonName(candidate) ||
+      !cleaned ||
+      !plausiblePersonName(cleaned) ||
+      genericProfileName(cleaned) ||
       /^(?:a|an|my|writing|applying|interested|seeking|looking|excited|available|hoping|reaching|contacting|submitting|sending)\b/i.test(
-        candidate,
+        cleaned,
       ) ||
       /\b(?:application|interest|job|post|position|opportunity)\b/i.test(
-        candidate,
+        cleaned,
       )
     )
       return undefined;
-    return candidate;
+    return cleaned;
   };
   const subjectName = subject
     .match(
@@ -242,14 +252,15 @@ export function intakeEvidence(input: {
   const headingName = headingLines
     .slice(0, firstSection < 0 ? 8 : firstSection)
     .slice(0, 8)
+    .map(cleanOcrName)
     .find(
       (l) =>
         /^[\p{L}][\p{L} .,'’-]{4,80}$/u.test(l) &&
         l.split(/\s+/).length >= 2 &&
         l.split(/\s+/).length <= 5 &&
-        !/resume|curriculum|vitae|address|contact|profile|personal|information|experience|education|skills|objective|university|college|school|bachelor|barista|cashier|supervisor|leader|accounting|analyst|manager|staff|assistant|engineer|developer|administrator|intern|clerk|officer|executive|representative|specialist|recruitment|human resources|street|barangay|camarines|philippines|city|summary|references|career|history|employment|certification|achievement|to obtain|seeking|applying|dear|thank you/i.test(
+        !/resume|curriculum|vitae|address|contact|profile|personal|information|experience|education|skills|objective|university|college|school|bachelor|barista|cashier|supervisor|leader|accounting|analyst|manager|staff|assistant|engineer|developer|administrator|intern|clerk|officer|executive|representative|specialist|recruitment|human resources|street|barangay|camarines|philippines|city|summary|references|career|history|employment|certification|achievement|to obtain|seeking|applying|dear|thank you|place of birth|single/i.test(
           l,
-        ),
+        ) && !genericProfileName(l),
     );
   const explicitResumeName = named(resume);
   const resumeName = explicitResumeName || headingName;
@@ -384,6 +395,14 @@ export function intakeEvidence(input: {
   if (residenceLocation) {
     evidence.assignedBranch = `Residence matched configured location: ${residenceLocation}.`;
     provenance.assignedBranch = "Residence match";
+    // The recruiting policy treats one exact configured residence match as a
+    // usable branch preference when the applicant did not state another one.
+    // An explicit preferred branch above always wins over this fallback.
+    if (!detectedLocations.size) {
+      detectedLocations.add(residenceLocation);
+      evidence.location = `Residence matched configured location: ${residenceLocation}.`;
+      provenance.location = "Residence match";
+    }
   }
   const displayName = senderName(input.from || "");
   const senderEmail = (input.from || "")
@@ -541,7 +560,7 @@ export function intakeEvidence(input: {
   );
   const educationCandidates = [
     ...(educationTimeline?.values || []),
-    ...(structuredEducation?.values || []),
+    ...(educationTimeline?.values.length ? [] : structuredEducation?.values || []),
     ...(educationTimeline?.values.length || structuredEducation?.values.length
       ? []
       : educationSection.values.filter((line) => educationTerms.test(line))),

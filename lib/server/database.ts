@@ -162,7 +162,8 @@ async function databaseTransaction<T>(
         // 20 total connections, so one idle connection per instance is safer
         // than multiplying a 2-client pool by concurrent route instances.
         max: process.env.VERCEL ? 1 : 5,
-        idleTimeoutMillis: process.env.VERCEL ? 1000 : 10000,
+        idleTimeoutMillis: process.env.VERCEL && aiven ? 1 : process.env.VERCEL ? 1000 : 10000,
+        maxUses: process.env.VERCEL && aiven ? 1 : 0,
         connectionTimeoutMillis: 10000,
         statement_timeout: 30000,
         query_timeout: 35000,

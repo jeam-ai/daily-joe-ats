@@ -1,6 +1,10 @@
 import type { Application } from "@/types";
 import type { intakeEvidence } from "./intake-evidence";
 import { formalFact } from "./formal-facts";
+const genericProfileName = (value?: string) =>
+  /\b(?:place\s+of\s+birth|date\s+of\s+birth|civil\s+status|marital\s+status|nationality|gender|\bsingle\b)\b/i.test(
+    value || "",
+  );
 export const missingInformation = (value?: string) =>
   !value?.trim() ||
   /requires review|needs verification|not verified|not clearly stated|not confirmed from submitted information|^unknown$/i.test(
@@ -10,9 +14,10 @@ export function applicantDisplayName(application: Application) {
   const name = application.applicant.name;
   if (
     !application.information?.fields.name?.verifiedBy &&
-    /\b(?:applying|writing|interest|job|position|post|opportunity)\b/i.test(
-      name,
-    )
+    (genericProfileName(name) ||
+      /\b(?:applying|writing|interest|job|position|post|opportunity)\b/i.test(
+        name,
+      ))
   )
     return "Name needs verification";
   return formalFact("name", name);
@@ -65,6 +70,7 @@ export function applyRecoveredResumeEvidence(
     !missingInformation(evidence.name) &&
     (incoming.fields.name?.source === "Resume" ||
       missingInformation(application.applicant.name) ||
+      genericProfileName(application.applicant.name) ||
       /\b(?:applying|writing|interest|job|position|post|opportunity)\b/i.test(
         application.applicant.name,
       ))
@@ -131,6 +137,12 @@ export function applyRecoveredResumeEvidence(
         (!/\b(?:19|20)\d{2}\b/.test(current) &&
           /\b(?:19|20)\d{2}\b/.test(value) &&
           /\b(?:school|college|university|lyceum|polytechnic|institute)\b/i.test(
+            value,
+          )) ||
+        (/\b(?:service\s+crew|barista|cashier|waiter|waitress|ojt|work(?:ed|ing)?|experience|employment)\b/i.test(
+          current,
+        ) &&
+          !/\b(?:service\s+crew|barista|cashier|waiter|waitress|ojt|work(?:ed|ing)?|experience|employment)\b/i.test(
             value,
           )));
     const correctedSkills =

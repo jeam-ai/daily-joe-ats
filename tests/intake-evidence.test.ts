@@ -142,10 +142,7 @@ test("structured education, key strengths, and a configured residence branch are
       "Address: Zone 3, Concepcion Pequena, Naga City\nTERTIARY:\nBicol State College of Applied Sciences and Technology\nNaga City Camarines Sur, Philippines\nBachelor of Technical Teacher Education\nMajor in Food Service Management\n2015- 2019\nSECONDARY:\nSan Pascual National High School\nSan Pascual Burias Masbate\n2012-2015\nKEY STRENGTHS\nAbility to work independently\nGood interpersonal skills\nFlexible and adaptable\nExtensive experience working with multidisciplinary teams",
   });
   assert.equal(result.residenceLocation, "Naga City");
-  assert.equal(
-    result.location,
-    "Preferred work location was not clearly stated in the submitted application.",
-  );
+  assert.equal(result.location, "Naga City");
   assert.match(result.education, /Bicol State College/i);
   assert.match(result.education, /Food Service Management/i);
   assert.match(result.education, /2015–2019/);
@@ -154,6 +151,18 @@ test("structured education, key strengths, and a configured residence branch are
   assert.match(result.skills, /Good interpersonal skills/i);
   assert.equal(result.sources.skills, "Resume");
   assert.equal(result.sources.assignedBranch, "Residence match");
+  assert.equal(result.sources.location, "Residence match");
+});
+test("an exact configured residence becomes the location fallback and OCR names reject profile labels", () => {
+  const result = intakeEvidence({
+    subject: "Application for Barista",
+    locations: ["Naga City"],
+    resume:
+      "JUANITO INSERT0 BERNARTE\nNaga City, Philippines\nPERSONAL INFORMATION\nFull Name: Place Of Birth Single\nAddress: Zone 3, Concepcion Pequena, Naga City",
+  });
+  assert.equal(result.name, "Juanito Inserto Bernarte");
+  assert.equal(result.location, "Naga City");
+  assert.equal(result.residenceLocation, "Naga City");
 });
 test("timeline education, unlabeled contact addresses, and qualifications do not bleed into one another", () => {
   const result = intakeEvidence({
