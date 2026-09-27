@@ -131,8 +131,8 @@ async function archiveAnonymousReportSnapshot(
 export type RetentionRunOptions = { dryRun?: boolean };
 export function retentionDryRunEnabled() {
   return (
-    process.env.DRY_RUN_RETENTION_CLEANUP !== "false" ||
-    process.env.RETENTION_CLEANUP_VERIFIED !== "true"
+    process.env.DRY_RUN_RETENTION_CLEANUP?.trim() !== "false" ||
+    process.env.RETENTION_CLEANUP_VERIFIED?.trim() !== "true"
   );
 }
 export async function runRetentionCleanup(options: RetentionRunOptions = {}) {
