@@ -23,7 +23,11 @@ import type { Application, QualificationRule, User } from "@/types";
 
 const MAX_PREVIEW_MESSAGES = 40;
 export { screenResumeAgainstCriteria } from "@/lib/screening";
-import { screenResumeAgainstCriteria, buildInsight } from "@/lib/screening";
+import {
+  screenResumeAgainstCriteria,
+  buildInsight,
+  qualificationRulesForPosition,
+} from "@/lib/screening";
 import { detectResumeType, extractResume } from "@/lib/server/documents";
 import { withDeadline } from "@/lib/server/deadline";
 export function resumeScreeningInsight(
@@ -506,7 +510,11 @@ export async function confirmImport(
       const location =
         r.appliedLocation ||
         "Preferred work location was not clearly stated in the submitted application.";
-      const rules = need?.criteria || [];
+      const rules = qualificationRulesForPosition(
+        position,
+        need?.criteria,
+        state.qualifications,
+      );
       const now = new Date().toISOString();
       const sequence =
         ((await readRecord<number>(tx, "sequence", "applicant")) || 0) + 1;
@@ -598,21 +606,13 @@ export async function confirmImport(
           outcome: "Requires Review",
           completedAt: "",
           insight: buildInsight(
-            screenResumeAgainstCriteria(
-              r.text,
-              rules,
-              !r.extraction?.warnings.length,
-            ),
+            screenResumeAgainstCriteria(r.text, rules, !!r.text.trim()),
             position,
             location,
             !!r.text.trim(),
           ),
           method: "rules",
-          criteria: screenResumeAgainstCriteria(
-            r.text,
-            rules,
-            !r.extraction?.warnings.length,
-          ),
+          criteria: screenResumeAgainstCriteria(r.text, rules, !!r.text.trim()),
         },
         lastActivity: now,
         notes: [

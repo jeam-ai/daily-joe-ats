@@ -3,6 +3,7 @@ import { useState } from "react";
 import type { Application } from "@/types";
 import { requestJson } from "@/lib/client-request";
 import { canManage } from "@/lib/data-policy";
+import { qualificationRulesForPosition } from "@/lib/screening";
 import { useApp } from "./provider";
 import { Button, Modal } from "./ui";
 export function ScreeningControls({
@@ -17,12 +18,11 @@ export function ScreeningControls({
   const ready =
     !a.isDemo &&
     !!a.resumeId &&
-    !!(
-      state?.hiringNeeds.find((n) => n.id === a.hiringNeedId)?.criteria
-        ?.length ||
-      state?.qualifications.find((q) => q.position === a.position)?.rules
-        ?.length
-    ) &&
+    !!qualificationRulesForPosition(
+      a.position,
+      state?.hiringNeeds.find((n) => n.id === a.hiringNeedId)?.criteria,
+      state?.qualifications || [],
+    ).length &&
     canManage(state?.currentUser);
   return (
     <div className="form-stack spaced">

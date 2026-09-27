@@ -5,6 +5,7 @@ import { canManage } from "@/lib/data-policy";
 import { SafeError } from "@/lib/server/config";
 import { safeError } from "@/lib/server/response";
 import { reportIssue } from "@/lib/server/diagnostics";
+import { isDatabaseFailure } from "@/lib/server/diagnostic-buffer";
 import { intakeStatus, syncIntake } from "@/lib/google/gmail/sync";
 import { syncGmailThreadActivity } from "@/lib/google/gmail/activity";
 export const runtime = "nodejs";
@@ -18,6 +19,24 @@ export async function GET() {
       headers: { "Cache-Control": "no-store" },
     });
   } catch (e) {
+    // Status reads must not turn a brief Aiven connection interruption into a
+    // browser-level 500. The intake job and its Gmail cursor are durable, so
+    // returning a retrying status lets the client poll again without claiming
+    // that applicant data changed or was lost.
+    if (isDatabaseFailure(e))
+      return Response.json(
+        {
+          status: "checking",
+          message:
+            "Database connection is retrying. The saved Gmail queue is unchanged and will resume automatically.",
+          imported: 0,
+          checked: 0,
+          pending: [],
+          issues: [],
+          retryAt: Date.now() + 30000,
+        },
+        { headers: { "Cache-Control": "no-store" } },
+      );
     return safeError(e);
   }
 }

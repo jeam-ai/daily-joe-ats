@@ -21,7 +21,11 @@ import { seal, unseal } from "@/lib/auth/security";
 import { intakeEvidence, messageBody } from "@/lib/intake-evidence";
 import { gmail, official } from "@/lib/google/gmail/intake";
 import { accessToken } from "@/lib/google/gmail/service";
-import { screenResumeAgainstCriteria, buildInsight } from "@/lib/screening";
+import {
+  screenResumeAgainstCriteria,
+  buildInsight,
+  qualificationRulesForPosition,
+} from "@/lib/screening";
 
 export function sampleQualifications(): QualificationTemplate[] {
   return ["Barista", "Team Leader", "Supervisor", "Other"].map((position) => {
@@ -281,17 +285,16 @@ export async function enrichApplicants(user: User, ids: string[]) {
       a.information.conflicts = info.conflicts;
       a.originalSubject ||= p.source.subject.slice(0, 200);
       const need = state.hiringNeeds.find((n) => n.id === a.hiringNeedId);
-      const rules =
-        need?.criteria ||
-        state.qualifications.find(
-          (template) => template.position === a.position,
-        )?.rules ||
-        [];
+      const rules = qualificationRulesForPosition(
+        a.position,
+        need?.criteria,
+        state.qualifications,
+      );
       if (a.screening.method !== "hr" && !a.screening.completedAt) {
         const criteria = screenResumeAgainstCriteria(
           p.text,
           rules,
-          !a.extraction?.warnings.length,
+          !!p.text.trim(),
         );
         a.screening = {
           criteria,

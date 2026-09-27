@@ -1,7 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { intakeEvidence } from "../lib/intake-evidence";
-import { screenResumeAgainstCriteria } from "../lib/screening";
+import {
+  qualificationRulesForPosition,
+  screenResumeAgainstCriteria,
+} from "../lib/screening";
 import { evidenceInformation } from "../lib/applicant-information";
 import { applyRecoveredResumeEvidence } from "../lib/applicant-information";
 import type { Application } from "../types";
@@ -295,7 +298,8 @@ test("stored parser mistakes are replaced by richer resume evidence without touc
   const application = {
     applicant: {
       name: "Fictional Applicant",
-      location: "Processed cash, card, and digital transactions accurately using POS systems.",
+      location:
+        "Processed cash, card, and digital transactions accurately using POS systems.",
       education: "Bachelor of Arts in · Bachelor of Arts in",
       skills: "Carmona National High School · Academic Track: HUMSS",
       certifications: "Trainings Attended",
@@ -384,10 +388,74 @@ test("qualification checks accept direct equivalent resume wording without inven
   const results = screenResumeAgainstCriteria(
     "Senior High School graduate\nProcessed cash transactions accurately\nService Crew assisting customers",
     [
-      { id: "school", label: "High school graduate or equivalent", kind: "Minimum", absenceFails: false },
-      { id: "cash", label: "Cash handling", kind: "Minimum", absenceFails: false },
-      { id: "service", label: "Customer service experience", kind: "Minimum", absenceFails: false },
+      {
+        id: "school",
+        label: "High school graduate or equivalent",
+        kind: "Minimum",
+        absenceFails: false,
+      },
+      {
+        id: "cash",
+        label: "Cash handling",
+        kind: "Minimum",
+        absenceFails: false,
+      },
+      {
+        id: "service",
+        label: "Customer service experience",
+        kind: "Minimum",
+        absenceFails: false,
+      },
     ],
   );
-  assert.deepEqual(results.map((result) => result.result), ["Met", "Met", "Met"]);
+  assert.deepEqual(
+    results.map((result) => result.result),
+    ["Met", "Met", "Met"],
+  );
+});
+test("qualification screening resolves branch-suffixed roles and uses adjacent resume evidence", () => {
+  const templateRules = [
+    {
+      id: "barista-years",
+      label: "Minimum of one year of barista experience",
+      kind: "Minimum" as const,
+      absenceFails: false,
+    },
+    {
+      id: "cashier",
+      label: "Cash handling or POS experience",
+      kind: "Minimum" as const,
+      absenceFails: false,
+    },
+  ];
+  const rules = qualificationRulesForPosition(
+    "Barista - SM San Pedro Branch",
+    [],
+    [{ position: "Barista", rules: templateRules }],
+  );
+  assert.equal(rules.length, 2);
+  const results = screenResumeAgainstCriteria(
+    "Coffee shop Barista\n2019 - 2021\nUsed POS systems and processed card and cash transactions.",
+    rules,
+  );
+  assert.deepEqual(
+    results.map((result) => result.result),
+    ["Met", "Met"],
+  );
+});
+test("minor extraction warnings do not suppress readable resume screening", () => {
+  const result = screenResumeAgainstCriteria(
+    "Service Crew assisting customers and handling customer inquiries.",
+    [
+      {
+        id: "service",
+        label: "Customer service experience",
+        kind: "Minimum",
+        absenceFails: false,
+      },
+    ],
+    true,
+  )[0];
+  assert.equal(result.result, "Met");
+  assert.match(result.evidence, /Equivalent resume evidence/);
 });

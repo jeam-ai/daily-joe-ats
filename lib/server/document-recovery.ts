@@ -6,7 +6,11 @@ import { unseal, seal } from "@/lib/auth/security";
 import { intakeEvidence } from "@/lib/intake-evidence";
 import { canonicalizeStoredLocations } from "@/lib/locations";
 import { applyRecoveredResumeEvidence } from "@/lib/applicant-information";
-import { screenResumeAgainstCriteria, buildInsight } from "@/lib/screening";
+import {
+  screenResumeAgainstCriteria,
+  buildInsight,
+  qualificationRulesForPosition,
+} from "@/lib/screening";
 import { queueExtraction } from "./ai-extraction";
 import { config, SafeError } from "./config";
 import {
@@ -30,7 +34,7 @@ const sparse = (warnings?: string[]) =>
   );
 const OCR_UPGRADE = "bundled-english-v1";
 const EVIDENCE_PARSER_VERSION =
-  "residence-preference-clean-education-name-v7";
+  "residence-preference-clean-education-qualification-v8";
 
 // Re-evaluate saved text after a deterministic parser improvement. This does
 // not fetch Gmail, write files, call AI, or touch HR-verified fields/stages.
@@ -122,17 +126,16 @@ export async function refreshStoredEvidenceBatch(limit = 25, onlyId?: string) {
         application.screening.method !== "hr" &&
         !application.screening.completedAt
       ) {
-        const rules =
+        const rules = qualificationRulesForPosition(
+          application.position,
           state.hiringNeeds.find((need) => need.id === application.hiringNeedId)
-            ?.criteria ||
-          state.qualifications.find(
-            (template) => template.position === application.position,
-          )?.rules ||
-          [];
+            ?.criteria,
+          state.qualifications,
+        );
         const criteria = screenResumeAgainstCriteria(
           text,
           rules,
-          !application.extraction?.warnings.length,
+          !!text.trim(),
         );
         application.screening = {
           criteria,
@@ -276,17 +279,16 @@ export async function recoverApplicationDocument(
       application.screening.method !== "hr" &&
       !application.screening.completedAt
     ) {
-      const rules =
+      const rules = qualificationRulesForPosition(
+        application.position,
         state.hiringNeeds.find((need) => need.id === application.hiringNeedId)
-          ?.criteria ||
-        state.qualifications.find(
-          (template) => template.position === application.position,
-        )?.rules ||
-        [];
+          ?.criteria,
+        state.qualifications,
+      );
       const criteria = screenResumeAgainstCriteria(
         document.text,
         rules,
-        !document.extraction.warnings.length,
+        !!document.text.trim(),
       );
       application.screening = {
         criteria,

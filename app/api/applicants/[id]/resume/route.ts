@@ -9,7 +9,11 @@ import { config, SafeError } from "@/lib/server/config";
 import { safeError } from "@/lib/server/response";
 import { seal, unseal } from "@/lib/auth/security";
 import { extractResume } from "@/lib/server/documents";
-import { buildInsight, screenResumeAgainstCriteria } from "@/lib/screening";
+import {
+  buildInsight,
+  qualificationRulesForPosition,
+  screenResumeAgainstCriteria,
+} from "@/lib/screening";
 
 export const runtime = "nodejs";
 export const maxDuration = 180;
@@ -45,6 +49,7 @@ export async function POST(request: Request, { params }: Context) {
       return {
         a,
         need: s.hiringNeeds.find((n) => n.id === a.hiringNeedId),
+        qualifications: s.qualifications,
         revision: s.revision,
       };
     });
@@ -100,8 +105,12 @@ export async function POST(request: Request, { params }: Context) {
         await queueExtraction(tx, a, user.email);
         const criteria = screenResumeAgainstCriteria(
           document.text,
-          snapshot.need?.criteria || [],
-          !document.extraction.warnings.length,
+          qualificationRulesForPosition(
+            a.position,
+            snapshot.need?.criteria,
+            snapshot.qualifications,
+          ),
+          !!document.text.trim(),
         );
         a.screening = {
           criteria,
@@ -151,7 +160,12 @@ export async function POST(request: Request, { params }: Context) {
       const body = await request.json();
       if (body.confirmed !== true)
         throw new SafeError("Confirm the screening action first.");
-      if (!snapshot.need?.criteria?.length || !snapshot.a.resumeId)
+      const rules = qualificationRulesForPosition(
+        snapshot.a.position,
+        snapshot.need?.criteria,
+        snapshot.qualifications,
+      );
+      if (!rules.length || !snapshot.a.resumeId)
         throw new SafeError(
           "Assign a hiring need with qualifications and attach a resume first.",
         );
@@ -168,11 +182,7 @@ export async function POST(request: Request, { params }: Context) {
         String(resume.extracted_text),
         config().encryptionKey,
       );
-      const criteria = screenResumeAgainstCriteria(
-        text,
-        snapshot.need.criteria,
-        !snapshot.a.extraction?.warnings.length,
-      );
+      const criteria = screenResumeAgainstCriteria(text, rules, !!text.trim());
       if (body.ai)
         throw new SafeError(
           "Use the separate AI Assist control. System Analysis is deterministic.",
@@ -184,8 +194,8 @@ export async function POST(request: Request, { params }: Context) {
         outcome: "Requires Review" as const,
         insight: buildInsight(
           criteria,
-          snapshot.need.position,
-          snapshot.need.location,
+          snapshot.a.position,
+          snapshot.a.location,
           !!text,
         ),
       };
