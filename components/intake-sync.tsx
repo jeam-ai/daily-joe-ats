@@ -41,8 +41,15 @@ export function IntakeSyncStatus() {
   useEffect(() => {
     if (!enabled || paused) return;
     let stopped = false,
+      running = false,
       timer: ReturnType<typeof setTimeout>;
     async function tick() {
+      if (stopped || running) return;
+      if (document.hidden) {
+        timer = setTimeout(() => void tick(), 60000);
+        return;
+      }
+      running = true;
       let delay = 60000;
       try {
         const value = await check();
@@ -51,12 +58,11 @@ export function IntakeSyncStatus() {
           value.status === "capacity"
             ? 60000
             : ["checking", "processing"].includes(value.status)
-              // A Sheets status check is still an authenticated gateway read.
-              // Let the active commit finish; the visible progress bar keeps
-              // moving without creating contention that looks like a failure.
-              ? 10000
+              ? // The server lease owns the work. Status reads do not need to
+                // poll every few seconds while a document batch is processing.
+                30000
               : value.pending.length || value.page
-                ? 6000
+                ? 20000
                 : 120000;
         setError("");
         if (
@@ -67,7 +73,7 @@ export function IntakeSyncStatus() {
           (!value.retryAt || value.retryAt <= Date.now())
         ) {
           await requestJson("/api/intake/sync", { method: "POST" });
-          delay = 1000;
+          delay = 5000;
           setJob((old) =>
             old
               ? {
@@ -86,13 +92,21 @@ export function IntakeSyncStatus() {
               : "Gmail status is temporarily unavailable. Retry in a moment; no applicant data was changed.",
           );
       } finally {
+        running = false;
         if (!stopped) timer = setTimeout(() => void tick(), delay);
       }
     }
+    function onVisibilityChange() {
+      if (document.hidden || stopped) return;
+      clearTimeout(timer);
+      if (!running) void tick();
+    }
+    document.addEventListener("visibilitychange", onVisibilityChange);
     void tick();
     return () => {
       stopped = true;
       clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
     };
   }, [enabled, paused]);
   // Automatic evidence fallback is deliberately a separate, slow cadence from
@@ -104,7 +118,8 @@ export function IntakeSyncStatus() {
       timer: ReturnType<typeof setTimeout>;
     async function pump() {
       try {
-        await requestJson("/api/system/extraction?drain=1");
+        if (!document.hidden)
+          await requestJson("/api/system/extraction?drain=1");
       } catch {
         // The Error Center records server failures. A later cadence retries a
         // safe, leased job without surfacing noisy background toasts.
