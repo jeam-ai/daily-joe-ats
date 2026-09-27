@@ -141,6 +141,14 @@ export async function syncGmailThreadActivity() {
         );
         nextPageToken = response.nextPageToken;
         nextHistoryId = response.historyId;
+        // Intake and activity workers can overlap. Recheck a small recent
+        // window so a reply first seen before its application committed is
+        // linked on a later pass instead of being lost with the history cursor.
+        const head = await gmail<{ messages?: MessageRef[] }>(
+          token,
+          `messages?maxResults=50&q=${encodeURIComponent("newer_than:7d")}`,
+        );
+        messages.push(...(head.messages || []));
       }
     }
     const unique = [
@@ -148,7 +156,20 @@ export async function syncGmailThreadActivity() {
         messages.filter((m) => m.id && m.threadId).map((m) => [m.id, m]),
       ).values(),
     ];
-    const threadIds = [...new Set(unique.map((m) => m.threadId))];
+    const recorded = unique.length
+      ? new Set(
+          await readTransaction(async (tx) =>
+            (
+              await tx.query(
+                `SELECT message_id FROM gmail_thread_events WHERE message_id IN (${unique.map((_, index) => `$${index + 1}`).join(",")})`,
+                unique.map((message) => message.id),
+              )
+            ).map((row) => String(row.message_id)),
+          ),
+        )
+      : new Set<string>();
+    const fresh = unique.filter((message) => !recorded.has(message.id));
+    const threadIds = [...new Set(fresh.map((m) => m.threadId))];
     const applications = threadIds.length
       ? await readTransaction(async (tx) => {
           const rows = await tx.query(
@@ -160,7 +181,7 @@ export async function syncGmailThreadActivity() {
           );
         })
       : [];
-    const relevant = unique.filter((message) =>
+    const relevant = fresh.filter((message) =>
       applications.some(
         (application) => application.gmailThreadId === message.threadId,
       ),
