@@ -584,12 +584,16 @@ test("Gemini quota failure preserves the applicant and persists a bounded backof
   });
   const before = await current(id);
   let calls = 0;
-  await runExtractionJobs(2, {
-    extract: async () => {
-      calls++;
-      throw new AiProviderError("rate_limit", 429);
+  await runExtractionJobs(
+    2,
+    {
+      extract: async () => {
+        calls++;
+        throw new AiProviderError("rate_limit", 429);
+      },
     },
-  });
+    id,
+  );
   await runExtractionJobs(2, {
     extract: async () => {
       calls++;

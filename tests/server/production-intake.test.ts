@@ -187,10 +187,12 @@ test("automatic intake uses safe batches, maintains latest 100 with an older que
     );
     assert.ok(s.applications.every((a) => a.screening.criteria.length === 4));
     await transaction(async (tx) => {
-      const job = (await tx.query(
-        "SELECT payload FROM records WHERE collection=$1 AND id=$2",
-        ["jobs", "gmail"],
-      ))[0];
+      const job = (
+        await tx.query(
+          "SELECT payload FROM records WHERE collection=$1 AND id=$2",
+          ["jobs", "gmail"],
+        )
+      )[0];
       assert.ok(job);
       const parsed = JSON.parse(String(job.payload));
       parsed.lastNewEligibleAt = Date.now() - 6 * 60 * 60 * 1000 - 1;
@@ -301,12 +303,17 @@ test("newest Gmail messages preempt a saved historical backfill cursor", async (
       status: "complete",
       message: "Historical backfill was queued",
       pending: ["april-message"],
+      latestPending: [],
+      backfillPending: ["april-message"],
+      backfillMonth: "2026-04",
+      backfillImportedThisMonth: 0,
       page: "april-page",
       query: state.intakeQuery,
       issues: [],
       imported: 0,
       checked: 0,
       queueVersion: INTAKE_QUEUE_VERSION,
+      queuePolicyVersion: 2,
       nextPhase: "backfill",
     }),
   );
@@ -336,9 +343,9 @@ test("newest Gmail messages preempt a saved historical backfill cursor", async (
           {
             filename: "resume.txt",
             body: {
-              data: Buffer.from("Customer service and cashier experience.").toString(
-                "base64url",
-              ),
+              data: Buffer.from(
+                "Customer service and cashier experience.",
+              ).toString("base64url"),
             },
           },
         ],

@@ -25,6 +25,7 @@ import { writeAudit } from "./audit";
 import { reportIssue, resolveIssue, recordIssue } from "./diagnostics";
 import { pendingFailures, clearBufferedFailure } from "./diagnostic-buffer";
 import { collectionSheets, entitySheets } from "@/lib/sheets-schema";
+import { activeIntake } from "@/lib/data-policy";
 
 export interface HealthSnapshot {
   checkedAt?: string;
@@ -74,6 +75,7 @@ type IntakeHealth = {
 type BackgroundHealth = {
   status?: string;
   leaseUntil?: number;
+  applicationId?: string;
 };
 const recordValue = <T>(
   snapshot: HealthStorage,
@@ -498,14 +500,36 @@ async function performChecks(): Promise<HealthSnapshot> {
         const snapshot = await stored;
         if (!snapshot) throw Error("Storage snapshot unavailable");
         const jobs = collectionValues<BackgroundHealth>(snapshot, collection);
-        const failed = jobs.filter(
+        const activeApplicationIds = new Set(
+          snapshot.applications
+            .filter(activeIntake)
+            .map((application) => application.id),
+        );
+        const automaticJobs =
+          id === "extraction"
+            ? jobs.filter(
+                (job) =>
+                  !job.applicationId ||
+                  activeApplicationIds.has(job.applicationId),
+              )
+            : jobs;
+        const deferred =
+          id === "extraction"
+            ? jobs.filter(
+                (job) =>
+                  !!job.applicationId &&
+                  !activeApplicationIds.has(job.applicationId) &&
+                  ["Queued", "Running"].includes(job.status || ""),
+              ).length
+            : 0;
+        const failed = automaticJobs.filter(
           (j) =>
             ["Failed", "Unconfirmed"].includes(j.status || "") ||
             (j.status === "Running" &&
               typeof j.leaseUntil === "number" &&
               j.leaseUntil < Date.now()),
         ).length;
-        const queued = jobs.filter((j) =>
+        const queued = automaticJobs.filter((j) =>
           ["Queued", "Running", "Sending"].includes(j.status || ""),
         ).length;
         const completed = jobs.filter((j) =>
@@ -523,7 +547,11 @@ async function performChecks(): Promise<HealthSnapshot> {
               : jobs.length
                 ? "Healthy"
                 : "Not Verified",
-          detail: `${queued} queued or processing · ${completed} completed · ${failed} require review. ${
+          detail: `${queued} active queued or processing · ${completed} completed · ${failed} require review.${
+            deferred
+              ? ` ${deferred} historical AI jobs are deferred to protect provider quota; System Analysis remains available and HR can retry an individual applicant when needed.`
+              : ""
+          } ${
             delayed
               ? `Gemini requested a bounded retry after ${displayTime(new Date(backoff).toISOString())}; existing System Analysis remains available.`
               : jobs.length

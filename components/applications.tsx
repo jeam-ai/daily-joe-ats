@@ -481,155 +481,156 @@ export function Applications({ talent = false }: { talent?: boolean }) {
         {listLoading && !rows.length ? (
           <LoadingSkeleton />
         ) : rows.length ? (
-          <Table>
-            <thead>
-              <tr>
-                {[
-                  "Applicant",
-                  "Role / urgency",
-                  "Qualifications",
-                  talent ? "Experience" : "Stage",
-                  "Status",
-                  tab === "Hired" ? "Hired date" : "Last activity",
-                  "",
-                ].map((c, i) => (
-                  <th key={i}>{c}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {visible.map((a) => (
-                <tr key={a.id}>
-                  <td>
-                    <Link
-                      className="applicant-cell"
-                      href={`/applications/${a.id}`}
-                      prefetch={false}
-                    >
-                      <ApplicantCard
-                        name={applicantDisplayName(a)}
-                        reference={a.id}
-                      />
-                    </Link>
-                    {a.isDemo && <Badge tone="amber">DEMO</Badge>}
-                    {a.queueState === "Queued" && <Badge>Queued</Badge>}
-                    {a.retentionExpiresAt &&
-                      ["outside_live_queue", "terminal"].includes(
-                        a.retentionCategory || "",
-                      ) && (
-                        <small className="retention-inline">
-                          {a.retentionCategory === "outside_live_queue"
-                            ? "Outside live queue"
-                            : "Status retention pending"}{" "}
-                          — permanent cleanup eligible{" "}
-                          {daysUntil(Date.parse(a.retentionExpiresAt)) > 0
-                            ? `in ${daysUntil(Date.parse(a.retentionExpiresAt))} days`
-                            : "now"}
-                        </small>
-                      )}
-                    {talent && !a.talentPoolExpiredAt && (
-                      <small className="retention-inline">
-                        {talentRetentionWarning(a)}
-                      </small>
-                    )}
-                  </td>
-                  <td>
-                    {a.position}
-                    <small className="cell-secondary">{a.location}</small>
-                    {state.hiringNeeds.find((n) => n.id === a.hiringNeedId)
-                      ?.urgency && (
-                      <>
-                        <br />
-                        <StatusBadge
-                          status={
-                            state.hiringNeeds.find(
-                              (n) => n.id === a.hiringNeedId,
-                            )!.urgency
-                          }
-                        />
-                      </>
-                    )}
-                  </td>
-                  <td>
-                    <span
-                      className="qualification-summary"
-                      title={a.screening.outcome}
-                    >
-                      {a.screening.criteria.length
-                        ? `${a.screening.criteria.filter((c) => c.result === "Met").length}/${a.screening.criteria.length} met`
-                        : "Not assessed"}
-                    </span>
-                    <small className="cell-secondary">
-                      {a.screening.criteria.length
-                        ? `${
-                            a.screening.criteria.filter(
-                              (c) => c.result === "Unclear",
-                            ).length
-                          } unclear`
-                        : "Qualifications not configured"}
-                    </small>
-                  </td>
-                  <td>
-                    {talent ? (
-                      `${a.applicant.experience || "Unverified"} years`
-                    ) : (
-                      <StatusBadge status={a.stage} />
-                    )}
-                  </td>
-                  <td>
-                    <StatusBadge
-                      status={
-                        tab === "Hired"
-                          ? a.employment?.status || "Active"
-                          : a.status
-                      }
-                    />
-                  </td>
-                  <td>
-                    {formatDate(
-                      tab === "Hired"
-                        ? a.hiredAt || a.lastActivity
-                        : ["All applications", "Queued"].includes(tab) &&
-                            a.gmailActivityAt
-                          ? a.gmailActivityAt
-                          : a.lastActivity,
-                      state.preferences,
-                      Boolean(a.gmailActivityAt) &&
-                        ["All applications", "Queued"].includes(tab),
-                    )}
-                    {a.gmailActivityAt &&
-                      ["All applications", "Queued"].includes(tab) && (
-                        <small className="cell-secondary">
-                          Gmail thread updated
-                        </small>
-                      )}
-                  </td>
-                  <td>
-                    <ActionMenu
-                      label={`Actions for ${applicantDisplayName(a)}`}
-                      items={[
-                        {
-                          label: "View Applicant",
-                          onClick: () => router.push(`/applications/${a.id}`),
-                        },
-                        {
-                          label: "Edit Applicant",
-                          onClick: () => setEditing(a),
-                          disabled: !canEdit(state.currentUser, a),
-                        },
-                        {
-                          label: "Delete Applicant",
-                          onClick: () => setDeleting(a),
-                          disabled: !canManage(state.currentUser),
-                          danger: true,
-                        },
-                      ]}
-                    />
-                  </td>
+          <div className="applications-table">
+            <Table>
+              <thead>
+                <tr>
+                  {[
+                    "Applicant",
+                    "Role / urgency",
+                    "Qualifications",
+                    talent ? "Experience" : "Stage",
+                    "Status",
+                    tab === "Hired" ? "Hired date" : "Last activity",
+                    "",
+                  ].map((c, i) => (
+                    <th key={i}>{c}</th>
+                  ))}
                 </tr>
-              ))}
-            </tbody>
-          </Table>
+              </thead>
+              <tbody>
+                {visible.map((a) => (
+                  <tr key={a.id}>
+                    <td>
+                      <Link
+                        className="applicant-cell"
+                        href={`/applications/${a.id}`}
+                        prefetch={false}
+                      >
+                        <ApplicantCard
+                          name={applicantDisplayName(a)}
+                          reference={a.id}
+                        />
+                      </Link>
+                      {a.isDemo && <Badge tone="amber">DEMO</Badge>}
+                      {a.queueState === "Queued" && <Badge>Queued</Badge>}
+                      {a.retentionExpiresAt &&
+                        ["outside_live_queue", "terminal"].includes(
+                          a.retentionCategory || "",
+                        ) && (
+                          <small className="retention-inline">
+                            {a.retentionCategory === "outside_live_queue"
+                              ? "Outside live queue"
+                              : "Status retention pending"}{" "}
+                            — permanent cleanup eligible{" "}
+                            {daysUntil(Date.parse(a.retentionExpiresAt)) > 0
+                              ? `in ${daysUntil(Date.parse(a.retentionExpiresAt))} days`
+                              : "now"}
+                          </small>
+                        )}
+                      {talent && !a.talentPoolExpiredAt && (
+                        <small className="retention-inline">
+                          {talentRetentionWarning(a)}
+                        </small>
+                      )}
+                    </td>
+                    <td className="application-role-cell">
+                      <strong className="application-role">{a.position}</strong>
+                      <small className="cell-secondary">{a.location}</small>
+                      {state.hiringNeeds.find((n) => n.id === a.hiringNeedId)
+                        ?.urgency && (
+                        <span className="application-urgency">
+                          <StatusBadge
+                            status={
+                              state.hiringNeeds.find(
+                                (n) => n.id === a.hiringNeedId,
+                              )!.urgency
+                            }
+                          />
+                        </span>
+                      )}
+                    </td>
+                    <td className="application-qualification-cell">
+                      <span
+                        className="qualification-summary"
+                        title={a.screening.outcome}
+                      >
+                        {a.screening.criteria.length
+                          ? `${a.screening.criteria.filter((c) => c.result === "Met").length}/${a.screening.criteria.length} met`
+                          : "Not assessed"}
+                      </span>
+                      <small className="cell-secondary">
+                        {a.screening.criteria.length
+                          ? `${
+                              a.screening.criteria.filter(
+                                (c) => c.result === "Unclear",
+                              ).length
+                            } unclear`
+                          : "Qualifications not configured"}
+                      </small>
+                    </td>
+                    <td>
+                      {talent ? (
+                        `${a.applicant.experience || "Unverified"} years`
+                      ) : (
+                        <StatusBadge status={a.stage} />
+                      )}
+                    </td>
+                    <td>
+                      <StatusBadge
+                        status={
+                          tab === "Hired"
+                            ? a.employment?.status || "Active"
+                            : a.status
+                        }
+                      />
+                    </td>
+                    <td>
+                      {formatDate(
+                        tab === "Hired"
+                          ? a.hiredAt || a.lastActivity
+                          : ["All applications", "Queued"].includes(tab) &&
+                              a.gmailActivityAt
+                            ? a.gmailActivityAt
+                            : a.lastActivity,
+                        state.preferences,
+                        Boolean(a.gmailActivityAt) &&
+                          ["All applications", "Queued"].includes(tab),
+                      )}
+                      {a.gmailActivityAt &&
+                        ["All applications", "Queued"].includes(tab) && (
+                          <small className="cell-secondary">
+                            Gmail thread updated
+                          </small>
+                        )}
+                    </td>
+                    <td>
+                      <ActionMenu
+                        label={`Actions for ${applicantDisplayName(a)}`}
+                        items={[
+                          {
+                            label: "View Applicant",
+                            onClick: () => router.push(`/applications/${a.id}`),
+                          },
+                          {
+                            label: "Edit Applicant",
+                            onClick: () => setEditing(a),
+                            disabled: !canEdit(state.currentUser, a),
+                          },
+                          {
+                            label: "Delete Applicant",
+                            onClick: () => setDeleting(a),
+                            disabled: !canManage(state.currentUser),
+                            danger: true,
+                          },
+                        ]}
+                      />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </Table>
+          </div>
         ) : (
           <EmptyState
             title={

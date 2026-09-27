@@ -6,6 +6,8 @@ import { Badge, Button, Card } from "./ui";
 type Status = {
   enabled: boolean;
   configured: boolean;
+  activeQueued?: number;
+  deferred?: number;
   jobs: { status: string; completedAt?: string; error?: string }[];
 };
 export function ExtractionSettings() {
@@ -114,13 +116,16 @@ export function ExtractionSettings() {
               Application usage:{" "}
               {data.jobs.filter((j) => j.status === "Completed").length}{" "}
               completed ·{" "}
-              {
+              {data.activeQueued ??
                 data.jobs.filter(
                   (j) => j.status === "Queued" || j.status === "Running",
-                ).length
-              }{" "}
-              pending · {data.jobs.filter((j) => j.status === "Failed").length}{" "}
-              need review. Provider quota is managed by Gemini.
+                ).length}{" "}
+              active pending ·{" "}
+              {data.jobs.filter((j) => j.status === "Failed").length} need
+              review
+              {(data.deferred || 0) > 0 &&
+                ` · ${data.deferred} historical jobs deferred to protect provider quota`}
+              . Provider quota is managed by Gemini.
             </p>
           </>
         )}

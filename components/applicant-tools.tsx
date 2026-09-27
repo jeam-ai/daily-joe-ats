@@ -16,6 +16,20 @@ import {
   Modal,
   StatusBadge,
 } from "./ui";
+
+function screeningOutcome(criteria: ScreeningCriterion[]) {
+  if (
+    !criteria.length ||
+    criteria.some((criterion) =>
+      ["Unclear", "Not Assessed"].includes(criterion.result),
+    )
+  )
+    return "Requires Review" as const;
+  return criteria.some((criterion) => criterion.result === "Not Met")
+    ? ("Criteria Not Met" as const)
+    : ("Meets Criteria" as const);
+}
+
 export function ApplicantTools({
   application: a,
 }: {
@@ -23,7 +37,9 @@ export function ApplicantTools({
 }) {
   const { state, updateApplication, saving } = useApp();
   const [employment, setEmployment] = useState(false),
-    [review, setReview] = useState(false);
+    [review, setReview] = useState(false),
+    [checklistConfirmation, setChecklistConfirmation] = useState(false),
+    [checklistDraft, setChecklistDraft] = useState<Record<string, boolean>>({});
   if (!state) return null;
   const need = state.hiringNeeds.find((n) => n.id === a.hiringNeedId);
   const directMatches = a.screening.criteria.filter(
@@ -32,6 +48,51 @@ export function ApplicantTools({
   const needsReview = a.screening.criteria.filter((criterion) =>
     ["Unclear", "Not Assessed"].includes(criterion.result),
   ).length;
+  const canReviewCriteria = canEdit(state.currentUser, a) && !saving;
+  const checklistChanged = a.screening.criteria.some(
+    (criterion) =>
+      criterion.id in checklistDraft &&
+      checklistDraft[criterion.id] !== (criterion.result === "Met"),
+  );
+  const draftMetCount = a.screening.criteria.filter((criterion) =>
+    criterion.id in checklistDraft
+      ? checklistDraft[criterion.id]
+      : criterion.result === "Met",
+  ).length;
+  async function saveChecklist() {
+    const saved = await updateApplication(
+      a.id,
+      (application) => {
+        const criteria = application.screening.criteria.map((criterion) => {
+          if (!(criterion.id in checklistDraft)) return criterion;
+          const met = checklistDraft[criterion.id];
+          return {
+            ...criterion,
+            result: met ? ("Met" as const) : ("Not Assessed" as const),
+            evidence: met
+              ? criterion.evidence ||
+                "HR marked this qualification as present after reviewing the submitted resume."
+              : "Awaiting HR qualification review.",
+          };
+        });
+        return {
+          ...application,
+          screening: {
+            ...application.screening,
+            method: "hr",
+            criteria,
+            completedAt: new Date().toISOString(),
+            outcome: screeningOutcome(criteria),
+          },
+        };
+      },
+      true,
+    );
+    if (saved) {
+      setChecklistDraft({});
+      setChecklistConfirmation(false);
+    }
+  }
   return (
     <>
       {a.stage === "Initial Interview" && (
@@ -143,6 +204,97 @@ export function ApplicantTools({
           )}
         </div>
       </Card>
+      {a.screening.criteria.length > 0 && (
+        <Card className="spaced hr-qualification-checklist">
+          <div className="card-heading">
+            <div>
+              <h2>HR qualification checklist</h2>
+              <p>Tick only what is supported by the submitted resume.</p>
+            </div>
+            <Badge tone="blue">
+              {directMatches}/{a.screening.criteria.length} met
+            </Badge>
+          </div>
+          <div className="qualification-checklist-body">
+            {a.screening.criteria.map((criterion) => (
+              <label className="qualification-check" key={criterion.id}>
+                <input
+                  type="checkbox"
+                  checked={
+                    criterion.id in checklistDraft
+                      ? checklistDraft[criterion.id]
+                      : criterion.result === "Met"
+                  }
+                  disabled={!canReviewCriteria}
+                  onChange={(event) =>
+                    setChecklistDraft((draft) => ({
+                      ...draft,
+                      [criterion.id]: event.target.checked,
+                    }))
+                  }
+                />
+                <span>
+                  <strong>{criterion.requirement}</strong>
+                  <small>
+                    {criterion.result === "Met"
+                      ? "Marked met"
+                      : criterion.result === "Not Assessed"
+                        ? "Not assessed — tick if found"
+                        : criterion.result}
+                  </small>
+                </span>
+              </label>
+            ))}
+            {!canEdit(state.currentUser, a) && (
+              <p className="fine-print">
+                A recruitment manager can update this checklist.
+              </p>
+            )}
+            {canEdit(state.currentUser, a) && (
+              <Button
+                variant="secondary"
+                disabled={!checklistChanged || saving}
+                onClick={() => setChecklistConfirmation(true)}
+              >
+                Save HR checklist
+              </Button>
+            )}
+          </div>
+        </Card>
+      )}
+      {checklistConfirmation && (
+        <Modal
+          busy={saving}
+          title="Confirm qualification checklist"
+          onClose={() => setChecklistConfirmation(false)}
+        >
+          <div className="form-stack">
+            <p>
+              {a.applicant.name} · {a.position}
+            </p>
+            <p>
+              You are marking <strong>{draftMetCount}</strong> of{" "}
+              {a.screening.criteria.length} configured qualifications as met.
+            </p>
+            <p className="fine-print">
+              This records an HR review and updates the qualification total. It
+              does not advance, reject, or email the applicant.
+            </p>
+            <div className="modal-actions">
+              <Button
+                variant="secondary"
+                disabled={saving}
+                onClick={() => setChecklistConfirmation(false)}
+              >
+                Cancel
+              </Button>
+              <Button disabled={saving} onClick={() => void saveChecklist()}>
+                {saving ? "Saving…" : "Confirm & save"}
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
       {a.hiredAt && (
         <Card className="spaced">
           <div className="card-heading">
@@ -193,14 +345,7 @@ export function ApplicantTools({
                       method: "hr",
                       criteria,
                       completedAt: new Date().toISOString(),
-                      outcome:
-                        criteria.some((c) =>
-                          ["Unclear", "Not Assessed"].includes(c.result),
-                        ) || !criteria.length
-                          ? "Requires Review"
-                          : criteria.some((c) => c.result === "Not Met")
-                            ? "Criteria Not Met"
-                            : "Meets Criteria",
+                      outcome: screeningOutcome(criteria),
                     },
                   }),
                   true,

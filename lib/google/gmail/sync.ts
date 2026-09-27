@@ -67,8 +67,10 @@ export type IntakeSync = {
   queuePolicyVersion?: number;
   lastNewEligibleAt?: number;
   nextBackfillAt?: number;
-  backfillWeekStartedAt?: number;
-  backfillImportedThisWeek?: number;
+  /** Calendar month currently being recovered, e.g. 2026-08. */
+  backfillMonth?: string;
+  backfillImportedThisMonth?: number;
+  backfillCompletedMonths?: string[];
   backfillPausedReason?: string;
   backfillStoragePercent?: number;
   backfillComplete?: boolean;
@@ -97,8 +99,8 @@ export const INTAKE_COOLDOWN_MS = 60 * 1000;
 // committed to the ATS remain untouched and are still de-duplicated.
 export const INTAKE_QUEUE_VERSION = 3;
 export const NEW_INTAKE_QUIET_PERIOD_MS = 6 * 60 * 60 * 1000;
-export const BACKFILL_WEEKLY_LIMIT = 60;
-const BACKFILL_QUEUE_POLICY_VERSION = 1;
+export const BACKFILL_MONTHLY_LIMIT = 60;
+const BACKFILL_QUEUE_POLICY_VERSION = 2;
 const BACKFILL_STORAGE_WARNING = 0.7;
 // Background work may be stopped by a serverless host before its advertised
 // route limit. A durable job can be safely reclaimed after this interval: its
@@ -113,6 +115,26 @@ const empty = (): IntakeSync => ({
   pending: [],
   issues: [],
 });
+
+function monthKey(date: Date) {
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+function previousMonth(key: string) {
+  const [year, month] = key.split("-").map(Number);
+  return month === 1
+    ? `${year - 1}-12`
+    : `${year}-${String(month - 1).padStart(2, "0")}`;
+}
+
+function gmailMonthQuery(query: string, key: string) {
+  const [year, month] = key.split("-").map(Number);
+  const start = new Date(Date.UTC(year, month - 1, 1));
+  const end = new Date(Date.UTC(year, month, 1));
+  const date = (value: Date) =>
+    `${value.getUTCFullYear()}/${String(value.getUTCMonth() + 1).padStart(2, "0")}/${String(value.getUTCDate()).padStart(2, "0")}`;
+  return `${query} after:${date(start)} before:${date(end)}`;
+}
 
 /** Historical intake is optional work, so it fails closed when capacity is not safe. */
 async function backfillStorageStatus() {
@@ -280,23 +302,26 @@ export async function syncIntake(
       delete job.nextSyncAt;
       delete job.nextPhase;
     }
-    // Older intake jobs stored latest and historical IDs in one list. Split
-    // them once without dropping the historical work: only confirmed Gmail
-    // head IDs remain eligible for continuous intake; everything else waits
-    // behind the six-hour backfill policy.
+    // Policy version two makes history a bounded calendar-month recovery.
+    // Keep known latest work, but reset only old historical queue pointers so
+    // they can be rediscovered in deterministic month order. No saved
+    // application is affected; Gmail IDs still de-duplicate every import.
     if (job.queuePolicyVersion !== BACKFILL_QUEUE_POLICY_VERSION) {
       const newest = new Set(job.latestPending || []);
       const pending = job.pending || [];
-      const historical = pending.filter((id) => !newest.has(id));
       job.pending = pending.filter((id) => newest.has(id));
       job.latestPending = job.latestPending?.filter((id) =>
         job.pending.includes(id),
       );
       if (!job.latestPending?.length) delete job.latestPending;
-      job.backfillPending = [
-        ...new Set([...(job.backfillPending || []), ...historical]),
-      ];
-      if (!job.backfillPending.length) delete job.backfillPending;
+      delete job.backfillPending;
+      delete job.page;
+      delete job.backfillMonth;
+      delete job.backfillImportedThisMonth;
+      delete job.backfillCompletedMonths;
+      delete job.backfillComplete;
+      delete job.nextBackfillAt;
+      delete job.backfillPausedReason;
       job.lastNewEligibleAt ||= now;
       job.queuePolicyVersion = BACKFILL_QUEUE_POLICY_VERSION;
     }
@@ -388,10 +413,7 @@ export async function syncIntake(
     const head = await gmail<{
       messages?: { id: string }[];
       nextPageToken?: string;
-    }>(
-      token,
-      `messages?maxResults=100&q=${encodeURIComponent(recentQuery)}`,
-    );
+    }>(token, `messages?maxResults=100&q=${encodeURIComponent(recentQuery)}`);
     const queued = new Set([...job.pending, ...(job.backfillPending || [])]);
     const known = new Set([
       ...workspace.applications.map((a) => a.gmailMessageId),
@@ -442,30 +464,17 @@ export async function syncIntake(
     }
     job.headCheckedAt = now;
     await checkpoint();
-    // Historical mail is deliberately slow, bounded work. New intake keeps
-    // checking the Gmail head every cycle; a single historical batch is only
-    // permitted after six quiet hours, then waits another six hours.
-    if (
-      !job.pending.length &&
-      !job.recentPage &&
-      (job.backfillPending?.length || job.page || !job.backfillComplete)
-    ) {
-      const weekStarted = job.backfillWeekStartedAt || now;
-      if (now - weekStarted >= 7 * 86400000) {
-        job.backfillWeekStartedAt = now;
-        job.backfillImportedThisWeek = 0;
-        delete job.backfillPausedReason;
-      }
+    // History is the final fallback. New mail is checked first on every pass,
+    // then the missed three-day window above. Only after six quiet hours do we
+    // recover one calendar month at a time, capped at 60 applications for
+    // that month before moving to the preceding month.
+    if (!job.pending.length && !job.recentPage) {
       const quietUntil =
         (job.lastNewEligibleAt || now) + NEW_INTAKE_QUIET_PERIOD_MS;
-      const weeklyImports = job.backfillImportedThisWeek || 0;
       if (now < quietUntil) {
         job.nextBackfillAt = quietUntil;
         job.backfillPausedReason =
-          "Waiting for six hours without a new eligible application.";
-      } else if (weeklyImports >= BACKFILL_WEEKLY_LIMIT) {
-        job.nextBackfillAt = weekStarted + 7 * 86400000;
-        job.backfillPausedReason = `Weekly historical intake limit reached (${BACKFILL_WEEKLY_LIMIT}).`;
+          "Historical intake waits while the latest mailbox remains quiet.";
       } else if (job.nextBackfillAt && job.nextBackfillAt > now) {
         job.backfillPausedReason =
           "Waiting six hours after the previous historical batch.";
@@ -479,58 +488,71 @@ export async function syncIntake(
         } else {
           delete job.backfillPausedReason;
           job.backfillStoragePercent = storage.percent;
-          // The generic mailbox cursor is only opened after the latest
-          // three-day recovery sweep is complete and its quiet window has
-          // elapsed. It is therefore always historical work.
-          if (!job.backfillPending?.length && !job.page) {
-            stage = "mailbox-history-head";
-            const historyHead = await gmail<{
-              messages?: { id: string }[];
-              nextPageToken?: string;
-            }>(
-              token,
-              `messages?maxResults=100&q=${encodeURIComponent(query)}`,
-            );
+          const currentMonth = monthKey(new Date(now));
+          let targetMonth = job.backfillMonth || previousMonth(currentMonth);
+          const advanceMonth = () => {
+            job.backfillCompletedMonths = [
+              ...new Set([...(job.backfillCompletedMonths || []), targetMonth]),
+            ].slice(-48);
+            targetMonth = previousMonth(targetMonth);
+            job.backfillMonth = targetMonth;
+            job.backfillImportedThisMonth = 0;
+            delete job.backfillPending;
+            delete job.page;
+          };
+          if ((job.backfillImportedThisMonth || 0) >= BACKFILL_MONTHLY_LIMIT) {
+            advanceMonth();
+            job.nextBackfillAt = Date.now() + NEW_INTAKE_QUIET_PERIOD_MS;
+            job.message = `Historical cap reached for the completed month. Next safe history batch will begin with ${targetMonth}.`;
+          } else {
+            job.backfillMonth = targetMonth;
+            const historyQuery = gmailMonthQuery(query, targetMonth);
             const historyKnown = new Set([
               ...workspace.applications.map((a) => a.gmailMessageId),
               ...(job.seenIds || []),
             ]);
-            job.backfillPending = (historyHead.messages || [])
-              .map((message) => message.id)
-              .filter((id) => !historyKnown.has(id));
-            job.page = historyHead.nextPageToken;
-            if (!(job.backfillPending || []).length) delete job.backfillPending;
-            if (!job.backfillPending?.length && !job.page)
-              job.backfillComplete = true;
-          }
-          if (!job.backfillPending?.length && job.page) {
-            stage = "mailbox-page";
-            const page = await gmail<{
-              messages?: { id: string }[];
-              nextPageToken?: string;
-            }>(
-              token,
-              `messages?maxResults=100&q=${encodeURIComponent(query)}&pageToken=${encodeURIComponent(job.page)}`,
-            );
-            const pageKnown = new Set([
-              ...workspace.applications.map((a) => a.gmailMessageId),
-              ...(job.seenIds || []),
-            ]);
-            job.backfillPending = (page.messages || [])
-              .map((message) => message.id)
-              .filter((id) => !pageKnown.has(id));
-            job.page = page.nextPageToken;
-            if (!(job.backfillPending || []).length) delete job.backfillPending;
-            if (!job.backfillPending?.length && !job.page)
-              job.backfillComplete = true;
-          }
-          if (job.backfillPending?.length) {
-            job.pending = job.backfillPending.slice(
-              0,
-              AUTOMATIC_INTAKE_BATCH_SIZE,
-            );
-            job.phase = "backfill";
-            job.message = "Importing one safe historical email-only batch…";
+            if (!job.backfillPending?.length && !job.page) {
+              stage = "mailbox-history-month";
+              const history = await gmail<{
+                messages?: { id: string }[];
+                nextPageToken?: string;
+              }>(
+                token,
+                `messages?maxResults=100&q=${encodeURIComponent(historyQuery)}`,
+              );
+              job.backfillPending = (history.messages || [])
+                .map((message) => message.id)
+                .filter((id) => !historyKnown.has(id));
+              job.page = history.nextPageToken;
+            } else if (!job.backfillPending?.length && job.page) {
+              stage = "mailbox-history-page";
+              const page = await gmail<{
+                messages?: { id: string }[];
+                nextPageToken?: string;
+              }>(
+                token,
+                `messages?maxResults=100&q=${encodeURIComponent(historyQuery)}&pageToken=${encodeURIComponent(job.page)}`,
+              );
+              job.backfillPending = (page.messages || [])
+                .map((message) => message.id)
+                .filter((id) => !historyKnown.has(id));
+              job.page = page.nextPageToken;
+            }
+            if (!job.backfillPending?.length && !job.page) {
+              advanceMonth();
+              job.message = `No unimported applications found for the completed month. Continuing with ${targetMonth}.`;
+            } else if (job.backfillPending?.length) {
+              const remaining = Math.max(
+                0,
+                BACKFILL_MONTHLY_LIMIT - (job.backfillImportedThisMonth || 0),
+              );
+              job.pending = job.backfillPending.slice(
+                0,
+                Math.min(AUTOMATIC_INTAKE_BATCH_SIZE, remaining),
+              );
+              job.phase = "backfill";
+              job.message = `Importing a safe ${targetMonth} historical email-only batch…`;
+            }
           }
         }
       }
@@ -623,13 +645,24 @@ export async function syncIntake(
         job.backfillPending = job.backfillPending?.filter(
           (id) => !ids.includes(id),
         );
-        if (!job.backfillPending?.length) {
+        const monthlyImported =
+          (job.backfillImportedThisMonth || 0) + job.imported;
+        const finishedMonth =
+          job.backfillMonth || previousMonth(monthKey(new Date(now)));
+        if (
+          monthlyImported >= BACKFILL_MONTHLY_LIMIT ||
+          (!job.backfillPending?.length && !job.page)
+        ) {
+          job.backfillCompletedMonths = [
+            ...new Set([...(job.backfillCompletedMonths || []), finishedMonth]),
+          ].slice(-48);
+          job.backfillMonth = previousMonth(finishedMonth);
+          job.backfillImportedThisMonth = 0;
           delete job.backfillPending;
-          if (!job.page) job.backfillComplete = true;
+          delete job.page;
+        } else {
+          job.backfillImportedThisMonth = monthlyImported;
         }
-        job.backfillImportedThisWeek =
-          (job.backfillImportedThisWeek || 0) + job.imported;
-        job.backfillWeekStartedAt ||= now;
         job.nextBackfillAt = Date.now() + NEW_INTAKE_QUIET_PERIOD_MS;
       } else {
         job.latestPending = job.latestPending?.filter((id) =>
@@ -649,9 +682,13 @@ export async function syncIntake(
       .slice(-40);
     job.status = retryBatch ? "error" : "complete";
     const remaining =
-      job.pending.length > 0 || !!job.backfillPending?.length || !!job.page;
+      job.pending.length > 0 ||
+      !!job.latestPending?.length ||
+      !!job.recentPage ||
+      !!job.backfillPending?.length ||
+      !!job.page;
     if (!retryBatch && remaining) {
-      if (job.latestPending?.length) {
+      if (job.latestPending?.length || job.recentPage) {
         job.phase = "cooldown";
         job.nextPhase = "latest";
         job.nextSyncAt = Date.now() + INTAKE_COOLDOWN_MS;

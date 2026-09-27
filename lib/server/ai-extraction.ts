@@ -9,7 +9,7 @@ import {
   extractionReasons,
   missingInformation,
 } from "@/lib/applicant-information";
-import { canEdit } from "@/lib/data-policy";
+import { activeIntake, canEdit } from "@/lib/data-policy";
 import { seal, unseal } from "@/lib/auth/security";
 import {
   AiProviderError,
@@ -227,10 +227,15 @@ export const extractionProvider = (): ExtractionProvider => ({
 });
 export async function runExtractionJobs(
   limit = 2,
-  provider: ExtractionProvider = extractionProvider(),
+  provider?: ExtractionProvider,
   preferredApplicationId?: string,
 ) {
   if (!aiConfigured()) return;
+  // Production automation is deliberately limited to the live HR queue. A
+  // caller that supplies a provider is an explicit/manual operation (and our
+  // deterministic test seam), so it may target a named historical applicant.
+  const automaticOnly = !provider;
+  const extractor = provider || extractionProvider();
   for (let count = 0; count < limit; count++) {
     const claimed = await retryableTransaction(async (tx) => {
       if (
@@ -248,6 +253,12 @@ export async function runExtractionJobs(
         Date.now()
       )
         return null;
+      const state = await getState(tx);
+      const activeApplicationIds = new Set(
+        state.applications
+          .filter(activeIntake)
+          .map((application) => application.id),
+      );
       const rows = await tx.query(
         "SELECT payload FROM records WHERE collection=$1",
         ["extraction_jobs"],
@@ -262,6 +273,9 @@ export async function runExtractionJobs(
         })
         .find(
           (j) =>
+            (!automaticOnly ||
+              activeApplicationIds.has(j.applicationId) ||
+              j.applicationId === preferredApplicationId) &&
             j.attempts < 3 &&
             (((j.status === "Queued" ||
               (j.status === "Failed" && !!j.retryAt)) &&
@@ -269,10 +283,9 @@ export async function runExtractionJobs(
               (j.status === "Running" && (j.leaseUntil || 0) < Date.now())),
         );
       if (!job) return null;
-      const state = await getState(tx),
-        a = state.applications.find(
-          (a) => a.id === job.applicationId && !a.deletedAt && !a.isDemo,
-        );
+      const a = state.applications.find(
+        (a) => a.id === job.applicationId && !a.deletedAt && !a.isDemo,
+      );
       if (!a || version(a) !== job.sourceVersion) {
         job.status = "Failed";
         job.error =
@@ -338,7 +351,7 @@ export async function runExtractionJobs(
         throw new SafeError(
           "No readable submitted content is available for extraction.",
         );
-      const result = await provider.extract(sources);
+      const result = await extractor.extract(sources);
       const committed = await retryableTransaction(async (tx) => {
         const current = await readRecord<ExtractionJob>(
           tx,
@@ -548,13 +561,34 @@ export async function extractionStatus() {
         "extraction_jobs",
       ])
     ).map((r) => JSON.parse(String(r.payload)) as ExtractionJob),
+    activeApplicationIds: new Set(
+      (await getState(tx)).applications.filter(activeIntake).map((a) => a.id),
+    ),
   }));
+  const withQueueSummary = <
+    T extends { jobs: ExtractionJob[]; activeApplicationIds: Set<string> },
+  >({
+    activeApplicationIds,
+    ...value
+  }: T) => ({
+    ...value,
+    activeQueued: value.jobs.filter(
+      (job) =>
+        activeApplicationIds.has(job.applicationId) &&
+        ["Queued", "Running"].includes(job.status),
+    ).length,
+    deferred: value.jobs.filter(
+      (job) =>
+        !activeApplicationIds.has(job.applicationId) &&
+        ["Queued", "Running"].includes(job.status),
+    ).length,
+  });
   if (
     !snapshot.jobs.some(
       (job) => job.status === "Running" && (job.leaseUntil || 0) < Date.now(),
     )
   )
-    return snapshot;
+    return withQueueSummary(snapshot);
   return retryableTransaction(async (tx) => {
     const jobs = (
       await tx.query("SELECT payload FROM records WHERE collection=$1", [
@@ -582,7 +616,7 @@ export async function extractionStatus() {
           { jobId: job.id },
         );
       }
-    return {
+    return withQueueSummary({
       enabled:
         (
           await readRecord<{ enabled: boolean }>(
@@ -593,7 +627,10 @@ export async function extractionStatus() {
         )?.enabled !== false,
       configured: aiConfigured(),
       jobs,
-    };
+      activeApplicationIds: new Set(
+        (await getState(tx)).applications.filter(activeIntake).map((a) => a.id),
+      ),
+    });
   });
 }
 export async function configureExtraction(enabled: boolean, user: User) {

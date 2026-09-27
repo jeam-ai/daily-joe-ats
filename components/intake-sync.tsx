@@ -56,6 +56,13 @@ export function IntakeSyncStatus() {
     : job?.lastBatchPhase === "backfill"
       ? "Processed"
       : "Standby";
+  const historyMonth = job?.backfillMonth
+    ? new Intl.DateTimeFormat("en-PH", {
+        month: "short",
+        year: "numeric",
+        timeZone: "UTC",
+      }).format(new Date(`${job.backfillMonth}-01T00:00:00Z`))
+    : "Standby";
   async function check() {
     const value = await requestJson<IntakeSync>("/api/intake/sync");
     setJob(value);
@@ -176,11 +183,11 @@ export function IntakeSyncStatus() {
           </span>
           <span>
             <b>History</b>
-            {historyLabel}
+            {historyLabel === "Processed" ? historyMonth : historyLabel}
           </span>
           <span>
-            <b>This week</b>
-            {job?.backfillImportedThisWeek || 0} / 60
+            <b>Month cap</b>
+            {job?.backfillImportedThisMonth || 0} / 60
           </span>
           {job?.completedAt && (
             <span>
