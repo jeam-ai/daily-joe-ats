@@ -1,4 +1,11 @@
 import type { NextConfig } from "next";
+const ocrRuntimeFiles = [
+  // Tesseract starts a separate Node worker. Its runtime require calls and
+  // SIMD-selected WASM core are not discoverable from the route entry point.
+  "./node_modules/tesseract.js/src/worker-script/**/*",
+  "./node_modules/tesseract.js-core/**/*",
+  "./node_modules/wasm-feature-detect/**/*",
+];
 const config: NextConfig = {
   serverExternalPackages: [
     "@napi-rs/canvas",
@@ -19,6 +26,12 @@ const config: NextConfig = {
       // fails even though the parser itself is present.
       "./node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs",
     ],
+    "/api/intake": ocrRuntimeFiles,
+    "/api/intake/sync": ocrRuntimeFiles,
+    "/api/cron/intake": ocrRuntimeFiles,
+    "/api/auth/callback": ocrRuntimeFiles,
+    "/api/applicants/*/resume": ocrRuntimeFiles,
+    "/api/applicants/*/processing": ocrRuntimeFiles,
   },
   // Local operational state and temporary credentials must never be copied
   // into a production function bundle.
