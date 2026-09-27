@@ -176,6 +176,17 @@ test("automatic intake uses safe batches, maintains latest 100 with an older que
       s.applications.every((a) => !a.hiringNeedId && a.status === "New"),
     );
     assert.ok(s.applications.every((a) => a.screening.criteria.length === 4));
+    await transaction(async (tx) => {
+      const job = (await tx.query(
+        "SELECT payload FROM records WHERE collection=$1 AND id=$2",
+        ["jobs", "gmail"],
+      ))[0];
+      assert.ok(job);
+      const parsed = JSON.parse(String(job.payload));
+      parsed.lastNewEligibleAt = Date.now() - 6 * 60 * 60 * 1000 - 1;
+      parsed.nextBackfillAt = 0;
+      await putRecord(tx, "jobs", "gmail", parsed);
+    });
     await syncIntake(undefined, true);
     assert.equal((await intakeStatus()).status, "complete");
     s = await transaction(getState);
@@ -334,7 +345,7 @@ test("newest Gmail messages preempt a saved historical backfill cursor", async (
     );
     const job = await intakeStatus();
     assert.equal(job.lastBatchPhase, "latest");
-    assert.ok(job.pending.includes("april-message"));
+    assert.ok(job.backfillPending?.includes("april-message"));
   } finally {
     globalThis.fetch = original;
   }
@@ -364,6 +375,8 @@ test("unreadable attachments preserve email facts and do not pause intake", asyn
       retryAt: 0,
       headCheckedAt: Date.now(),
       queueVersion: INTAKE_QUEUE_VERSION,
+      queuePolicyVersion: 1,
+      latestPending: ["broken"],
       query: state.intakeQuery,
     }),
   );

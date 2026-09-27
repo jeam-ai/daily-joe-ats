@@ -14,6 +14,8 @@ import {
 } from "./intake";
 import { accessToken } from "./service";
 import {
+  aivenConfigured,
+  postgresConfigured,
   retryableTransaction,
   readTransaction,
   readRecord,
@@ -57,6 +59,15 @@ export type IntakeSync = {
   seenIds?: string[];
   /** IDs known to have come from Gmail's newest-first mailbox head. */
   latestPending?: string[];
+  /** Historical IDs are kept separately so they can never outrank new mail. */
+  backfillPending?: string[];
+  queuePolicyVersion?: number;
+  lastNewEligibleAt?: number;
+  nextBackfillAt?: number;
+  backfillWeekStartedAt?: number;
+  backfillImportedThisWeek?: number;
+  backfillPausedReason?: string;
+  backfillStoragePercent?: number;
   batchLimit?: number;
   batchChecked?: number;
   batchImported?: number;
@@ -80,6 +91,10 @@ export const INTAKE_COOLDOWN_MS = 2 * 60 * 1000;
 // messages. The rebase discards only unimported queue pointers; applications
 // already committed to the ATS remain untouched and are still de-duplicated.
 export const INTAKE_QUEUE_VERSION = 2;
+export const NEW_INTAKE_QUIET_PERIOD_MS = 6 * 60 * 60 * 1000;
+export const BACKFILL_WEEKLY_LIMIT = 60;
+const BACKFILL_QUEUE_POLICY_VERSION = 1;
+const BACKFILL_STORAGE_WARNING = 0.7;
 // Background work may be stopped by a serverless host before its advertised
 // route limit. A durable job can be safely reclaimed after this interval: its
 // application writes use stable Gmail IDs and its checkpoint rejects an older
@@ -93,6 +108,34 @@ const empty = (): IntakeSync => ({
   pending: [],
   issues: [],
 });
+
+/** Historical intake is optional work, so it fails closed when capacity is not safe. */
+async function backfillStorageStatus() {
+  if (!postgresConfigured()) return { blocked: false as const };
+  try {
+    const result = await readTransaction(async (tx) => {
+      const storage = Number(
+        (await tx.query("SELECT pg_database_size(current_database()) AS bytes"))[0]
+          ?.bytes || 0,
+      );
+      const connectionLimit = aivenConfigured()
+        ? String(
+            (await tx.query("SELECT current_setting('max_connections') AS n"))[0]
+              ?.n || "",
+          )
+        : "";
+      const configuredLimit = Number(process.env.DB_STORAGE_LIMIT_BYTES || 0);
+      const limit =
+        configuredLimit || (connectionLimit === "20" ? 1024 ** 3 : 0);
+      return limit > 0 ? storage / limit : null;
+    });
+    return result !== null && result >= BACKFILL_STORAGE_WARNING
+      ? { blocked: true as const, percent: Math.round(result * 100) }
+      : { blocked: false as const, percent: result ? Math.round(result * 100) : undefined };
+  } catch {
+    return { blocked: true as const };
+  }
+}
 export async function intakeStatus() {
   return readTransaction(async (tx) => {
     const state =
@@ -162,6 +205,9 @@ export async function restartQueuedIntake(requestedBy: User) {
     delete job.page;
     delete job.seenIds;
     delete job.latestPending;
+    delete job.backfillPending;
+    delete job.nextBackfillAt;
+    delete job.backfillPausedReason;
     delete job.retryAt;
     delete job.nextSyncAt;
     delete job.nextPhase;
@@ -218,6 +264,26 @@ export async function syncIntake(
       delete job.retryAt;
       delete job.nextSyncAt;
       delete job.nextPhase;
+    }
+    // Older intake jobs stored latest and historical IDs in one list. Split
+    // them once without dropping the historical work: only confirmed Gmail
+    // head IDs remain eligible for continuous intake; everything else waits
+    // behind the six-hour backfill policy.
+    if (job.queuePolicyVersion !== BACKFILL_QUEUE_POLICY_VERSION) {
+      const newest = new Set(job.latestPending || []);
+      const pending = job.pending || [];
+      const historical = pending.filter((id) => !newest.has(id));
+      job.pending = pending.filter((id) => newest.has(id));
+      job.latestPending = job.latestPending?.filter((id) =>
+        job.pending.includes(id),
+      );
+      if (!job.latestPending?.length) delete job.latestPending;
+      job.backfillPending = [
+        ...new Set([...(job.backfillPending || []), ...historical]),
+      ];
+      if (!job.backfillPending.length) delete job.backfillPending;
+      job.lastNewEligibleAt ||= now;
+      job.queuePolicyVersion = BACKFILL_QUEUE_POLICY_VERSION;
     }
     if (!force && (job.consecutiveFailures || 0) >= 3) return null;
     if (force) job.consecutiveFailures = 0;
@@ -279,6 +345,9 @@ export async function syncIntake(
       job.pending = [];
       delete job.page;
       delete job.latestPending;
+      delete job.backfillPending;
+      delete job.nextBackfillAt;
+      delete job.backfillPausedReason;
       job.query = query;
     }
     job.message = "Finding new eligible applications in the official mailbox…";
@@ -291,7 +360,10 @@ export async function syncIntake(
       messages?: { id: string }[];
       nextPageToken?: string;
     }>(token, `messages?maxResults=100&q=${encodeURIComponent(query)}`);
-    const queued = new Set(job.pending);
+    const queued = new Set([
+      ...job.pending,
+      ...(job.backfillPending || []),
+    ]);
     const known = new Set([
       ...workspace.applications.map((a) => a.gmailMessageId),
       ...(job.seenIds || []),
@@ -306,34 +378,74 @@ export async function syncIntake(
       job.latestPending = [
         ...new Set([...(job.latestPending || []), ...fresh]),
       ];
+      job.lastNewEligibleAt = now;
+      delete job.backfillPausedReason;
       job.phase = "latest";
       job.message = "Prioritizing newest eligible applications from Gmail…";
     }
     job.headCheckedAt = now;
     await checkpoint();
-    // Only move to the historical cursor after the newest queue has been
-    // exhausted. This preserves backfill without allowing it to block live
-    // applications.
-    if (!job.pending.length && job.page) {
-      stage = "mailbox-page";
-      job.phase = "backfill";
-      job.message =
-        "Backfilling older matching applications from the official mailbox…";
-      const page = await gmail<{
-        messages?: { id: string }[];
-        nextPageToken?: string;
-      }>(
-        token,
-        `messages?maxResults=100&q=${encodeURIComponent(query)}${job.page ? `&pageToken=${encodeURIComponent(job.page)}` : ""}`,
-      );
-      const pageKnown = new Set([
-        ...workspace.applications.map((a) => a.gmailMessageId),
-        ...(job.seenIds || []),
-      ]);
-      job.pending = (page.messages || [])
-        .map((message) => message.id)
-        .filter((id) => !pageKnown.has(id));
-      job.page = page.nextPageToken;
+    // Historical mail is deliberately slow, bounded work. New intake keeps
+    // checking the Gmail head every cycle; a single historical batch is only
+    // permitted after six quiet hours, then waits another six hours.
+    if (!job.pending.length && (job.backfillPending?.length || job.page)) {
+      const weekStarted = job.backfillWeekStartedAt || now;
+      if (now - weekStarted >= 7 * 86400000) {
+        job.backfillWeekStartedAt = now;
+        job.backfillImportedThisWeek = 0;
+        delete job.backfillPausedReason;
+      }
+      const quietUntil =
+        (job.lastNewEligibleAt || now) + NEW_INTAKE_QUIET_PERIOD_MS;
+      const weeklyImports = job.backfillImportedThisWeek || 0;
+      if (now < quietUntil) {
+        job.nextBackfillAt = quietUntil;
+        job.backfillPausedReason =
+          "Waiting for six hours without a new eligible application.";
+      } else if (weeklyImports >= BACKFILL_WEEKLY_LIMIT) {
+        job.nextBackfillAt = weekStarted + 7 * 86400000;
+        job.backfillPausedReason = `Weekly historical intake limit reached (${BACKFILL_WEEKLY_LIMIT}).`;
+      } else if (job.nextBackfillAt && job.nextBackfillAt > now) {
+        job.backfillPausedReason =
+          "Waiting six hours after the previous historical batch.";
+      } else {
+        const storage = await backfillStorageStatus();
+        if (storage.blocked) {
+          job.backfillPausedReason = storage.percent
+            ? `Historical intake paused: Aiven storage is at ${storage.percent}%.`
+            : "Historical intake paused until Aiven storage can be verified.";
+          job.backfillStoragePercent = storage.percent;
+        } else {
+          delete job.backfillPausedReason;
+          job.backfillStoragePercent = storage.percent;
+          if (!job.backfillPending?.length && job.page) {
+            stage = "mailbox-page";
+            const page = await gmail<{
+              messages?: { id: string }[];
+              nextPageToken?: string;
+            }>(
+              token,
+              `messages?maxResults=100&q=${encodeURIComponent(query)}&pageToken=${encodeURIComponent(job.page)}`,
+            );
+            const pageKnown = new Set([
+              ...workspace.applications.map((a) => a.gmailMessageId),
+              ...(job.seenIds || []),
+            ]);
+            job.backfillPending = (page.messages || [])
+              .map((message) => message.id)
+              .filter((id) => !pageKnown.has(id));
+            job.page = page.nextPageToken;
+          }
+          if (job.backfillPending?.length) {
+            job.pending = job.backfillPending.slice(
+              0,
+              AUTOMATIC_INTAKE_BATCH_SIZE,
+            );
+            job.phase = "backfill";
+            job.message = "Importing one safe historical email-only batch…";
+          }
+        }
+      }
       await checkpoint();
     }
     const ids = job.pending.slice(0, AUTOMATIC_INTAKE_BATCH_SIZE);
@@ -358,6 +470,7 @@ export async function syncIntake(
       // scan from stranding the whole Gmail queue.
       deadline: now + Math.min(60000, Math.max(1000, budgetMs - 30000)),
       automatic: true,
+      emailOnly: job.lastBatchPhase === "backfill",
     });
     job.checked = preview.scanned;
     job.batchChecked = preview.scanned;
@@ -418,10 +531,21 @@ export async function syncIntake(
     const retryBatch = retryIds.length > 0 && job.failures < 3;
     if (!retryIds.length || job.failures >= 3) {
       job.pending = job.pending.slice(ids.length);
-      job.latestPending = job.latestPending?.filter((id) =>
-        job.pending.includes(id),
-      );
-      if (!job.latestPending?.length) delete job.latestPending;
+      if (job.lastBatchPhase === "backfill") {
+        job.backfillPending = job.backfillPending?.filter(
+          (id) => !ids.includes(id),
+        );
+        if (!job.backfillPending?.length) delete job.backfillPending;
+        job.backfillImportedThisWeek =
+          (job.backfillImportedThisWeek || 0) + job.imported;
+        job.backfillWeekStartedAt ||= now;
+        job.nextBackfillAt = Date.now() + NEW_INTAKE_QUIET_PERIOD_MS;
+      } else {
+        job.latestPending = job.latestPending?.filter((id) =>
+          job.pending.includes(id),
+        );
+        if (!job.latestPending?.length) delete job.latestPending;
+      }
       job.seenIds = [...new Set([...(job.seenIds || []), ...ids])].slice(-5000);
     }
     if (job.failures >= 3) job.failures = 0; // Continue past unreadable mail; issues remain visible and a later scan retries it.
@@ -433,15 +557,25 @@ export async function syncIntake(
       .filter((issue) => !issue.reason.startsWith("Duplicate"))
       .slice(-40);
     job.status = retryBatch ? "error" : "complete";
-    const remaining = job.pending.length > 0 || !!job.page;
+    const remaining =
+      job.pending.length > 0 ||
+      !!job.backfillPending?.length ||
+      !!job.page;
     if (!retryBatch && remaining) {
-      job.phase = "cooldown";
-      job.nextPhase = job.latestPending?.length
-        ? "latest"
-        : "backfill";
-      job.nextSyncAt = Date.now() + INTAKE_COOLDOWN_MS;
-      job.message =
-        "Waiting briefly so the database can finish the prior save safely.";
+      if (job.latestPending?.length) {
+        job.phase = "cooldown";
+        job.nextPhase = "latest";
+        job.nextSyncAt = Date.now() + INTAKE_COOLDOWN_MS;
+        job.message =
+          "Waiting briefly so the database can finish the prior save safely.";
+      } else {
+        job.phase = "idle";
+        delete job.nextPhase;
+        delete job.nextSyncAt;
+        job.message =
+          job.backfillPausedReason ||
+          "Latest intake remains active; historical intake will wait for its next safe window.";
+      }
     } else {
       job.phase = "idle";
       delete job.nextPhase;
@@ -519,7 +653,7 @@ export async function syncIntake(
           ? 120000
           : job.status === "capacity"
             ? 30000
-            : job.pending.length || job.page
+            : job.pending.length
               ? INTAKE_COOLDOWN_MS
               : 30000);
     await checkpoint().catch(() => {});

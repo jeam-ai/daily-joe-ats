@@ -77,6 +77,8 @@ export function IntakeSyncStatus() {
                 30000
               : value.nextSyncAt && value.nextSyncAt > Date.now()
                 ? Math.max(1000, value.nextSyncAt - Date.now() + 100)
+                : value.nextBackfillAt && value.nextBackfillAt > Date.now()
+                  ? 30000
                 : value.pending.length || value.page
                   ? 5000
                   : // A visible HR workspace is the live intake monitor. Keep a
@@ -154,6 +156,16 @@ export function IntakeSyncStatus() {
         {(job?.page || job?.nextPhase === "backfill") && (
           <small>
             Backfill remaining: {job.page ? "checking next page" : "queued"}
+          </small>
+        )}
+        {job?.backfillPausedReason && (
+          <small>
+            Historical intake: {job.backfillPausedReason}
+          </small>
+        )}
+        {job?.backfillImportedThisWeek !== undefined && (
+          <small>
+            Historical intake this week: {job.backfillImportedThisWeek} / 60
           </small>
         )}
         {coolingDown && (

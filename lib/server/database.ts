@@ -104,6 +104,10 @@ const schema = [
   "CREATE INDEX IF NOT EXISTS hiring_need_retention_expiry_idx ON hiring_need_retention(expires_at)",
   "CREATE TABLE IF NOT EXISTS retention_policies (name TEXT PRIMARY KEY, days INTEGER NOT NULL, updated_at TEXT NOT NULL)",
   "CREATE TABLE IF NOT EXISTS retention_cleanup_metrics (month TEXT NOT NULL, metric TEXT NOT NULL, count INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL, PRIMARY KEY(month,metric))",
+  // Privacy-preserving report archive. It contains aggregate dimensions and
+  // counts only—never an applicant, contact detail, document, or identifier.
+  "CREATE TABLE IF NOT EXISTS retention_report_snapshots (snapshot_date TEXT NOT NULL, stage TEXT NOT NULL, position TEXT NOT NULL, location TEXT NOT NULL, source TEXT NOT NULL, count INTEGER NOT NULL DEFAULT 0, expires_at TEXT NOT NULL, PRIMARY KEY(snapshot_date,stage,position,location,source,expires_at))",
+  "CREATE INDEX IF NOT EXISTS retention_report_snapshots_expiry_idx ON retention_report_snapshots(expires_at)",
   "CREATE TABLE IF NOT EXISTS interviews (id TEXT PRIMARY KEY, application_id TEXT NOT NULL REFERENCES applications(id), payload TEXT NOT NULL)",
   "CREATE TABLE IF NOT EXISTS application_requirements (id TEXT NOT NULL, application_id TEXT NOT NULL REFERENCES applications(id), payload TEXT NOT NULL, PRIMARY KEY(id,application_id))",
   "CREATE TABLE IF NOT EXISTS screening_results (application_id TEXT PRIMARY KEY REFERENCES applications(id), payload TEXT NOT NULL)",

@@ -48,7 +48,7 @@ const fields: { name: RetentionPolicyName; label: string; note: string }[] = [
   {
     name: "report_days",
     label: "Saved report snapshots",
-    note: "Applies only if historical report snapshots are stored.",
+    note: "Anonymous counts-only snapshots are retained after applicant data is permanently deleted.",
   },
 ];
 
@@ -97,8 +97,9 @@ export function RetentionSettings() {
           <p className="fine-print">
             Queue size stays at 500 and the active HR view stays at
             approximately 100. These periods do not limit Gmail intake.
-            Permanent deletion is controlled separately by deployment
-            verification settings.
+            Before permanent applicant deletion, the system writes an
+            anonymous report snapshot (date, stage, role, location, source,
+            and count only) for the configured report period.
           </p>
           {snapshot?.dryRun && (
             <p className="info-banner">

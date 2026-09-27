@@ -96,6 +96,37 @@ async function deleteApplication(tx: Transaction, application: Application) {
     );
 }
 
+/**
+ * Preserve the reporting contribution without retaining applicant data. This
+ * row deliberately has no application ID, name, contact data, resume text, or
+ * free-form notes; it is safe to keep after the linked record is deleted.
+ */
+async function archiveAnonymousReportSnapshot(
+  tx: Transaction,
+  application: Application,
+  reportDays: number,
+  nowMs: number,
+) {
+  const applied = Date.parse(application.appliedAt);
+  const snapshotDate = Number.isFinite(applied)
+    ? new Date(applied).toISOString().slice(0, 10)
+    : new Date(nowMs).toISOString().slice(0, 10);
+  await tx.query(
+    `INSERT INTO retention_report_snapshots(snapshot_date,stage,position,location,source,count,expires_at)
+     VALUES($1,$2,$3,$4,$5,1,$6)
+     ON CONFLICT(snapshot_date,stage,position,location,source,expires_at)
+     DO UPDATE SET count=retention_report_snapshots.count+1`,
+    [
+      snapshotDate,
+      application.stage,
+      application.position,
+      application.location,
+      application.source || "Not recorded",
+      at(plusDays(nowMs, reportDays)),
+    ],
+  );
+}
+
 /** Re-evaluates retention from current queue membership; safe to run repeatedly. */
 export type RetentionRunOptions = { dryRun?: boolean };
 export function retentionDryRunEnabled() {
@@ -345,8 +376,15 @@ export async function runRetentionCleanup(options: RetentionRunOptions = {}) {
     // are removed. The transaction keeps this atomic for readers.
     if (!dryRun && (remove.size || talentPoolChanged)) {
       await saveState(tx, state, { sync: false });
-      for (const application of deletedApplications)
+      for (const application of deletedApplications) {
+        await archiveAnonymousReportSnapshot(
+          tx,
+          application,
+          policy.report_days,
+          nowMs,
+        );
         await deleteApplication(tx, application);
+      }
     }
 
     // A hiring need has its own lifecycle. Expiry never deletes an applicant;
@@ -417,7 +455,17 @@ export async function runRetentionCleanup(options: RetentionRunOptions = {}) {
       );
     }
     if (!dryRun) {
+      const expiredSnapshots = await tx.query(
+        "DELETE FROM retention_report_snapshots WHERE expires_at<=$1 RETURNING snapshot_date",
+        [now],
+      );
       await recordCleanupMetric(tx, "applications_deleted", remove.size, now);
+      await recordCleanupMetric(
+        tx,
+        "anonymous_report_snapshots_expired",
+        expiredSnapshots.length,
+        now,
+      );
       await recordCleanupMetric(
         tx,
         "talent_pool_expired",
@@ -435,6 +483,7 @@ export async function runRetentionCleanup(options: RetentionRunOptions = {}) {
       deletedApplications: dryRun ? 0 : remove.size,
       deletedTalentPoolMemberships: dryRun ? 0 : wouldExpireTalentPool,
       deletedHiringNeeds: dryRun ? 0 : needIds.size,
+      archivedAnonymousReportSnapshots: dryRun ? 0 : deletedApplications.length,
       liveQueue: Math.min(live.length, INTAKE_QUEUE_LIMIT),
     };
   });

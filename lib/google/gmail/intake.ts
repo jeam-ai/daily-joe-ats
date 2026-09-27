@@ -147,7 +147,13 @@ function attachmentProblem(
 }
 export async function previewImport(
   user: User,
-  options: { ids?: string[]; deadline?: number; automatic?: boolean } = {},
+  options: {
+    ids?: string[];
+    deadline?: number;
+    automatic?: boolean;
+    /** Historical recovery records email facts first; source files stay in Gmail. */
+    emailOnly?: boolean;
+  } = {},
 ) {
   if (!["Admin", "Talent Acquisition", "HR Generalist"].includes(user.role))
     throw new SafeError("Recruitment manager access required.", 403);
@@ -291,6 +297,12 @@ export async function previewImport(
               .digest("hex"),
         );
       };
+      if (options.emailOnly) {
+        pushEmailOnly(
+          "Historical email-only intake. The resume remains in Gmail and is retrieved only when HR opens or processes this applicant.",
+        );
+        continue;
+      }
       if (Date.now() >= deadline) {
         if (options.automatic) {
           pushEmailOnly(

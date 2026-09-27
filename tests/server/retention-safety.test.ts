@@ -169,3 +169,56 @@ test("Requirements are protected outside 500 and return to the queue cancels gra
   await runRetentionCleanup();
   assert.deepEqual(await retention(), []);
 });
+
+test("permanent cleanup writes a counts-only report snapshot before deleting applicant data", async () => {
+  const state = initialState();
+  const removable = application("archive-me", "2025-01-01T00:00:00.000Z");
+  state.applications.push(removable);
+  for (let i = 0; i < 500; i++)
+    state.applications.push(
+      application(
+        `current-${i}`,
+        `2026-09-${String((i % 28) + 1).padStart(2, "0")}T00:00:00.000Z`,
+      ),
+    );
+  await transaction((tx) => saveState(tx, state, { sync: false }));
+  await runRetentionCleanup();
+  await transaction((tx) =>
+    tx.query(
+      "UPDATE application_retention SET started_at=$1,expires_at=$2 WHERE application_id=$3",
+      [
+        new Date(Date.now() - 11 * 86400000).toISOString(),
+        new Date(Date.now() - 1).toISOString(),
+        removable.id,
+      ],
+    ),
+  );
+  const previousDryRun = process.env.DRY_RUN_RETENTION_CLEANUP;
+  const previousVerified = process.env.RETENTION_CLEANUP_VERIFIED;
+  process.env.DRY_RUN_RETENTION_CLEANUP = "false";
+  process.env.RETENTION_CLEANUP_VERIFIED = "true";
+  try {
+    const result = await runRetentionCleanup({ dryRun: false });
+    assert.equal(result.deletedApplications, 1);
+    assert.equal(result.archivedAnonymousReportSnapshots, 1);
+  } finally {
+    process.env.DRY_RUN_RETENTION_CLEANUP = previousDryRun;
+    process.env.RETENTION_CLEANUP_VERIFIED = previousVerified;
+  }
+  const saved = await readTransaction((tx) => getState(tx));
+  assert.ok(!saved.applications.some((item) => item.id === removable.id));
+  const snapshots = await readTransaction((tx) =>
+    tx.query(
+      "SELECT snapshot_date,stage,position,location,source,count,expires_at FROM retention_report_snapshots",
+    ),
+  );
+  assert.equal(snapshots.length, 1);
+  assert.equal(snapshots[0].count, 1);
+  assert.equal(snapshots[0].position, "Test Position");
+  assert.equal(snapshots[0].location, "Test Location");
+  assert.ok(Date.parse(String(snapshots[0].expires_at)) > Date.now());
+  assert.deepEqual(
+    Object.keys(snapshots[0]).sort(),
+    ["count", "expires_at", "location", "position", "snapshot_date", "source", "stage"],
+  );
+});
