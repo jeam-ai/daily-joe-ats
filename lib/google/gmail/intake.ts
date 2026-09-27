@@ -239,6 +239,10 @@ export async function previewImport(
           body: emailBody,
           filename: attachments[0]?.filename,
           from,
+          positions: state.hiringNeeds.map((need) => need.position),
+          locations: state.locations
+            ?.filter((location) => location.active)
+            .map((location) => location.name),
         });
         rows.push({
           messageId: message.id,
@@ -358,6 +362,10 @@ export async function previewImport(
           resume: extracted,
           filename: p.filename,
           from,
+          positions: state.hiringNeeds.map((need) => need.position),
+          locations: state.locations
+            ?.filter((location) => location.active)
+            .map((location) => location.name),
         });
         rows.push({
           messageId: message.id,
@@ -552,6 +560,10 @@ export async function confirmImport(
           resume: r.text,
           filename: r.filename,
           from: r.sender || "",
+          positions: state.hiringNeeds.map((need) => need.position),
+          locations: state.locations
+            ?.filter((location) => location.active)
+            .map((location) => location.name),
         });
       const a: Application = {
         id: applicationId,

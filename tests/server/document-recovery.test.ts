@@ -14,6 +14,7 @@ import {
 import {
   recoverApplicationDocument,
   recoverOneDeferredDocument,
+  refreshStoredEvidenceBatch,
 } from "../../lib/server/document-recovery";
 import { getState, saveState } from "../../lib/server/repository";
 import { initialState } from "../../lib/server/initial-state";
@@ -190,4 +191,91 @@ test("sparse PDF evidence receives one automatic local OCR upgrade, not an endle
     false,
   );
   assert.equal(calls, 1);
+});
+test("saved evidence refresh updates missing skills once without Gmail or workflow changes", async () => {
+  await transaction(async (tx) => {
+    const state = await getState(tx);
+    const application = state.applications[0];
+    application.applicant.skills = "";
+    application.applicant.location = "443 Zone 4, Fictional Barangay,";
+    application.information!.fields.residence = {
+      source: "Resume",
+      evidence: "Original address line",
+      confidence: "Confident",
+    };
+    await tx.query("UPDATE resumes SET extracted_text=$1 WHERE id=$2", [
+      seal(
+        "FICTIONAL TEST PERSON\nAddress: 443 Zone 4, Fictional Barangay,\nCamarines Sur, Philippines\nSKILLS AND COMPETENCIES\n• Good communication skills\n• Basic accounting and reporting\nEDUCATION\nHigh school graduate",
+        process.env.TOKEN_ENCRYPTION_KEY!,
+      ),
+      application.resumeId,
+    ]);
+    await saveState(tx, state, { sync: false });
+  });
+  assert.deepEqual(await refreshStoredEvidenceBatch(1), {
+    examined: 1,
+    updated: 1,
+  });
+  assert.deepEqual(await refreshStoredEvidenceBatch(1), {
+    examined: 0,
+    updated: 0,
+  });
+  await transaction(async (tx) => {
+    const state = await getState(tx);
+    state.applications[0].position =
+      "Applied position was not clearly stated in the submitted application.";
+    state.applications[0].location =
+      "Preferred work location was not clearly stated in the submitted application.";
+    state.locations ||= [];
+    state.locations.push({
+      id: "new-branch-from-report",
+      name: "Fictional New Branch",
+      city: "",
+      province: "",
+      active: true,
+    });
+    state.hiringNeeds.push({
+      id: "new-need-from-report",
+      position: "Social Media Manager",
+      location: "Fictional New Branch",
+      slots: 1,
+      filled: 0,
+      urgency: "High",
+      targetDate: "2026-10-15",
+      status: "Open",
+      criteria: [],
+      qualifications: "",
+      questions: "",
+    });
+    await saveState(tx, state, { sync: false });
+    await putRecord(
+      tx,
+      "application_sources",
+      state.applications[0].id,
+      seal(
+        {
+          subject:
+            "Application for Social Media Manager - Fictional New Branch",
+          body: "I am applying for Social Media Manager at Fictional New Branch.",
+          from: "<fixture@example.invalid>",
+        },
+        process.env.TOKEN_ENCRYPTION_KEY!,
+      ),
+    );
+  });
+  assert.deepEqual(await refreshStoredEvidenceBatch(1), {
+    examined: 1,
+    updated: 1,
+  });
+  const afterConfiguration = await readTransaction(
+    async (tx) => (await getState(tx)).applications[0],
+  );
+  assert.equal(afterConfiguration.position, "Social Media Manager");
+  assert.equal(afterConfiguration.location, "Fictional New Branch");
+  const saved = await readTransaction(
+    async (tx) => (await getState(tx)).applications[0],
+  );
+  assert.match(saved.applicant.skills || "", /Communication Skills/i);
+  assert.match(saved.applicant.location, /Camarines Sur, Philippines/);
+  assert.equal(saved.stage, "Screening");
 });

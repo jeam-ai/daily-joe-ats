@@ -10,7 +10,11 @@ import {
 } from "@/lib/server/ai-extraction";
 import { safeError } from "@/lib/server/response";
 import { SafeError } from "@/lib/server/config";
-import { recoverOneDeferredDocument } from "@/lib/server/document-recovery";
+import {
+  recoverOneDeferredDocument,
+  refreshStoredEvidenceBatch,
+} from "@/lib/server/document-recovery";
+import { reportIssue } from "@/lib/server/diagnostics";
 export const runtime = "nodejs";
 export const maxDuration = 120;
 export async function GET(request: Request) {
@@ -35,6 +39,9 @@ export async function GET(request: Request) {
       // compete with the ten-message intake batch.
       after(async () => {
         const recovered = await recoverOneDeferredDocument().catch(() => false);
+        await refreshStoredEvidenceBatch(10).catch(() =>
+          reportIssue("documents.extraction"),
+        );
         if (!recovered && ready && data.enabled && data.configured)
           await runExtractionJobs(2).catch(() => undefined);
       });

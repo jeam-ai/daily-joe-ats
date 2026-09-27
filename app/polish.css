@@ -1519,14 +1519,14 @@ th,
 .information-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 28px;
-  padding: 20px 24px;
+  gap: 20px;
+  padding: 18px 24px;
   margin: 0;
 }
 .information-column {
   display: grid;
   align-content: start;
-  gap: 18px;
+  gap: 15px;
   min-width: 0;
 }
 .information-item {
@@ -1554,6 +1554,10 @@ th,
 }
 .information-list li {
   padding-left: 1px;
+}
+.applicant-information > .padded > .info-banner,
+.applicant-information > .padded > .warning-banner {
+  margin-bottom: 16px;
 }
 .information-grid details {
   font-size: 12px;

@@ -118,6 +118,42 @@ test("built-in resume sections recover skills and job history without AI", () =>
   assert.match(result.certifications, /Food Safety Training/);
   assert.equal(result.sources.skills, "Resume");
 });
+test("skills and competencies plus a wrapped postal address are recovered without a false first-name conflict", () => {
+  const result = intakeEvidence({
+    subject: "Barista application - Naga City",
+    from: "Fictional <fixture@example.invalid>",
+    resume:
+      "FICTIONAL TEST PERSON\nAddress: 443 Zone 4, Fictional Barangay,\nCamarines Sur, Philippines\nContact Number: 09123456789\nEXPERIENCE\nGraphic Designer\nExample Company\n2024-Present\nSKILLS AND COMPETENCIES\n• Good communication skills\n• Basic accounting and reporting\nEDUCATION\n2022-Present - COLLEGE\nExample University",
+  });
+  assert.equal(
+    result.residence,
+    "443 Zone 4, Fictional Barangay, Camarines Sur, Philippines",
+  );
+  assert.match(result.skills, /Good Communication Skills/i);
+  assert.match(result.skills, /Basic Accounting And Reporting/i);
+  assert.doesNotMatch(result.experienceDetails, /Good communication/i);
+  assert.equal(result.warnings.length, 0);
+  const application = {
+    applicant: {
+      name: "Fictional Test Person",
+      location: "443 Zone 4, Fictional Barangay,",
+      skills: "",
+    },
+    information: {
+      fields: {
+        residence: {
+          source: "Resume",
+          confidence: "Confident",
+          evidence: "Original address line",
+        },
+      },
+      conflicts: [],
+    },
+  } as unknown as Application;
+  applyRecoveredResumeEvidence(application, result);
+  assert.equal(application.applicant.location, result.residence);
+  assert.ok(application.applicant.skills);
+});
 test("resume filename can recover an uncertain name and subject role omits the sender suffix", () => {
   const result = intakeEvidence({
     subject: "Application for Junior Data Analyst - Fictional Person",
@@ -139,6 +175,17 @@ test("resume filename can recover an uncertain name and subject role omits the s
   applyRecoveredResumeEvidence(application, result);
   assert.equal(application.applicant.name, "Fictional Person");
   assert.equal(application.position, "Junior Data Analyst");
+});
+test("configured vacancies can identify explicitly submitted branch and specific role", () => {
+  const result = intakeEvidence({
+    subject: "Application for Area Supervisor - Daet & Sipocot",
+    from: "<fixture@example.invalid>",
+    positions: ["Area Supervisor", "Supervisor"],
+    locations: ["Daet & Sipocot"],
+  });
+  assert.equal(result.position, "Area Supervisor");
+  assert.equal(result.location, "Daet & Sipocot");
+  assert.equal(result.sources.location, "Email subject");
 });
 test("equivalent role wording still requires stated duration and absent content is not assessed", () => {
   const rules = [

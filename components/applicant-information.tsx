@@ -70,6 +70,11 @@ export function ApplicantInformation({
         .filter(Boolean),
     ),
   ];
+  const structuredItems = (value: string) =>
+    value
+      .split(/\s+·\s+|\n+/)
+      .map((item) => item.trim())
+      .filter(Boolean);
   const display = (key: string, value?: string) => {
     if (missingInformation(value))
       return key === "position"
@@ -87,7 +92,7 @@ export function ApplicantInformation({
       : normalized;
   };
   return (
-    <Card className="spaced">
+    <Card className="spaced applicant-information">
       <div className="card-heading">
         <div>
           <h2>Applicant information</h2>
@@ -118,6 +123,17 @@ export function ApplicantInformation({
                     <ul className="information-list">
                       {listItems(value!).map((item) => (
                         <li key={item}>{formalFact(key, item)}</li>
+                      ))}
+                    </ul>
+                  ) : (key === "education" || key === "experienceDetails") &&
+                    !missingInformation(value) &&
+                    structuredItems(value!).length > 1 &&
+                    structuredItems(value!).length <= 10 ? (
+                    <ul className="information-list">
+                      {structuredItems(value!).map((item, index) => (
+                        <li key={`${index}-${item}`}>
+                          {formalFact(key, item)}
+                        </li>
                       ))}
                     </ul>
                   ) : (

@@ -32,15 +32,24 @@ import Link from "next/link";
 import { QualificationEditor } from "./qualification-editor";
 import type { QualificationRule } from "@/types";
 import { canManage } from "@/lib/data-policy";
+import { planVacancyReportImport } from "@/lib/vacancy-report";
+import { clientFetch } from "@/lib/client-request";
 export function HiringNeeds() {
-  const { state, update, notify, saving, dataset } = useApp();
+  const { state, update, notify, refresh, saving, dataset } = useApp();
   const params = useSearchParams();
   const [editing, setEditing] = useState<string | null>(
     params.get("new") ? "new" : params.get("edit"),
   );
   const [rules, setRules] = useState<QualificationRule[] | null>(null);
   const [filter, setFilter] = useState("Open");
+  const [importOpen, setImportOpen] = useState(false);
+  const [importing, setImporting] = useState(false);
   if (!state) return <LoadingSkeleton />;
+  const reportPlan = planVacancyReportImport(state);
+  const canImportReport =
+    dataset === "real" &&
+    state.currentUser?.role === "Admin" &&
+    reportPlan.needs.length > 0;
   const existing = state.hiringNeeds.find((n) => n.id === editing);
   const rows = state.hiringNeeds.filter(
     (n) => filter === "All" || n.status === filter,
@@ -95,6 +104,27 @@ export function HiringNeeds() {
       setRules(null);
     }
   }
+  async function importReport() {
+    setImporting(true);
+    try {
+      const response = await clientFetch("/api/hiring-needs/report-import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ confirmed: true }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw Error(result.error || "Vacancy import failed.");
+      await refresh();
+      setImportOpen(false);
+      notify(
+        `${result.createdNeeds} hiring needs added (${result.createdSlots} slots).`,
+      );
+    } catch (error) {
+      notify((error as Error).message, "error");
+    } finally {
+      setImporting(false);
+    }
+  }
   return (
     <>
       <div className="page-heading">
@@ -103,23 +133,34 @@ export function HiringNeeds() {
           <h1>Hiring Needs</h1>
           <p>The right people. The right place. The right time.</p>
         </div>
-        <Button
-          disabled={
-            !canManage(state.currentUser) || saving || dataset === "demo"
-          }
-          title={
-            dataset === "demo"
-              ? "Use the generated demo hiring needs, or exit demo to create a real request."
-              : undefined
-          }
-          onClick={() => {
-            setRules([]);
-            setEditing("new");
-          }}
-        >
-          <Plus size={17} />
-          New Hiring Need
-        </Button>
+        <div className="button-row">
+          {canImportReport && (
+            <Button
+              variant="secondary"
+              disabled={saving || importing}
+              onClick={() => setImportOpen(true)}
+            >
+              Add Sep 21 vacancies
+            </Button>
+          )}
+          <Button
+            disabled={
+              !canManage(state.currentUser) || saving || dataset === "demo"
+            }
+            title={
+              dataset === "demo"
+                ? "Use the generated demo hiring needs, or exit demo to create a real request."
+                : undefined
+            }
+            onClick={() => {
+              setRules([]);
+              setEditing("new");
+            }}
+          >
+            <Plus size={17} />
+            New Hiring Need
+          </Button>
+        </div>
       </div>
       <div className="metrics-grid vacancy-metrics" aria-label="Vacancy report">
         <MetricCard
@@ -393,6 +434,37 @@ export function HiringNeeds() {
               </Button>
             </div>
           </form>
+        </Modal>
+      )}
+      {importOpen && (
+        <Modal
+          busy={importing}
+          title="Add September 21 vacancies"
+          onClose={() => setImportOpen(false)}
+        >
+          <p>
+            Add {reportPlan.needs.length} itemized hiring requests (
+            {reportPlan.needs.reduce((total, need) => total + need.slots, 0)}{" "}
+            slots) with an October 15, 2026 target date. Role criteria are
+            editable suggestions, not requirements stated in the report.
+          </p>
+          <p className="retention-inline">
+            The report prints 19 Operations slots, but its itemized rows total
+            18. Only the 18 identifiable Operations slots and 2 Head Office
+            slots will be added. The unexplained slot will not be invented.
+          </p>
+          <div className="modal-actions">
+            <Button
+              variant="secondary"
+              disabled={importing}
+              onClick={() => setImportOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button disabled={importing} onClick={importReport}>
+              {importing ? "Adding…" : "Add verified rows"}
+            </Button>
+          </div>
         </Modal>
       )}
     </>

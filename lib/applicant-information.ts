@@ -96,7 +96,21 @@ export function applyRecoveredResumeEvidence(
       !!evidence.name &&
       current?.trim().toLocaleLowerCase() ===
         `${value} - ${evidence.name}`.toLocaleLowerCase();
-    if (!missingInformation(current) && !subjectPositionIncludesName) continue;
+    const longerResumeAddress =
+      key === "residence" &&
+      incoming.fields.residence?.source === "Resume" &&
+      fields.residence?.source === "Resume" &&
+      !!current &&
+      value
+        .toLocaleLowerCase()
+        .startsWith(current.trim().toLocaleLowerCase()) &&
+      value.length > current.trim().length + 4;
+    if (
+      !missingInformation(current) &&
+      !subjectPositionIncludesName &&
+      !longerResumeAddress
+    )
+      continue;
     if (key === "position" || key === "location")
       application[key] = formalFact(key, value);
     else if (key === "residence")
@@ -105,7 +119,15 @@ export function applyRecoveredResumeEvidence(
     if (incoming.fields[key]) fields[key] = incoming.fields[key];
   }
   application.information.conflicts = [
-    ...new Set([...application.information.conflicts, ...incoming.conflicts]),
+    ...new Set([
+      ...application.information.conflicts.filter(
+        (conflict) =>
+          !/information conflict detected: resume identifies .*email display name/i.test(
+            conflict,
+          ) || incoming.conflicts.some((fresh) => fresh === conflict),
+      ),
+      ...incoming.conflicts,
+    ]),
   ].slice(0, 12);
 }
 export function extractionReasons(a: Application) {

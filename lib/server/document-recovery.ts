@@ -1,4 +1,5 @@
 import "server-only";
+import { createHash } from "node:crypto";
 import type { User } from "@/types";
 import { canEdit } from "@/lib/data-policy";
 import { unseal, seal } from "@/lib/auth/security";
@@ -27,6 +28,114 @@ const sparse = (warnings?: string[]) =>
     /very little readable text was extracted/i.test(warning),
   );
 const OCR_UPGRADE = "bundled-english-v1";
+const EVIDENCE_PARSER_VERSION = "skills-address-v2";
+
+// Re-evaluate saved text after a deterministic parser improvement. This does
+// not fetch Gmail, write files, call AI, or touch HR-verified fields/stages.
+export async function refreshStoredEvidenceBatch(limit = 10, onlyId?: string) {
+  return transaction(async (tx) => {
+    const state = await getState(tx);
+    const processed =
+      (await readRecord<Record<string, string>>(
+        tx,
+        "document_recovery",
+        "evidence_parser",
+      )) || {};
+    const positions = state.hiringNeeds
+      .filter((need) => !need.isDemo && need.status === "Open")
+      .map((need) => need.position);
+    const locations = (state.locations || [])
+      .filter((location) => location.active)
+      .map((location) => location.name);
+    const vocabulary = createHash("sha256")
+      .update(
+        JSON.stringify([positions.slice().sort(), locations.slice().sort()]),
+      )
+      .digest("hex")
+      .slice(0, 12);
+    const candidates = state.applications
+      .filter(
+        (item) =>
+          !item.isDemo &&
+          !item.deletedAt &&
+          !!item.resumeId &&
+          (!onlyId || item.id === onlyId) &&
+          processed[item.id] !==
+            `${item.resumeId}:${EVIDENCE_PARSER_VERSION}:${vocabulary}`,
+      )
+      .slice(0, Math.max(1, Math.min(limit, 10)));
+    let updated = 0;
+    for (const application of candidates) {
+      processed[application.id] =
+        `${application.resumeId}:${EVIDENCE_PARSER_VERSION}:${vocabulary}`;
+      const resume = (
+        await tx.query(
+          "SELECT filename,extracted_text FROM resumes WHERE id=$1",
+          [application.resumeId],
+        )
+      )[0];
+      if (!resume?.extracted_text) continue;
+      const text = unseal<string>(
+        String(resume.extracted_text),
+        config().encryptionKey,
+      );
+      const savedSource = await readRecord<string>(
+        tx,
+        "application_sources",
+        application.id,
+      );
+      const source = savedSource
+        ? unseal<{
+            subject: string;
+            body: string;
+            from: string;
+          }>(savedSource, config().encryptionKey)
+        : {
+            subject: application.originalSubject || "",
+            body: "",
+            from: application.applicant.email,
+          };
+      const before = JSON.stringify({
+        applicant: application.applicant,
+        information: application.information,
+        position: application.position,
+        location: application.location,
+      });
+      applyRecoveredResumeEvidence(
+        application,
+        intakeEvidence({
+          ...source,
+          filename: String(resume.filename),
+          resume: text,
+          positions,
+          locations,
+        }),
+      );
+      if (
+        before !==
+        JSON.stringify({
+          applicant: application.applicant,
+          information: application.information,
+          position: application.position,
+          location: application.location,
+        })
+      ) {
+        updated++;
+        await audit(
+          tx,
+          "System",
+          "application.evidence_parser_refreshed",
+          application.id,
+          { version: EVIDENCE_PARSER_VERSION },
+        );
+      }
+    }
+    if (candidates.length)
+      await putRecord(tx, "document_recovery", "evidence_parser", processed);
+    if (updated) await saveState(tx, state, { sync: false });
+    return { examined: candidates.length, updated };
+  });
+}
 
 export async function recoverApplicationDocument(
   id: string,
@@ -35,7 +144,8 @@ export async function recoverApplicationDocument(
 ) {
   const actor = user?.email || "System";
   const snapshot = await readTransaction(async (tx) => {
-    const application = (await getState(tx)).applications.find(
+    const state = await getState(tx);
+    const application = state.applications.find(
       (item) => item.id === id && !item.deletedAt,
     );
     if (!application) throw new SafeError("Applicant not found.", 404);
@@ -59,7 +169,16 @@ export async function recoverApplicationDocument(
       )
     )[0];
     const email = await readRecord<string>(tx, "application_sources", id);
-    return { application, resume, source, email };
+    return {
+      application,
+      resume,
+      source,
+      email,
+      positions: state.hiringNeeds.map((need) => need.position),
+      locations: state.locations
+        ?.filter((location) => location.active)
+        .map((location) => location.name),
+    };
   });
   await transaction((tx) =>
     audit(tx, actor, "resume.processing_requested", id, {
@@ -83,6 +202,8 @@ export async function recoverApplicationDocument(
     ...submitted,
     filename: String(snapshot.resume.filename),
     resume: document.text,
+    positions: snapshot.positions,
+    locations: snapshot.locations,
   });
   await transaction(async (tx) => {
     const state = await getState(tx);

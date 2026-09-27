@@ -218,7 +218,14 @@ export async function enrichApplicants(user: User, ids: string[]) {
       id,
       text,
       source,
-      evidence: intakeEvidence({ ...source, resume: text }),
+      evidence: intakeEvidence({
+        ...source,
+        resume: text,
+        positions: snapshot.hiringNeeds.map((need) => need.position),
+        locations: snapshot.locations
+          ?.filter((location) => location.active)
+          .map((location) => location.name),
+      }),
       before: a,
     });
   }

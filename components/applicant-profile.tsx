@@ -9,7 +9,7 @@ import {
   workflowTemplate,
 } from "@/lib/email-templates";
 import { EmailHistory, ViewEmail } from "./email-history";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { canManage, canEdit } from "@/lib/data-policy";
 import { ApplicantEditor, DeleteApplicantDialog } from "./applicant-management";
@@ -144,6 +144,7 @@ export function ApplicantProfile({ id }: { id: string }) {
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
+  const evidenceChecked = useRef(new Set<string>());
   const [pendingChange, setPendingChange] = useState<{
     action: string;
     value: Application;
@@ -167,6 +168,35 @@ export function ApplicantProfile({ id }: { id: string }) {
       current = false;
     };
   }, [state?.revision, state?.applications.length, id, ensureApplication]);
+  useEffect(() => {
+    const application = state?.applications.find((item) => item.id === id);
+    if (
+      !application?.resumeId ||
+      application.isDemo ||
+      !canManage(state?.currentUser) ||
+      evidenceChecked.current.has(id)
+    )
+      return;
+    evidenceChecked.current.add(id);
+    void requestJson<{ updated: number }>(`/api/applicants/${id}/processing`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refreshStoredEvidence: true }),
+    })
+      .then((result) => {
+        if (result.updated) return refresh({ clearDetails: true });
+      })
+      .catch(() => {
+        // Normal profile loading remains available; the scheduled evidence
+        // pass and Error Center handle an unavailable background refresh.
+      });
+  }, [
+    id,
+    state?.revision,
+    state?.applications.length,
+    state?.currentUser,
+    refresh,
+  ]);
   if (!state) return <LoadingSkeleton />;
   const a = state.applications.find((a) => a.id === id);
   if (!a) if (detailLoading) return <LoadingSkeleton />;
