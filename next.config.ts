@@ -6,6 +6,14 @@ const ocrRuntimeFiles = [
   "./node_modules/tesseract.js/src/**/*",
   "./node_modules/tesseract.js-core/**/*",
   "./node_modules/wasm-feature-detect/**/*",
+  // The separate worker is not statically traced. Keep its direct package
+  // dependencies beside it, including bmp-js used by setImage.
+  "./node_modules/bmp-js/**/*",
+  "./node_modules/idb-keyval/**/*",
+  "./node_modules/is-url/**/*",
+  "./node_modules/node-fetch/**/*",
+  "./node_modules/regenerator-runtime/**/*",
+  "./node_modules/zlibjs/**/*",
 ];
 const config: NextConfig = {
   serverExternalPackages: [
