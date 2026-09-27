@@ -35,6 +35,7 @@ import {
 } from "./ui";
 import { formatDate, formatTime } from "@/lib/dates";
 import { requestJson } from "@/lib/client-request";
+import { applicantDisplayName } from "@/lib/applicant-information";
 type RetentionSnapshot = {
   dryRun: boolean;
   queue: {
@@ -81,14 +82,14 @@ export function Dashboard() {
   );
   const monthly = summary?.currentMonthByStatus || {};
   const metrics = [
-    ["Total Applications", Object.values(monthly).reduce((sum, count) => sum + (count || 0), 0), UsersRound, "Received this month", ""],
     [
-      "New",
-      monthly.New || 0,
-      Inbox,
-      "Ready for a first look",
-      "New",
+      "Total Applications",
+      Object.values(monthly).reduce((sum, count) => sum + (count || 0), 0),
+      UsersRound,
+      "Received this month",
+      "",
     ],
+    ["New", monthly.New || 0, Inbox, "Ready for a first look", "New"],
     [
       "For Review",
       monthly["For Review"] || 0,
@@ -110,13 +111,7 @@ export function Dashboard() {
       "Conversations in progress",
       "interviews",
     ],
-    [
-      "Hired",
-      monthly.Hired || 0,
-      UserCheck,
-      "New beginnings",
-      "Hired",
-    ],
+    ["Hired", monthly.Hired || 0, UserCheck, "New beginnings", "Hired"],
     [
       "Rejected",
       monthly.Rejected || 0,
@@ -257,10 +252,7 @@ export function Dashboard() {
                     <div className="hiring-slots">
                       <strong>{need.slots - need.filled} open slots</strong>
                       <span>
-                        {
-                          summary?.activeByHiringNeed[need.id] || 0
-                        }{" "}
-                        in pipeline
+                        {summary?.activeByHiringNeed[need.id] || 0} in pipeline
                       </span>
                     </div>
                     <div className="hiring-progress">
@@ -292,9 +284,9 @@ export function Dashboard() {
                   href={`/applications/${a.id}`}
                   className="recent-row"
                 >
-                  <Avatar name={a.applicant.name} />
+                  <Avatar name={applicantDisplayName(a)} />
                   <div>
-                    <strong>{a.applicant.name}</strong>
+                    <strong>{applicantDisplayName(a)}</strong>
                     <span>
                       {a.position} · {a.location}
                     </span>
@@ -442,16 +434,22 @@ export function Dashboard() {
                 >
                   <div className="calendar-tile">
                     <span>
-                      {new Date(interview.scheduledAt).toLocaleDateString("en-US", {
-                        timeZone: timezone,
-                        month: "long",
-                      })}
+                      {new Date(interview.scheduledAt).toLocaleDateString(
+                        "en-US",
+                        {
+                          timeZone: timezone,
+                          month: "long",
+                        },
+                      )}
                     </span>
                     <strong>
-                      {new Date(interview.scheduledAt).toLocaleDateString("en-US", {
-                        timeZone: timezone,
-                        day: "numeric",
-                      })}
+                      {new Date(interview.scheduledAt).toLocaleDateString(
+                        "en-US",
+                        {
+                          timeZone: timezone,
+                          day: "numeric",
+                        },
+                      )}
                     </strong>
                   </div>
                   <div>

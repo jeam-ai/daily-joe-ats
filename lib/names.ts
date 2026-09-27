@@ -6,7 +6,7 @@ export function formalName(value: string, surnameFirst = false) {
     return name;
   if (name.includes(",")) {
     const [last, ...given] = name.split(",");
-    name = `${given.join(" ").trim()} ${last.trim()}`;
+    name = `${given.join(" ").trim()} ${last.trim()}`.replace(/\s+/g, " ");
   } else if (surnameFirst) {
     const [last, ...given] = name.split(" ");
     name = `${given.join(" ")} ${last}`;
@@ -24,6 +24,20 @@ export function formalName(value: string, surnameFirst = false) {
         .replace(/^Mc\p{L}/u, (s) => s.slice(0, 2) + s.slice(2).toUpperCase());
     })
     .join(" ");
+}
+export function plausiblePersonName(value: string) {
+  const words = value
+    .trim()
+    .split(/[\s,]+/)
+    .filter(Boolean);
+  return (
+    words.length >= 2 &&
+    words.length <= 5 &&
+    /^[\p{L}][\p{L}\s.,'’–-]+$/u.test(value) &&
+    !/\b(?:application|applying|writing|interested|interest|seeking|looking|job|post|position|opportunity|candidate|work|express|available)\b/i.test(
+      value,
+    )
+  );
 }
 export function nameParts(name: string) {
   const words = formalName(name).split(" ");

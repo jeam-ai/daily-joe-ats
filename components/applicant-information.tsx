@@ -6,7 +6,11 @@ import { Card, Badge } from "./ui";
 import { Button } from "./ui";
 import { Pencil } from "lucide-react";
 import { useApp } from "./provider";
-import { missingInformation } from "@/lib/applicant-information";
+import {
+  applicantDisplayName,
+  missingInformation,
+} from "@/lib/applicant-information";
+import { formalFact } from "@/lib/formal-facts";
 export function ApplicantInformation({
   application: a,
   editable = false,
@@ -46,7 +50,7 @@ export function ApplicantInformation({
   }, [a.id, state?.revision]);
   const need = state?.hiringNeeds.find((n) => n.id === a.hiringNeedId);
   const rows = [
-    ["name", "Full name", a.applicant.name],
+    ["name", "Full name", applicantDisplayName(a)],
     ["phone", "Phone", a.applicant.phone],
     ["residence", "Residence / address", a.applicant.location],
     ["position", "Applied position", a.position],
@@ -56,7 +60,32 @@ export function ApplicantInformation({
     ["experienceDetails", "Experience", a.applicant.experienceDetails],
     ["skills", "Skills", a.applicant.skills],
     ["certifications", "Certifications", a.applicant.certifications],
+  ] as const;
+  const columns = [rows.slice(0, 5), rows.slice(5)];
+  const listItems = (value: string) => [
+    ...new Set(
+      value
+        .split(/\n|[;•]|,\s*(?=\p{L})/u)
+        .map((item) => item.replace(/^[-–]\s*/, "").trim())
+        .filter(Boolean),
+    ),
   ];
+  const display = (key: string, value?: string) => {
+    if (missingInformation(value))
+      return key === "position"
+        ? "Applied position was not clearly stated in the submission."
+        : key === "location"
+          ? "Preferred work location was not clearly stated."
+          : key === "residence"
+            ? "Residence not confirmed from submitted information."
+            : "Not stated in submitted information";
+    const normalized = formalFact(key, value!);
+    return key === "experienceDetails" &&
+      !/[.!?]$/.test(normalized) &&
+      !normalized.includes("\n")
+      ? `${normalized}.`
+      : normalized;
+  };
   return (
     <Card className="spaced">
       <div className="card-heading">
@@ -78,33 +107,37 @@ export function ApplicantInformation({
         )}
       </div>
       <dl className="information-grid">
-        {rows.map(([key, label, value]) => (
-          <div key={key}>
-            <dt>{label}</dt>
-            <dd>
-              {missingInformation(value)
-                ? key === "position"
-                  ? "Applied position was not clearly stated in the submission."
-                  : key === "location"
-                    ? "Preferred work location was not clearly stated."
-                    : key === "residence"
-                      ? "Residence not confirmed from submitted information."
-                      : "Not stated in submitted information"
-                : value}
-              {a.information?.fields[key!] && (
-                <>
-                  <br />
-                  <small className="muted">
-                    {a.information.fields[key!].source} ·{" "}
-                    {a.information.fields[key!].confidence}
-                  </small>
-                  <details>
-                    <summary>Evidence</summary>
-                    <p>{a.information.fields[key!].evidence}</p>
-                  </details>
-                </>
-              )}
-            </dd>
+        {columns.map((column, index) => (
+          <div className="information-column" key={index}>
+            {column.map(([key, label, value]) => (
+              <div className="information-item" key={key}>
+                <dt>{label}</dt>
+                <dd>
+                  {(key === "skills" || key === "certifications") &&
+                  !missingInformation(value) ? (
+                    <ul className="information-list">
+                      {listItems(value!).map((item) => (
+                        <li key={item}>{formalFact(key, item)}</li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <span>{display(key, value)}</span>
+                  )}
+                  {a.information?.fields[key] && (
+                    <>
+                      <small className="muted information-source">
+                        {a.information.fields[key].source} ·{" "}
+                        {a.information.fields[key].confidence}
+                      </small>
+                      <details>
+                        <summary>Evidence</summary>
+                        <p>{a.information.fields[key].evidence}</p>
+                      </details>
+                    </>
+                  )}
+                </dd>
+              </div>
+            ))}
           </div>
         ))}
       </dl>

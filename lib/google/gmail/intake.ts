@@ -573,6 +573,8 @@ export async function confirmImport(
           education: extracted.education,
           availability: extracted.availability,
           experienceDetails: extracted.experienceDetails,
+          skills: extracted.skills,
+          certifications: extracted.certifications,
         },
         position,
         location,

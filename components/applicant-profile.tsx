@@ -1,5 +1,6 @@
 "use client";
 import { ApplicantInformation } from "./applicant-information";
+import { applicantDisplayName } from "@/lib/applicant-information";
 import Link from "next/link";
 import { requestJson } from "@/lib/client-request";
 import {
@@ -380,7 +381,7 @@ export function ApplicantProfile({ id }: { id: string }) {
       <div className="profile-header">
         <div className="applicant-avatar-wrap">
           <Avatar
-            name={a.applicant.name}
+            name={applicantDisplayName(a)}
             imageUrl={
               a.applicantPhotoId
                 ? `/api/applicants/${a.id}/photo?v=${encodeURIComponent(a.applicantPhotoVersion || "1")}`
@@ -401,7 +402,7 @@ export function ApplicantProfile({ id }: { id: string }) {
         </div>
         <div>
           <div className="profile-name">
-            <h1>{a.applicant.name}</h1>
+            <h1>{applicantDisplayName(a)}</h1>
             <StatusBadge status={a.status} />
             {a.isDemo && <Badge tone="amber">DEMO DATA</Badge>}
           </div>
@@ -694,7 +695,7 @@ export function ApplicantProfile({ id }: { id: string }) {
                 <div>
                   <h2>Onboarding</h2>
                   <p>
-                    {a.applicant.name} · {a.position} · {a.location}
+                    {applicantDisplayName(a)} · {a.position} · {a.location}
                   </p>
                 </div>
               </div>
@@ -927,7 +928,8 @@ export function ApplicantProfile({ id }: { id: string }) {
           onClose={() => setPendingChange(null)}
         >
           <p>
-            <strong>{pendingChange.action}</strong> for {a.applicant.name}?
+            <strong>{pendingChange.action}</strong> for{" "}
+            {applicantDisplayName(a)}?
           </p>
           <p>This saves the update and audit history. No email will be sent.</p>
           <div className="modal-actions">
@@ -1014,9 +1016,9 @@ export function ApplicantProfile({ id }: { id: string }) {
         >
           <form onSubmit={confirm} className="form-stack">
             <div className="confirmation-summary">
-              <Avatar name={a.applicant.name} />
+              <Avatar name={applicantDisplayName(a)} />
               <div>
-                <strong>{a.applicant.name}</strong>
+                <strong>{applicantDisplayName(a)}</strong>
                 <p>
                   {a.position} · {a.location}
                 </p>

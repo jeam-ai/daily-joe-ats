@@ -114,6 +114,9 @@ export function ResumeViewer({ application: a }: { application: Application }) {
     );
   if (!document) return <LoadingSkeleton />;
   const extraction = document.extraction;
+  const processingPending = extraction?.warnings.some((warning) =>
+    /resume processing was deferred/i.test(warning),
+  );
   return (
     <div className="real-resume">
       <div className="resume-toolbar">
@@ -156,7 +159,11 @@ export function ResumeViewer({ application: a }: { application: Application }) {
       {extraction && (
         <div className="extraction-status">
           <Badge tone={extraction.warnings.length ? "amber" : "green"}>
-            {extraction.method === "text" ? "Text extracted" : "OCR processed"}
+            {processingPending
+              ? "Processing pending"
+              : extraction.method === "text"
+                ? "Text extracted"
+                : "OCR processed"}
             {extraction.confidence !== undefined
               ? ` · ${extraction.confidence}% OCR confidence`
               : ""}

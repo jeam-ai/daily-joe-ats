@@ -1,5 +1,6 @@
 import "server-only";
-import { formalName } from "@/lib/names";
+import { plausiblePersonName } from "@/lib/names";
+import { formalFact } from "@/lib/formal-facts";
 import { GoogleGenAI } from "@google/genai";
 import { createHash } from "node:crypto";
 import { z } from "zod";
@@ -92,6 +93,11 @@ const version = (a: Application) =>
       ]),
     )
     .digest("hex");
+const resumePending = (a: Application) =>
+  !!a.resumeId &&
+  !!a.extraction?.warnings.some((warning) =>
+    /resume processing was deferred/i.test(warning),
+  );
 export async function queueExtraction(
   tx: Transaction,
   a: Application,
@@ -102,7 +108,8 @@ export async function queueExtraction(
     "ai_extraction",
     "settings",
   );
-  if (!aiConfigured() || settings?.enabled === false) return;
+  if (!aiConfigured() || settings?.enabled === false || resumePending(a))
+    return;
   const reasons = extractionReasons(a);
   if (!reasons.length) return;
   const sourceVersion = version(a),
@@ -159,6 +166,12 @@ export function validateExtraction(
     if (!tokens.length || tokens.some((t) => !quote.includes(t)))
       throw Error("Unsupported value");
   }
+  result.fields = result.fields.filter(
+    (item) =>
+      item.field !== "name" ||
+      item.confidence === "Missing" ||
+      plausiblePersonName(item.value),
+  );
   return result;
 }
 export interface ExtractionProvider {
@@ -251,6 +264,13 @@ export async function runExtractionJobs(
         job.status = "Failed";
         job.error =
           "Applicant information changed. Saved HR information was preserved.";
+        job.attempts = 3;
+        await putRecord(tx, "extraction_jobs", job.id, job);
+        return null;
+      }
+      if (resumePending(a)) {
+        job.status = "Failed";
+        job.error = "The original resume is awaiting local processing.";
         job.attempts = 3;
         await putRecord(tx, "extraction_jobs", job.id, job);
         return null;
@@ -352,10 +372,10 @@ export async function runExtractionJobs(
           )
             continue;
           if (f.field === "position" || f.field === "location")
-            a[f.field] = f.value;
+            a[f.field] = formalFact(f.field, f.value);
           else
             (a.applicant as unknown as Record<string, unknown>)[key] =
-              f.field === "name" ? formalName(f.value) : f.value;
+              formalFact(f.field, f.value);
           a.information.fields[f.field] = {
             source: `AI extraction · ${f.source}`,
             evidence: f.evidence,

@@ -36,7 +36,8 @@ export function DocumentRecovery({
             <p>
               This reruns local extraction / OCR on the stored original.
               Verified HR qualification results and recruitment decisions are
-              preserved. No Gemini request is made.
+              preserved. If AI fallback is enabled, it runs separately after
+              the document is processed.
             </p>
             {error && (
               <p className="error-banner" role="alert">

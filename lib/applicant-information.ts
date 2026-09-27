@@ -1,10 +1,22 @@
 import type { Application } from "@/types";
 import type { intakeEvidence } from "./intake-evidence";
+import { formalFact } from "./formal-facts";
 export const missingInformation = (value?: string) =>
   !value?.trim() ||
   /requires review|not verified|not clearly stated|not confirmed from submitted information|^unknown$/i.test(
     value,
   );
+export function applicantDisplayName(application: Application) {
+  const name = application.applicant.name;
+  if (
+    !application.information?.fields.name?.verifiedBy &&
+    /\b(?:applying|writing|interest|job|position|post|opportunity)\b/i.test(
+      name,
+    )
+  )
+    return "Name needs verification";
+  return formalFact("name", name);
+}
 export function evidenceInformation(
   e: ReturnType<typeof intakeEvidence>,
 ): NonNullable<Application["information"]> {
@@ -32,6 +44,55 @@ export function evidenceInformation(
     ),
     conflicts: e.warnings,
   };
+}
+export function applyRecoveredResumeEvidence(
+  application: Application,
+  evidence: ReturnType<typeof intakeEvidence>,
+) {
+  const incoming = evidenceInformation(evidence);
+  application.information ||= { fields: {}, conflicts: [] };
+  const fields = application.information.fields;
+  // A resume identity is stronger than an unverified email sentence or sender
+  // display name. HR-verified names always take precedence.
+  if (
+    incoming.fields.name?.source === "Resume" &&
+    !fields.name?.verifiedBy &&
+    evidence.name &&
+    !missingInformation(evidence.name)
+  ) {
+    application.applicant.name = formalFact("name", evidence.name);
+    fields.name = incoming.fields.name;
+  }
+  for (const [key, value] of [
+    ["phone", evidence.phone],
+    ["education", evidence.education],
+    ["availability", evidence.availability],
+    ["experienceDetails", evidence.experienceDetails],
+    ["skills", evidence.skills],
+    ["certifications", evidence.certifications],
+    ["residence", evidence.residence],
+    ["position", evidence.position],
+    ["location", evidence.location],
+  ] as const) {
+    if (!value || missingInformation(value) || fields[key]?.verifiedBy)
+      continue;
+    const current =
+      key === "position" || key === "location"
+        ? application[key]
+        : key === "residence"
+          ? application.applicant.location
+          : application.applicant[key];
+    if (!missingInformation(current)) continue;
+    if (key === "position" || key === "location")
+      application[key] = formalFact(key, value);
+    else if (key === "residence")
+      application.applicant.location = formalFact(key, value);
+    else application.applicant[key] = formalFact(key, value);
+    if (incoming.fields[key]) fields[key] = incoming.fields[key];
+  }
+  application.information.conflicts = [
+    ...new Set([...application.information.conflicts, ...incoming.conflicts]),
+  ].slice(0, 12);
 }
 export function extractionReasons(a: Application) {
   if (a.isDemo || a.deletedAt) return [];

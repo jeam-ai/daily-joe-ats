@@ -1,5 +1,6 @@
 import { runExtractionJobs } from "@/lib/server/ai-extraction";
 import { drainEmailOutbox } from "@/lib/server/email-outbox";
+import { recoverOneDeferredDocument } from "@/lib/server/document-recovery";
 import { timingSafeEqual } from "node:crypto";
 import { syncIntake, intakeStatus } from "@/lib/google/gmail/sync";
 export const runtime = "nodejs";
@@ -21,6 +22,7 @@ export async function GET(request: Request) {
     const job = await intakeStatus();
     if (job.status !== "complete" || (!job.pending.length && !job.page)) break;
   }
+  if (Date.now() - started < 90000) await recoverOneDeferredDocument();
   if (Date.now() - started < 170000) await runExtractionJobs(1);
   return Response.json({ checked: true });
 }

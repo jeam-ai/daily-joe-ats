@@ -10,6 +10,7 @@ import {
 } from "@/lib/server/ai-extraction";
 import { safeError } from "@/lib/server/response";
 import { SafeError } from "@/lib/server/config";
+import { recoverOneDeferredDocument } from "@/lib/server/document-recovery";
 export const runtime = "nodejs";
 export const maxDuration = 120;
 export async function GET(request: Request) {
@@ -29,10 +30,14 @@ export async function GET(request: Request) {
             !!job.retryAt &&
             job.retryAt <= Date.now()),
       );
-      if (ready && data.enabled && data.configured)
-        // A short, bounded two-job burst lets automatic fallback keep up with
-        // Gmail batches without turning a status request into a long AI wait.
-        after(() => runExtractionJobs(2).catch(() => undefined));
+      // Resolve one retained Gmail original before asking AI to interpret
+      // email-only evidence. This is read-only for Gmail/Drive and does not
+      // compete with the ten-message intake batch.
+      after(async () => {
+        const recovered = await recoverOneDeferredDocument().catch(() => false);
+        if (!recovered && ready && data.enabled && data.configured)
+          await runExtractionJobs(2).catch(() => undefined);
+      });
       return Response.json(
         {
           enabled: data.enabled,

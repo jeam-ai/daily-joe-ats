@@ -23,6 +23,7 @@ for (const path of [
   "/settings/audit",
   "/settings/ai",
   "/settings/timekeeping",
+  "/settings/retention",
   "/login",
 ]) {
   const response = await fetch(base + path, { redirect: "manual" });
@@ -76,6 +77,9 @@ for (const path of [
   "/api/system?section=diagnostics",
   "/api/system?section=audit",
   "/api/system?section=ai",
+  "/api/system/retention",
+  "/api/reports/recruitment",
+  "/api/data-management",
   "/api/applicants/not-authorized/ai",
   "/api/workspace",
   "/api/applicants",
@@ -92,6 +96,7 @@ for (const path of [
 }
 for (const path of [
   "/api/system",
+  "/api/system/retention",
   "/api/applicants/not-authorized/ai",
   "/api/applicants/not-authorized/activity",
   "/api/applicants/not-authorized/processing",
@@ -119,4 +124,5 @@ for (const path of [
 console.log("PASS production API access boundaries");
 
 assert.equal((await fetch(base + "/api/cron/intake")).status, 401);
-console.log("PASS background intake requires a scheduler secret");
+assert.equal((await fetch(base + "/api/cron/cleanup")).status, 401);
+console.log("PASS background intake and cleanup require a scheduler secret");

@@ -1497,9 +1497,18 @@ th,
 .information-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 20px 28px;
-  padding: 24px;
+  gap: 28px;
+  padding: 20px 24px;
   margin: 0;
+}
+.information-column {
+  display: grid;
+  align-content: start;
+  gap: 18px;
+  min-width: 0;
+}
+.information-item {
+  min-width: 0;
 }
 .information-grid dt {
   color: var(--text-secondary);
@@ -1509,11 +1518,28 @@ th,
 .information-grid dd {
   margin: 0;
   overflow-wrap: anywhere;
-  line-height: 1.6;
+  line-height: 1.5;
+}
+.information-source {
+  display: block;
+  margin-top: 3px;
+}
+.information-list {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 2px;
+}
+.information-list li {
+  padding-left: 1px;
 }
 .information-grid details {
   font-size: 12px;
-  margin-top: 6px;
+  margin-top: 4px;
+}
+.information-grid details p {
+  margin: 5px 0 0;
+  line-height: 1.45;
 }
 .email-history {
   list-style: none;
@@ -1566,7 +1592,7 @@ progress {
   .information-grid {
     grid-template-columns: 1fr;
     padding: 18px;
-    gap: 16px;
+    gap: 18px;
   }
   .email-history li {
     flex-wrap: wrap;

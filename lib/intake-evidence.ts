@@ -1,4 +1,5 @@
-import { formalName } from "./names";
+import { formalName, plausiblePersonName } from "./names";
+import { formalFact } from "./formal-facts";
 import { senderName } from "./intake-matching";
 export interface IntakeEvidence {
   name: string;
@@ -9,6 +10,8 @@ export interface IntakeEvidence {
   education: string;
   availability: string;
   experienceDetails: string;
+  skills: string;
+  certifications: string;
   evidence: Record<string, string>;
   sources: Record<string, string>;
   nameUncertain: boolean;
@@ -129,29 +132,54 @@ export function intakeEvidence(input: {
                   : "Email body";
         }
   }
-  const named = (text: string) =>
-    text
-      .match(
-        /(?:\bmy name is|\b(?:full\s+)?name\s*:|\b(?:i am|i'm|this is))\s*([\p{L}][\p{L} .,'’-]{2,80}?)(?=\s*(?:,|\.|!|\?|\n|$))/iu,
+  const named = (text: string) => {
+    const candidate = (
+      text.match(
+        /(?:^|\n)\s*(?:full\s+)?name\s*[:–-]\s*([^\n]{2,100})/iu,
+      )?.[1] ||
+      text.match(
+        /(?:\bmy name is|\b(?:i am|i'm|this is))\s*([\p{L}][\p{L} .,'’-]{2,80}?)(?=\s*(?:,|\.|!|\?|\n|$))/iu,
       )?.[1]
+    )
       ?.replace(/\s+(?:po|please)$/i, "")
+      .replace(/[.!?]+$/, "")
       .trim();
+    if (
+      !candidate ||
+      !plausiblePersonName(candidate) ||
+      /^(?:a|an|my|writing|applying|interested|seeking|looking|excited|available|hoping|reaching|contacting|submitting|sending)\b/i.test(
+        candidate,
+      ) ||
+      /\b(?:application|interest|job|post|position|opportunity)\b/i.test(
+        candidate,
+      )
+    )
+      return undefined;
+    return candidate;
+  };
   const subjectName = subject
     .match(
       /^\s*([\p{L}][\p{L} .,'’-]{3,80}?)\s*[-–—|]\s*(?:resume|cv|curriculum vitae|job application)\b/iu,
     )?.[1]
     ?.trim();
-  const headingName = resume
+  const headingLines = resume
     .split(/\n/)
     .map((l) => l.trim())
-    .filter(Boolean)
+    .filter(Boolean);
+  const firstSection = headingLines.findIndex((line) =>
+    /^(?:contact|education|skills|experience|work experience|objective|objectives|profile|summary|about me)\s*(?::.*)?$/i.test(
+      line,
+    ),
+  );
+  const headingName = headingLines
+    .slice(0, firstSection < 0 ? 8 : firstSection)
     .slice(0, 8)
     .find(
       (l) =>
         /^[\p{L}][\p{L} .,'’-]{4,80}$/u.test(l) &&
         l.split(/\s+/).length >= 2 &&
         l.split(/\s+/).length <= 5 &&
-        !/resume|curriculum|vitae|address|contact|profile|personal|information|experience|education|skills|objective|university|college|school|bachelor|barista|cashier|supervisor|leader|street|barangay|camarines|philippines|city|summary|references|career|history|employment|certification|achievement|to obtain|seeking|applying|dear|thank you/i.test(
+        !/resume|curriculum|vitae|address|contact|profile|personal|information|experience|education|skills|objective|university|college|school|bachelor|barista|cashier|supervisor|leader|accounting|analyst|manager|staff|assistant|engineer|developer|administrator|intern|clerk|officer|executive|representative|specialist|recruitment|human resources|street|barangay|camarines|philippines|city|summary|references|career|history|employment|certification|achievement|to obtain|seeking|applying|dear|thank you/i.test(
           l,
         ),
     );
@@ -159,6 +187,40 @@ export function intakeEvidence(input: {
   const resumeName = explicitResumeName || headingName;
   const submittedName = named(body);
   const normalizeName = formalName;
+  const resumeLines = resume
+    .split(/\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const contactIndex = resumeLines.findIndex((line) =>
+    /^(?:contact|contact information|contact details)\s*:?$/i.test(line),
+  );
+  const contactLines =
+    contactIndex < 0
+      ? []
+      : resumeLines.slice(contactIndex + 1, contactIndex + 13);
+  const addressPattern = /^[\p{L}\d .'-]+,\s*[\p{L} .'-]+,\s*[\p{L} .'-]+$/u;
+  const joinedLine = (lines: string[], index: number) =>
+    lines[index].endsWith(",")
+      ? `${lines[index]} ${lines[index + 1] || ""}`
+      : lines[index];
+  const addressIsSafe = (line: string) =>
+    addressPattern.test(line) &&
+    !/@|(?:school|university|college|company|office)/i.test(line);
+  const contactAddress =
+    contactLines
+      .map((line, index) => joinedLine(contactLines, index))
+      .find(addressIsSafe) ||
+    resumeLines
+      .slice(0, 60)
+      .map((_, index) => ({
+        line: joinedLine(resumeLines, index),
+        nearby: resumeLines.slice(Math.max(0, index - 4), index + 5).join(" "),
+      }))
+      .find(
+        (candidate) =>
+          addressIsSafe(candidate.line) &&
+          /@|(?:\+63|0)9\d{2}/.test(candidate.nearby),
+      )?.line;
   const residence =
     (resume + "\n" + body)
       .match(
@@ -175,10 +237,15 @@ export function intakeEvidence(input: {
       )
       ?.trim()
       .slice(0, 180) ||
+    contactAddress ||
     "Not verified";
   if (residence !== "Not verified") {
     evidence.residence = "Explicit address: " + residence;
-    provenance.residence = resume.includes(residence) ? "Resume" : "Email body";
+    provenance.residence = resume
+      .replace(/\s+/g, " ")
+      .includes(residence.replace(/\s+/g, " "))
+      ? "Resume"
+      : "Email body";
   }
   const displayName = senderName(input.from || "");
   const name = normalizeName(
@@ -203,14 +270,44 @@ export function intakeEvidence(input: {
     );
   const text = resume + "\n" + body;
   const phone = text.match(/(?:\+63|0)9\d{2}[ -]?\d{3}[ -]?\d{4}/)?.[0] || "";
-  const education = text
-    .split(/\n/)
-    .filter((l) =>
-      /\b(?:bachelor|master|doctorate|high school|senior high|undergraduate|college graduate|degree in)\b/i.test(
-        l,
+  const sectionLines = (heading: RegExp, limit: number) => {
+    const lines = resume.split(/\n/).map((line) => line.trim());
+    const start = lines.findIndex((line) => heading.test(line));
+    if (start < 0) return [];
+    const found: string[] = [];
+    const inline = lines[start].split(":").slice(1).join(":").trim();
+    if (inline) found.push(inline);
+    for (const line of lines.slice(start + 1)) {
+      if (
+        /^(?:contact|education|skills|certifications?|job experience|work experience|employment history|professional experience|work history|references|about me|objectives?|profile|summary)\s*(?::.*)?$/i.test(
+          line,
+        )
+      )
+        break;
+      if (!line || /^[-–•]?\s*$/.test(line)) continue;
+      found.push(line.replace(/^[-–•]\s*/, ""));
+      if (found.length >= limit) break;
+    }
+    return found;
+  };
+  const educationLines = sectionLines(/^education\s*(?::.*)?$/i, 7);
+  const education = [
+    ...new Set([
+      ...educationLines.filter((line) =>
+        /\b(?:bachelor|master|doctorate|high school|senior high|undergraduate|college|university|degree|academic strand|honor|graduate|[12]\d{3})\b/i.test(
+          line,
+        ),
       ),
-    )
-    .slice(0, 3)
+      ...text
+        .split(/\n/)
+        .filter((line) =>
+          /\b(?:bachelor|master|doctorate|high school|senior high|undergraduate|college graduate|degree in)\b/i.test(
+            line,
+          ),
+        ),
+    ]),
+  ]
+    .slice(0, 5)
     .join(" · ")
     .slice(0, 600);
   const availability =
@@ -223,18 +320,32 @@ export function intakeEvidence(input: {
       )
       ?.trim()
       .slice(0, 300) || "";
+  const experienceLines = sectionLines(
+    /^(?:job experience|work experience|employment history|professional experience|work history)\s*(?::.*)?$/i,
+    7,
+  );
   const experienceDetails =
-    text
-      .match(
-        /(?:work(?:ing)?|employment|professional)\s+(?:experience|history)\s*[:\n]([\s\S]{0,800}?)(?=\n(?:education|skills|references|certifications)\b|$)/i,
-      )?.[1]
-      ?.trim()
+    (experienceLines.length
+      ? experienceLines.join(" · ")
+      : text.match(
+          /(?:job|work(?:ing)?|employment|professional)\s+(?:experience|history)\s*[:\n]([\s\S]{0,800}?)(?=\n(?:education|skills|references|certifications)\b|$)/i,
+        )?.[1] || ""
+    )
+      .trim()
       .slice(0, 600) || "";
+  const skills = sectionLines(/^skills?\s*(?::.*)?$/i, 8)
+    .join("\n")
+    .slice(0, 600);
+  const certifications = sectionLines(/^certifications?\s*(?::.*)?$/i, 6)
+    .join("\n")
+    .slice(0, 600);
   for (const [key, value] of Object.entries({
     phone,
     education,
     availability,
     experienceDetails,
+    skills,
+    certifications,
   }))
     if (value) {
       evidence[key] = value;
@@ -250,14 +361,16 @@ export function intakeEvidence(input: {
     warnings.push("Multiple preferred branches require HR verification.");
   return {
     name,
-    residence,
+    residence: formalFact("residence", residence),
     phone,
-    education,
-    availability,
-    experienceDetails,
+    education: formalFact("education", education),
+    availability: formalFact("availability", availability),
+    experienceDetails: formalFact("experienceDetails", experienceDetails),
+    skills: formalFact("skills", skills),
+    certifications: formalFact("certifications", certifications),
     position:
       detectedRoles.size === 1
-        ? [...detectedRoles][0]
+        ? formalFact("position", [...detectedRoles][0])
         : "Applied position was not clearly stated in the submitted application.",
     location:
       detectedLocations.size === 1

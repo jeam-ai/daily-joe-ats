@@ -29,6 +29,7 @@ import { requestJson, downloadFile } from "@/lib/client-request";
 import { ApplicantEditor, DeleteApplicantDialog } from "./applicant-management";
 import { ActionMenu } from "./action-menu";
 import { formatDate, monthKey } from "@/lib/dates";
+import { applicantDisplayName } from "@/lib/applicant-information";
 const daysUntil = (timestamp: number) =>
   Math.max(0, Math.ceil((timestamp - Date.now()) / 86400000));
 function talentRetentionWarning(application: Application) {
@@ -498,7 +499,10 @@ export function Applications({ talent = false }: { talent?: boolean }) {
                       className="applicant-cell"
                       href={`/applications/${a.id}`}
                     >
-                      <ApplicantCard name={a.applicant.name} reference={a.id} />
+                      <ApplicantCard
+                        name={applicantDisplayName(a)}
+                        reference={a.id}
+                      />
                     </Link>
                     {a.isDemo && <Badge tone="amber">DEMO</Badge>}
                     {a.queueState === "Queued" && <Badge>Queued</Badge>}
@@ -584,7 +588,7 @@ export function Applications({ talent = false }: { talent?: boolean }) {
                   </td>
                   <td>
                     <ActionMenu
-                      label={`Actions for ${a.applicant.name}`}
+                      label={`Actions for ${applicantDisplayName(a)}`}
                       items={[
                         {
                           label: "View Applicant",

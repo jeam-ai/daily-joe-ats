@@ -35,6 +35,7 @@ import {
 import { auditDetails, auditHistory } from "../../lib/server/audit";
 import { cachedHealth } from "../../lib/server/health";
 import { seal } from "../../lib/auth/security";
+import { validateExtraction } from "../../lib/server/ai-extraction";
 import type { User } from "../../types";
 import type { AiResult } from "../../types/operations";
 const root = process.cwd();
@@ -82,6 +83,40 @@ const provider: AiProvider = {
     return result;
   },
 };
+test("AI extraction cannot turn an application sentence into a person's name", () => {
+  const sentence =
+    "Interested in applying for the junior accounting analyst position";
+  const result = validateExtraction(
+    JSON.stringify({
+      fields: [
+        {
+          field: "name",
+          value: sentence,
+          source: "email",
+          evidence: sentence,
+          confidence: "Confident",
+        },
+        {
+          field: "position",
+          value: "junior accounting analyst",
+          source: "email",
+          evidence: sentence,
+          confidence: "Confident",
+        },
+      ],
+      conflicts: [],
+    }),
+    { email: sentence, resume: "", subject: "" },
+  );
+  assert.equal(
+    result.fields.some((field) => field.field === "name"),
+    false,
+  );
+  assert.equal(
+    result.fields.some((field) => field.field === "position"),
+    true,
+  );
+});
 test("optional AI Assist lifecycle, caching, explicit retry, stale evidence, and isolation", async () => {
   await transaction((tx) => putRecord(tx, "workspace", "main", initialState()));
   id = (

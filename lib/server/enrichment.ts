@@ -1,4 +1,5 @@
 import { evidenceInformation } from "@/lib/applicant-information";
+import { formalFact } from "@/lib/formal-facts";
 import { queueExtraction } from "./ai-extraction";
 import { recordIssue } from "./diagnostics";
 import "server-only";
@@ -252,6 +253,8 @@ export async function enrichApplicants(user: User, ids: string[]) {
         "education",
         "availability",
         "experienceDetails",
+        "skills",
+        "certifications",
         "residence",
         "position",
         "location",
@@ -259,8 +262,13 @@ export async function enrichApplicants(user: User, ids: string[]) {
         if (a.information.fields[key]?.verifiedBy) continue;
         const value = p.evidence[key];
         if (!value || /requires review|not verified/i.test(value)) continue;
-        if (key === "position" || key === "location") a[key] = value;
-        else a.applicant[key === "residence" ? "location" : key] = value;
+        if (key === "position" || key === "location")
+          a[key] = formalFact(key, value);
+        else
+          a.applicant[key === "residence" ? "location" : key] = formalFact(
+            key,
+            value,
+          );
         if (info.fields[key]) a.information.fields[key] = info.fields[key];
       }
       a.information.conflicts = info.conflicts;
