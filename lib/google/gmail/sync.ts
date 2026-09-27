@@ -190,9 +190,35 @@ export async function syncIntake(
     }
     job.message = "Finding new eligible applications in the official mailbox…";
     await checkpoint();
-    // Revisit the mailbox head independently of the older-page cursor.
-    // New arrivals must not wait behind a full window or a large backlog.
-    if (!job.headCheckedAt || now - job.headCheckedAt > 30000) {
+    // Always drain the durable older-page cursor before checking the mailbox
+    // head again. Otherwise a steady stream of new applications can keep
+    // being prepended to the pending list and starve older matching emails.
+    // The initial head fetch still makes a new arrival visible immediately;
+    // this branch guarantees the saved historical backlog finishes next.
+    if (!job.pending.length && job.page) {
+      stage = "mailbox-page";
+      job.message = "Backfilling older matching applications from the official mailbox…";
+      const page = await gmail<{
+        messages?: { id: string }[];
+        nextPageToken?: string;
+      }>(
+        token,
+        `messages?maxResults=100&q=${encodeURIComponent(query)}&pageToken=${encodeURIComponent(job.page)}`,
+      );
+      const known = new Set([
+        ...workspace.applications.map((a) => a.gmailMessageId),
+        ...(job.seenIds || []),
+      ]);
+      job.pending = (page.messages || [])
+        .map((message) => message.id)
+        .filter((id) => !known.has(id));
+      job.page = page.nextPageToken;
+      await checkpoint();
+    }
+    // Revisit the mailbox head independently once the prior historical page
+    // has been scheduled. This gives new arrivals priority without allowing
+    // them to permanently hide older matching messages.
+    if (!job.pending.length && (!job.headCheckedAt || now - job.headCheckedAt > 30000)) {
       stage = "mailbox-head";
       const head = await gmail<{
         messages?: { id: string }[];
@@ -210,7 +236,7 @@ export async function syncIntake(
       job.headCheckedAt = now;
       await checkpoint();
     }
-    if (!job.pending.length) {
+    if (!job.pending.length && !job.page) {
       stage = "mailbox-page";
       const page = await gmail<{
         messages?: { id: string }[];
