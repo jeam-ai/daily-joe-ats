@@ -176,13 +176,9 @@ export function extractionReasons(a: Application) {
     !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(a.applicant.email)
   )
     reasons.push("Email needs verification");
-  if (
-    a.extraction?.method === "ocr" ||
-    a.extraction?.method === "mixed" ||
-    a.extraction?.warnings.length ||
-    (a.extraction?.confidence ?? 100) <= 80
-  )
-    reasons.push("Document extraction is incomplete or uncertain");
+  // OCR warnings are review signals, not a reason to spend limited AI quota.
+  // Gemini is reserved for actual gaps remaining after deterministic resume,
+  // email-body, and subject parsing has run.
   if (a.information?.conflicts.length)
     reasons.push("Submitted sources conflict");
   return reasons;

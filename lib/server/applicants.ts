@@ -24,6 +24,8 @@ const createSchema = z.object({
   education: z.string().trim().max(1000).optional(),
   availability: z.string().trim().max(1000).optional(),
   experienceDetails: z.string().trim().max(4000).optional(),
+  skills: z.string().trim().max(2000).optional(),
+  certifications: z.string().trim().max(2000).optional(),
   hiringNeedId: z.string().max(254).optional(),
   notes: z.string().trim().max(10000),
 });
@@ -77,6 +79,8 @@ export async function createApplicant(input: unknown, user: User) {
             "education",
             "availability",
             "experienceDetails",
+            "skills",
+            "certifications",
           ]
             .filter((k) => values[k as keyof typeof values])
             .map((k) => [
@@ -105,6 +109,8 @@ export async function createApplicant(input: unknown, user: User) {
         education: values.education,
         availability: values.availability,
         experienceDetails: values.experienceDetails,
+        skills: values.skills,
+        certifications: values.certifications,
         experience: 0,
       },
       position: values.position,

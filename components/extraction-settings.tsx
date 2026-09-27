@@ -44,11 +44,40 @@ export function ExtractionSettings() {
         </Badge>
       </div>
       <div className="padded form-stack">
+        <div className="detection-flow" aria-label="Built-in detection order">
+          <div>
+            <span>1</span>
+            <strong>Resume</strong>
+            <p>
+              Contact details, address, role preference, education, experience,
+              skills, and credentials.
+            </p>
+          </div>
+          <div>
+            <span>2</span>
+            <strong>Email body</strong>
+            <p>Only fills fields not stated in the resume.</p>
+          </div>
+          <div>
+            <span>3</span>
+            <strong>Email subject</strong>
+            <p>
+              Final deterministic source for application role, branch, and
+              identity clues.
+            </p>
+          </div>
+          <div>
+            <span>4</span>
+            <strong>AI fallback</strong>
+            <p>
+              Gemini is used only if core fields remain missing or uncertain.
+            </p>
+          </div>
+        </div>
         <p>
-          Automatic fallback uses Gemini only for incomplete or conflicting
-          evidence. It preserves HR-verified fields and never changes
-          qualification results or hiring stages. Turning optional insights OFF
-          on an applicant does not disable automatic extraction fallback.
+          HR-verified values are protected. Automatic extraction never changes
+          qualification results, hiring stages, or decisions. Turning optional
+          applicant AI insights OFF does not disable this final fallback.
         </p>
         {data && (
           <>

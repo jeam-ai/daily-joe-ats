@@ -67,6 +67,8 @@ export function ApplicantEditor({
             experienceDetails: String(
               form.get("experienceDetails") || "",
             ).trim(),
+            skills: String(form.get("skills") || "").trim(),
+            certifications: String(form.get("certifications") || "").trim(),
             hiringNeedId: needId || undefined,
             notes: String(form.get("notes")).trim(),
           };
@@ -96,6 +98,8 @@ export function ApplicantEditor({
                     education: fields.education,
                     availability: fields.availability,
                     experienceDetails: fields.experienceDetails,
+                    skills: fields.skills,
+                    certifications: fields.certifications,
                   },
                   notes: fields.notes ? [...a.notes, fields.notes] : a.notes,
                 }),
@@ -327,6 +331,24 @@ export function ApplicantEditor({
               defaultValue={application?.applicant.experienceDetails || ""}
               maxLength={4000}
               rows={3}
+            />
+          </Field>
+          <Field label="Skills">
+            <textarea
+              name="skills"
+              defaultValue={application?.applicant.skills || ""}
+              maxLength={2000}
+              rows={3}
+              placeholder="One skill per line, or separate items with commas"
+            />
+          </Field>
+          <Field label="Certifications / trainings">
+            <textarea
+              name="certifications"
+              defaultValue={application?.applicant.certifications || ""}
+              maxLength={2000}
+              rows={3}
+              placeholder="One certification per line, or separate items with commas"
             />
           </Field>
         </div>

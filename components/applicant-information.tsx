@@ -51,6 +51,7 @@ export function ApplicantInformation({
   const need = state?.hiringNeeds.find((n) => n.id === a.hiringNeedId);
   const rows = [
     ["name", "Full name", applicantDisplayName(a)],
+    ["email", "Email", a.applicant.email],
     ["phone", "Phone", a.applicant.phone],
     ["residence", "Residence / address", a.applicant.location],
     ["position", "Applied position", a.position],
@@ -61,7 +62,25 @@ export function ApplicantInformation({
     ["skills", "Skills", a.applicant.skills],
     ["certifications", "Certifications", a.applicant.certifications],
   ] as const;
-  const columns = [rows.slice(0, 5), rows.slice(5)];
+  const sections = [
+    {
+      title: "Identity & contact",
+      description: "Who the applicant is and how to reach them.",
+      rows: rows.slice(0, 4),
+    },
+    {
+      title: "Application preferences",
+      description: "The role and work location explicitly requested.",
+      rows: rows.slice(4, 6),
+    },
+    {
+      title: "Background & qualifications",
+      description: "Submitted education, experience, skills, and credentials.",
+      rows: rows.slice(6),
+    },
+  ];
+  const incomplete = rows.filter(([, , value]) => missingInformation(value));
+  const confirmed = rows.length - incomplete.length;
   const listItems = (value: string) => [
     ...new Set(
       value
@@ -123,58 +142,86 @@ export function ApplicantInformation({
           </Button>
         )}
       </div>
-      <dl className="information-grid">
-        {columns.map((column, index) => (
-          <div className="information-column" key={index}>
-            {column.map(([key, label, value]) => (
-              <div className="information-item" key={key}>
-                <dt>{label}</dt>
-                <dd
-                  className={
-                    missingInformation(value) ? "information-empty" : undefined
-                  }
-                >
-                  {(key === "skills" || key === "certifications") &&
-                  !missingInformation(value) ? (
-                    <ul className="information-list">
-                      {listItems(value!).map((item) => (
-                        <li key={item}>{formalFact(key, item)}</li>
-                      ))}
-                    </ul>
-                  ) : (key === "education" || key === "experienceDetails") &&
-                    !missingInformation(value) &&
-                    structuredItems(value!).length > 1 &&
-                    structuredItems(value!).length <= 10 ? (
-                    <ul className="information-list">
-                      {structuredItems(value!).map((item, index) => (
-                        <li key={`${index}-${item}`}>
-                          {key === "education"
-                            ? educationItem(item)
-                            : formalFact(key, item)}
-                        </li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <span>{display(key, value)}</span>
-                  )}
-                  {a.information?.fields[key] && (
-                    <>
-                      <small className="muted information-source">
-                        {a.information.fields[key].source} ·{" "}
-                        {a.information.fields[key].confidence}
-                      </small>
-                      <details>
-                        <summary>Evidence</summary>
-                        <p>{a.information.fields[key].evidence}</p>
-                      </details>
-                    </>
-                  )}
-                </dd>
-              </div>
-            ))}
-          </div>
+      <div className="profile-coverage" aria-live="polite">
+        <div>
+          <strong>
+            Profile coverage: {confirmed} of {rows.length} fields found
+          </strong>
+          <p>
+            Built-in detection checks the resume first, then the email body and
+            subject only for remaining gaps.
+          </p>
+        </div>
+        <Badge>
+          {incomplete.length ? `${incomplete.length} to review` : "Complete"}
+        </Badge>
+      </div>
+      {!!incomplete.length && (
+        <p className="profile-coverage-note">
+          Needs review: {incomplete.map(([, label]) => label).join(", ")}. You
+          can complete these fields manually without waiting for AI fallback.
+        </p>
+      )}
+      <div className="information-sections">
+        {sections.map((section) => (
+          <section className="information-section" key={section.title}>
+            <div className="information-section-heading">
+              <h3>{section.title}</h3>
+              <p>{section.description}</p>
+            </div>
+            <dl className="information-grid">
+              {section.rows.map(([key, label, value]) => (
+                <div className="information-item" key={key}>
+                  <dt>{label}</dt>
+                  <dd
+                    className={
+                      missingInformation(value)
+                        ? "information-empty"
+                        : undefined
+                    }
+                  >
+                    {(key === "skills" || key === "certifications") &&
+                    !missingInformation(value) ? (
+                      <ul className="information-list">
+                        {listItems(value!).map((item) => (
+                          <li key={item}>{formalFact(key, item)}</li>
+                        ))}
+                      </ul>
+                    ) : (key === "education" || key === "experienceDetails") &&
+                      !missingInformation(value) &&
+                      structuredItems(value!).length > 1 &&
+                      structuredItems(value!).length <= 10 ? (
+                      <ul className="information-list">
+                        {structuredItems(value!).map((item, index) => (
+                          <li key={`${index}-${item}`}>
+                            {key === "education"
+                              ? educationItem(item)
+                              : formalFact(key, item)}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <span>{display(key, value)}</span>
+                    )}
+                    {a.information?.fields[key] && (
+                      <>
+                        <small className="muted information-source">
+                          {a.information.fields[key].source} ·{" "}
+                          {a.information.fields[key].confidence}
+                        </small>
+                        <details>
+                          <summary>Evidence</summary>
+                          <p>{a.information.fields[key].evidence}</p>
+                        </details>
+                      </>
+                    )}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          </section>
         ))}
-      </dl>
+      </div>
       <div className="padded">
         {extraction?.[0] && (
           <div

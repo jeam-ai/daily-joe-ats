@@ -44,7 +44,7 @@ test("residence never becomes preferred work location and missing evidence remai
     "Applicant name was not clearly stated in the submitted application.",
   );
 });
-test("explicit preferences and conflicting submitted branches remain auditable", () => {
+test("email body preferences take priority over a subject when no resume preference exists", () => {
   const r = intakeEvidence({
     subject: "Application for Supervisor",
     body: "I am applying at Santa Rosa, Laguna branch.",
@@ -55,11 +55,9 @@ test("explicit preferences and conflicting submitted branches remain auditable",
     subject: "Barista Naga City",
     body: "My preferred branch is Santa Rosa, Laguna.",
   });
-  assert.equal(
-    conflict.location,
-    "Preferred work location was not clearly stated in the submitted application.",
-  );
-  assert.equal(conflict.warnings.length, 1);
+  assert.equal(conflict.location, "Santa Rosa, Laguna");
+  assert.equal(conflict.sources.location, "Email body");
+  assert.equal(conflict.warnings.length, 0);
 });
 test("email subject and conversational body remain usable when a resume is unavailable", () => {
   const body = intakeEvidence({
@@ -70,4 +68,98 @@ test("email subject and conversational body remain usable when a resume is unava
   assert.equal(body.position, "Barista");
   const subject = intakeEvidence({ subject: "Jennifer Mendoza - Resume" });
   assert.equal(subject.name, "Jennifer Mendoza");
+});
+test("resume evidence wins before email fallback and richer section headings are recognized", () => {
+  const resumeFirst = intakeEvidence({
+    subject: "Application for Barista - Naga City",
+    body: "Phone: 0999 222 3333\nSkills: Sales\nCertifications: First aid training",
+    resume:
+      "PHONE: 0917 123 4567\nCORE SKILLS\nCash handling\nCustomer service\nLICENSES\nFood Safety Training",
+  });
+  assert.equal(resumeFirst.phone, "0917 123 4567");
+  assert.match(resumeFirst.skills, /Cash Handling/i);
+  assert.doesNotMatch(resumeFirst.skills, /Sales/i);
+  assert.match(resumeFirst.certifications, /Food Safety Training/i);
+  assert.equal(resumeFirst.sources.phone, "Resume");
+  assert.equal(resumeFirst.sources.skills, "Resume");
+  assert.equal(resumeFirst.sources.certifications, "Resume");
+
+  const resumePreference = intakeEvidence({
+    subject: "Application for Cashier - Santa Rosa, Laguna",
+    body: "I am applying for Cashier at Santa Rosa, Laguna.",
+    resume: "Desired position: Barista\nPreferred branch: Naga City",
+  });
+  assert.equal(resumePreference.position, "Barista");
+  assert.equal(resumePreference.location, "Naga City");
+  assert.equal(resumePreference.sources.position, "Resume");
+  assert.equal(resumePreference.sources.location, "Resume");
+
+  const emailFallback = intakeEvidence({
+    subject: "Kara Example - Resume | Application for Barista, Naga City",
+    body: "Availability: immediately available\nTechnical Skills: Cash handling\nLicenses: Food Safety Training",
+  });
+  assert.equal(emailFallback.position, "Barista");
+  assert.equal(emailFallback.location, "Naga City");
+  assert.match(emailFallback.availability, /immediately available/i);
+  assert.match(emailFallback.skills, /Cash handling/i);
+  assert.match(emailFallback.certifications, /Food Safety Training/i);
+  assert.equal(emailFallback.sources.skills, "Email body");
+});
+test("built-in parsing covers every profile field before using email fallback", () => {
+  const result = intakeEvidence({
+    subject: "Application for Cashier - Santa Rosa, Laguna",
+    body: "Availability: Can start immediately.\nApplying as Cashier at Santa Rosa, Laguna.",
+    from: "Ana Sender <ana.sender@example.invalid>",
+    resume:
+      "APPLICANT NAME: Ana Resume Person\nCONTACT DETAILS\nMobile: +63 917 123 4567\nCurrent Residence: Zone 4, Pili, Camarines Sur\nDesired role: Barista\nPreferred branch: Naga City\nEDUCATIONAL BACKGROUND\nBachelor of Science in Hospitality Management\nRELEVANT EXPERIENCE\nBarista — Example Coffee, 2024–2026\nKEY SKILLS\nCash handling\nCustomer service\nCREDENTIALS\nFood Safety Training",
+  });
+  assert.equal(result.name, "Ana Resume Person");
+  assert.equal(result.phone, "+63 917 123 4567");
+  assert.match(result.residence, /Zone 4, Pili, Camarines Sur/i);
+  assert.equal(result.position, "Barista");
+  assert.equal(result.location, "Naga City");
+  assert.match(result.education, /Hospitality Management/i);
+  assert.match(result.experienceDetails, /Example Coffee/i);
+  assert.match(result.skills, /Cash Handling/i);
+  assert.match(result.certifications, /Food Safety Training/i);
+  assert.match(result.availability, /Can start immediately/i);
+  assert.equal(result.sources.phone, "Resume");
+  assert.equal(result.sources.residence, "Resume");
+  assert.equal(result.sources.position, "Resume");
+  assert.equal(result.sources.location, "Resume");
+  assert.equal(result.sources.education, "Resume");
+  assert.equal(result.sources.experienceDetails, "Resume");
+  assert.equal(result.sources.skills, "Resume");
+  assert.equal(result.sources.certifications, "Resume");
+  assert.equal(result.sources.availability, "Email body");
+  assert.equal(result.sources.email, "Gmail sender");
+});
+test("email-body labels fill all profile fields when no readable resume exists", () => {
+  const result = intakeEvidence({
+    subject: "Mia Example - Job Application",
+    from: "Mia Example <mia@example.invalid>",
+    body: "Applicant Name: Mia Example\nPhone: 0917-555-1234\nResidence: Barangay San Jose, Naga City, Camarines Sur\nI am applying as Barista at Naga City branch.\nEducational Attainment: Senior High School Graduate\nAvailability: Flexible schedule, including weekends\nEMPLOYMENT\nService Crew — Example Restaurant, 2023–2025\nTECHNICAL SKILLS\nPoint-of-sale operation\nCustomer service\nLICENSES\nFirst Aid Training",
+  });
+  assert.equal(result.name, "Mia Example");
+  assert.equal(result.phone, "0917-555-1234");
+  assert.match(result.residence, /Barangay San Jose/i);
+  assert.equal(result.position, "Barista");
+  assert.equal(result.location, "Naga City");
+  assert.match(result.education, /Senior High School Graduate/i);
+  assert.match(result.availability, /Flexible schedule/i);
+  assert.match(result.experienceDetails, /Example Restaurant/i);
+  assert.match(result.skills, /Point-Of-Sale Operation/i);
+  assert.match(result.certifications, /First Aid Training/i);
+  for (const field of [
+    "phone",
+    "residence",
+    "position",
+    "location",
+    "education",
+    "availability",
+    "experienceDetails",
+    "skills",
+    "certifications",
+  ])
+    assert.equal(result.sources[field], "Email body", field);
 });

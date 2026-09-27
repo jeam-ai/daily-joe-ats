@@ -108,10 +108,23 @@ export async function queueExtraction(
     "ai_extraction",
     "settings",
   );
-  if (!aiConfigured() || settings?.enabled === false || resumePending(a))
-    return;
   const reasons = extractionReasons(a);
-  if (!reasons.length) return;
+  if (reasons.length)
+    await recordIssue("documents.profile_coverage", { entityId: a.id }, tx);
+  else
+    await resolveIssue(
+      "documents.profile_coverage",
+      { entityId: a.id },
+      true,
+      tx,
+    );
+  if (
+    !reasons.length ||
+    !aiConfigured() ||
+    settings?.enabled === false ||
+    resumePending(a)
+  )
+    return;
   const sourceVersion = version(a),
     id = `${a.id}:${sourceVersion}`;
   if (await readRecord(tx, "extraction_jobs", id)) return;

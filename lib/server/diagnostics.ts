@@ -103,6 +103,18 @@ const catalog = {
       "Record verified evidence manually if extraction remains incomplete.",
     ],
   },
+  "documents.profile_coverage": {
+    module: "Applicant profile parser",
+    severity: "Minor",
+    title: "Applicant profile needs evidence review",
+    message:
+      "Built-in resume and email parsing could not confirm one or more core applicant details. No recruitment decision was made.",
+    steps: [
+      "Review the preserved resume, email body, and subject evidence.",
+      "Use the editable applicant profile to record verified information.",
+      "AI fallback may clarify only the remaining missing fields when available.",
+    ],
+  },
   "sheets.sync": {
     module: "Spreadsheet",
     severity: "Needs Attention",
@@ -261,15 +273,16 @@ export async function resolveIssue(
   category: IssueCategory,
   context: { entityId?: string; jobId?: string } = {},
   automatic = false,
+  tx?: Transaction,
 ) {
-  return transaction(async (tx) => {
+  const work = async (db: Transaction) => {
     const key = createHash("sha256")
       .update(
         category + ":" + (context.entityId || "") + ":" + (context.jobId || ""),
       )
       .digest("hex")
       .slice(0, 32);
-    const issue = await readRecord<DiagnosticIssue>(tx, "diagnostics", key);
+    const issue = await readRecord<DiagnosticIssue>(db, "diagnostics", key);
     if (!issue || !unresolved(issue)) return;
     issue.status = automatic ? "Automatically Resolved" : "Fixed";
     issue.resolvedAt = new Date().toISOString();
@@ -281,13 +294,14 @@ export async function resolveIssue(
       actor: "System",
     });
     issue.history = issue.history.slice(-50);
-    await putRecord(tx, "diagnostics", key, issue);
-    await writeAudit(tx, "System", "diagnostics.resolved", context.entityId, {
+    await putRecord(db, "diagnostics", key, issue);
+    await writeAudit(db, "System", "diagnostics.resolved", context.entityId, {
       diagnosticId: key,
       automatic,
       resolution: issue.resolution,
     });
-  });
+  };
+  return tx ? work(tx) : transaction(work);
 }
 export async function recoveryAttempt(category: IssueCategory) {
   return transaction(async (tx) => {

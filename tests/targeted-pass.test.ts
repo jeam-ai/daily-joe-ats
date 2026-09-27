@@ -86,7 +86,7 @@ test("professional name formatting preserves initials, accents and compound surn
     lastName: "Dela Cruz Jr.",
   });
 });
-test("80 percent OCR, image processing and missing phone trigger automatic extraction while demo is excluded", () => {
+test("AI fallback is reserved for missing profile fields while demo is excluded", () => {
   const a = {
     lastActivity: "2026-09-01T00:00:00.000Z",
     id: "fixture",
@@ -112,7 +112,7 @@ test("80 percent OCR, image processing and missing phone trigger automatic extra
     location: "Naga City",
     extraction: { method: "text", confidence: 80, warnings: [] },
   } as Application;
-  assert.ok(extractionReasons(a).some((r) => r.includes("extraction")));
+  assert.deepEqual(extractionReasons(a), []);
   a.extraction!.confidence = 81;
   assert.deepEqual(extractionReasons(a), []);
   a.applicant.phone = "";

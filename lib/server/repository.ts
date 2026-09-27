@@ -1,7 +1,8 @@
 import { formalName } from "@/lib/names";
 import { INTAKE_QUEUE_LIMIT } from "@/lib/data-policy";
 import { defaultEmailTemplate } from "@/lib/email-templates";
-import { unresolved } from "./diagnostics";
+import { recordIssue, resolveIssue, unresolved } from "./diagnostics";
+import { extractionReasons } from "@/lib/applicant-information";
 import type { DiagnosticIssue } from "@/types/operations";
 import { writeAudit } from "./audit";
 import { buildTracker } from "./tracker";
@@ -956,6 +957,19 @@ export async function updateState(
           };
         if (a.employment && changed(a.employment, b.employment))
           a.employment.actor = user.email;
+        if (!a.isDemo && extractionReasons(a).length)
+          await recordIssue(
+            "documents.profile_coverage",
+            { entityId: a.id },
+            tx,
+          );
+        else
+          await resolveIssue(
+            "documents.profile_coverage",
+            { entityId: a.id },
+            true,
+            tx,
+          );
         await audit(
           tx,
           user.email,
