@@ -1,8 +1,9 @@
 import type { NextConfig } from "next";
 const ocrRuntimeFiles = [
-  // Tesseract starts a separate Node worker. Its runtime require calls and
-  // SIMD-selected WASM core are not discoverable from the route entry point.
-  "./node_modules/tesseract.js/src/worker-script/**/*",
+  // Tesseract starts a separate Node worker. Its runtime require calls cross
+  // from worker-script into sibling src/constants (for example imageType),
+  // which tracing cannot discover from the route entry point.
+  "./node_modules/tesseract.js/src/**/*",
   "./node_modules/tesseract.js-core/**/*",
   "./node_modules/wasm-feature-detect/**/*",
 ];
@@ -30,6 +31,7 @@ const config: NextConfig = {
     "/api/intake/sync": ocrRuntimeFiles,
     "/api/cron/intake": ocrRuntimeFiles,
     "/api/auth/callback": ocrRuntimeFiles,
+    "/api/system/extraction": ocrRuntimeFiles,
     "/api/applicants/*/resume": ocrRuntimeFiles,
     "/api/applicants/*/processing": ocrRuntimeFiles,
   },
