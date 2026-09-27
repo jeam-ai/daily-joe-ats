@@ -51,8 +51,12 @@ export type IntakeSync = {
   consecutiveFailures?: number;
   lastSuccessfulAt?: string;
   errorCode?: string;
+  /** Versioned only for the resumable queue, never applicant data. */
+  queueVersion?: number;
   headCheckedAt?: number;
   seenIds?: string[];
+  /** IDs known to have come from Gmail's newest-first mailbox head. */
+  latestPending?: string[];
   batchLimit?: number;
   batchChecked?: number;
   batchImported?: number;
@@ -71,6 +75,11 @@ export const AUTOMATIC_INTAKE_BATCH_SIZE = MAX_GMAIL_IMPORT_BATCH_SIZE;
 // transaction. The checkpoint is durable, so a browser, cron, or later login
 // can safely resume without duplicate Gmail imports.
 export const INTAKE_COOLDOWN_MS = 2 * 60 * 1000;
+// Version 2 intentionally rebases the old durable cursor once. Earlier
+// versions could continue an historical page before checking Gmail's newest
+// messages. The rebase discards only unimported queue pointers; applications
+// already committed to the ATS remain untouched and are still de-duplicated.
+export const INTAKE_QUEUE_VERSION = 2;
 // Background work may be stopped by a serverless host before its advertised
 // route limit. A durable job can be safely reclaimed after this interval: its
 // application writes use stable Gmail IDs and its checkpoint rejects an older
@@ -148,9 +157,11 @@ export async function restartQueuedIntake(requestedBy: User) {
       message:
         "Queued Gmail backlog cleared. Restarting from the newest eligible applications…",
       query: workspace.intakeQuery?.trim(),
+      queueVersion: INTAKE_QUEUE_VERSION,
     });
     delete job.page;
     delete job.seenIds;
+    delete job.latestPending;
     delete job.retryAt;
     delete job.nextSyncAt;
     delete job.nextPhase;
@@ -193,6 +204,20 @@ export async function syncIntake(
         "The previous Gmail check stopped before completion. Resuming safely from the saved queue…";
       delete job.runId;
       delete job.leaseUntil;
+    }
+    // Rebase the legacy historical cursor once. This fulfils the safe-restart
+    // behavior without deleting any saved applications: only uncommitted
+    // Gmail queue state is removed, and the next pass starts at the mailbox
+    // head while Gmail IDs prevent duplicate imports.
+    if (job.queueVersion !== INTAKE_QUEUE_VERSION) {
+      job.pending = [];
+      job.queueVersion = INTAKE_QUEUE_VERSION;
+      delete job.page;
+      delete job.seenIds;
+      delete job.latestPending;
+      delete job.retryAt;
+      delete job.nextSyncAt;
+      delete job.nextPhase;
     }
     if (!force && (job.consecutiveFailures || 0) >= 3) return null;
     if (force) job.consecutiveFailures = 0;
@@ -253,15 +278,42 @@ export async function syncIntake(
     if (job.query !== query) {
       job.pending = [];
       delete job.page;
+      delete job.latestPending;
       job.query = query;
     }
     job.message = "Finding new eligible applications in the official mailbox…";
     await checkpoint();
-    // Always drain the durable older-page cursor before checking the mailbox
-    // head again. Otherwise a steady stream of new applications can keep
-    // being prepended to the pending list and starve older matching emails.
-    // The initial head fetch still makes a new arrival visible immediately;
-    // this branch guarantees the saved historical backlog finishes next.
+    // Always inspect Gmail's newest-first head before a saved historical
+    // cursor. Fresh IDs are prepended to the durable queue, so a cursor left
+    // at an older month can never make old mail outrank a new application.
+    stage = "mailbox-head";
+    const head = await gmail<{
+      messages?: { id: string }[];
+      nextPageToken?: string;
+    }>(token, `messages?maxResults=100&q=${encodeURIComponent(query)}`);
+    const queued = new Set(job.pending);
+    const known = new Set([
+      ...workspace.applications.map((a) => a.gmailMessageId),
+      ...(job.seenIds || []),
+      ...queued,
+    ]);
+    const fresh = (head.messages || [])
+      .map((message) => message.id)
+      .filter((id) => !known.has(id));
+    if (!job.page) job.page = head.nextPageToken;
+    if (fresh.length) {
+      job.pending = [...new Set([...fresh, ...job.pending])];
+      job.latestPending = [
+        ...new Set([...(job.latestPending || []), ...fresh]),
+      ];
+      job.phase = "latest";
+      job.message = "Prioritizing newest eligible applications from Gmail…";
+    }
+    job.headCheckedAt = now;
+    await checkpoint();
+    // Only move to the historical cursor after the newest queue has been
+    // exhausted. This preserves backfill without allowing it to block live
+    // applications.
     if (!job.pending.length && job.page) {
       stage = "mailbox-page";
       job.phase = "backfill";
@@ -272,53 +324,15 @@ export async function syncIntake(
         nextPageToken?: string;
       }>(
         token,
-        `messages?maxResults=100&q=${encodeURIComponent(query)}&pageToken=${encodeURIComponent(job.page)}`,
+        `messages?maxResults=100&q=${encodeURIComponent(query)}${job.page ? `&pageToken=${encodeURIComponent(job.page)}` : ""}`,
       );
-      const known = new Set([
+      const pageKnown = new Set([
         ...workspace.applications.map((a) => a.gmailMessageId),
         ...(job.seenIds || []),
       ]);
       job.pending = (page.messages || [])
         .map((message) => message.id)
-        .filter((id) => !known.has(id));
-      job.page = page.nextPageToken;
-      await checkpoint();
-    }
-    // Revisit the mailbox head independently once the prior historical page
-    // has been scheduled. This gives new arrivals priority without allowing
-    // them to permanently hide older matching messages.
-    if (
-      !job.pending.length &&
-      (!job.headCheckedAt || now - job.headCheckedAt > 30000)
-    ) {
-      stage = "mailbox-head";
-      job.phase = "latest";
-      const head = await gmail<{
-        messages?: { id: string }[];
-        nextPageToken?: string;
-      }>(token, `messages?maxResults=100&q=${encodeURIComponent(query)}`);
-      const known = new Set([
-        ...workspace.applications.map((a) => a.gmailMessageId),
-        ...(job.seenIds || []),
-      ]);
-      const fresh = (head.messages || [])
-        .map((m) => m.id)
-        .filter((id) => !known.has(id));
-      if (!job.pending.length && !job.page) job.page = head.nextPageToken;
-      job.pending = [...new Set([...fresh, ...job.pending])];
-      job.headCheckedAt = now;
-      await checkpoint();
-    }
-    if (!job.pending.length && !job.page) {
-      stage = "mailbox-page";
-      const page = await gmail<{
-        messages?: { id: string }[];
-        nextPageToken?: string;
-      }>(
-        token,
-        `messages?maxResults=100&q=${encodeURIComponent(query)}${job.page ? `&pageToken=${encodeURIComponent(job.page)}` : ""}`,
-      );
-      job.pending = (page.messages || []).map((m) => m.id);
+        .filter((id) => !pageKnown.has(id));
       job.page = page.nextPageToken;
       await checkpoint();
     }
@@ -330,7 +344,8 @@ export async function syncIntake(
       return job;
     }
     job.status = "processing";
-    job.lastBatchPhase = job.phase === "backfill" ? "backfill" : "latest";
+    job.phase = job.latestPending?.includes(ids[0]) ? "latest" : "backfill";
+    job.lastBatchPhase = job.phase;
     job.message = `Reading and validating ${ids.length} application${ids.length === 1 ? "" : "s"}…`;
     await checkpoint();
     stage = "message-preview";
@@ -403,6 +418,10 @@ export async function syncIntake(
     const retryBatch = retryIds.length > 0 && job.failures < 3;
     if (!retryIds.length || job.failures >= 3) {
       job.pending = job.pending.slice(ids.length);
+      job.latestPending = job.latestPending?.filter((id) =>
+        job.pending.includes(id),
+      );
+      if (!job.latestPending?.length) delete job.latestPending;
       job.seenIds = [...new Set([...(job.seenIds || []), ...ids])].slice(-5000);
     }
     if (job.failures >= 3) job.failures = 0; // Continue past unreadable mail; issues remain visible and a later scan retries it.
@@ -417,7 +436,9 @@ export async function syncIntake(
     const remaining = job.pending.length > 0 || !!job.page;
     if (!retryBatch && remaining) {
       job.phase = "cooldown";
-      job.nextPhase = job.page ? "backfill" : "latest";
+      job.nextPhase = job.latestPending?.length
+        ? "latest"
+        : "backfill";
       job.nextSyncAt = Date.now() + INTAKE_COOLDOWN_MS;
       job.message =
         "Waiting briefly so the database can finish the prior save safely.";

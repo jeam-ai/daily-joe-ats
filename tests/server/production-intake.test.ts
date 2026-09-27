@@ -13,6 +13,7 @@ import { initialState } from "../../lib/server/initial-state";
 import { withStore } from "../../lib/server/store";
 import {
   AUTOMATIC_INTAKE_BATCH_SIZE,
+  INTAKE_QUEUE_VERSION,
   restartQueuedIntake,
   syncIntake,
   intakeStatus,
@@ -142,7 +143,7 @@ test("automatic intake uses safe batches, maintains latest 100 with an older que
     const cooldown = await intakeStatus();
     assert.equal(cooldown.phase, "cooldown");
     assert.ok(cooldown.nextSyncAt! > Date.now());
-    assert.equal(cooldown.nextPhase, "backfill");
+    assert.equal(cooldown.nextPhase, "latest");
     assert.equal(cooldown.databaseState, "saved");
     assert.ok(cooldown.lastDatabaseCommitAt);
     assert.equal(
@@ -261,6 +262,83 @@ test("matching needs evidence of both position and location; sender addresses ar
     undefined,
   );
 });
+test("newest Gmail messages preempt a saved historical backfill cursor", async () => {
+  const state = initialState();
+  await transaction((tx) => putRecord(tx, "workspace", "main", state));
+  await withStore((s) => {
+    s.officialConnection = {
+      email: "careers@example.invalid",
+      accessToken: "fixture",
+      refreshToken: "fixture-refresh",
+      expiresAt: Date.now() + 600000,
+      connectedAt: new Date().toISOString(),
+      scopes: ["https://www.googleapis.com/auth/gmail.readonly"],
+    };
+  });
+  await transaction((tx) =>
+    putRecord(tx, "jobs", "gmail", {
+      status: "complete",
+      message: "Historical backfill was queued",
+      pending: ["april-message"],
+      page: "april-page",
+      query: state.intakeQuery,
+      issues: [],
+      imported: 0,
+      checked: 0,
+      queueVersion: INTAKE_QUEUE_VERSION,
+      nextPhase: "backfill",
+    }),
+  );
+  const original = globalThis.fetch;
+  globalThis.fetch = async (input) => {
+    const url = String(input);
+    if (url.endsWith("/profile"))
+      return Response.json({ emailAddress: "careers@example.invalid" });
+    if (url.includes("messages?")) {
+      assert.ok(!url.includes("pageToken=april-page"));
+      return Response.json({
+        messages: [{ id: "newest-message" }],
+        nextPageToken: "mailbox-page-two",
+      });
+    }
+    assert.ok(url.includes("messages/newest-message"));
+    return Response.json({
+      id: "newest-message",
+      threadId: "newest-thread",
+      internalDate: String(Date.now()),
+      payload: {
+        headers: [
+          { name: "From", value: "Newest Candidate <new@example.invalid>" },
+          { name: "Subject", value: "Application for Barista" },
+        ],
+        parts: [
+          {
+            filename: "resume.txt",
+            body: {
+              data: Buffer.from("Customer service and cashier experience.").toString(
+                "base64url",
+              ),
+            },
+          },
+        ],
+      },
+    });
+  };
+  try {
+    await syncIntake(undefined, true);
+    const imported = await transaction(getState);
+    assert.ok(
+      imported.applications.some(
+        (application) => application.gmailMessageId === "newest-message",
+      ),
+    );
+    const job = await intakeStatus();
+    assert.equal(job.lastBatchPhase, "latest");
+    assert.ok(job.pending.includes("april-message"));
+  } finally {
+    globalThis.fetch = original;
+  }
+});
 test("unreadable attachments preserve email facts and do not pause intake", async () => {
   const state = await transaction(getState);
   await transaction((tx) =>
@@ -285,6 +363,7 @@ test("unreadable attachments preserve email facts and do not pause intake", asyn
       consecutiveFailures: 2,
       retryAt: 0,
       headCheckedAt: Date.now(),
+      queueVersion: INTAKE_QUEUE_VERSION,
       query: state.intakeQuery,
     }),
   );
@@ -293,6 +372,7 @@ test("unreadable attachments preserve email facts and do not pause intake", asyn
     const url = String(input);
     if (url.endsWith("/profile"))
       return Response.json({ emailAddress: "careers@example.invalid" });
+    if (url.includes("messages?")) return Response.json({ messages: [] });
     assert.ok(url.includes("messages/broken"));
     return Response.json({
       id: "broken",
