@@ -6,7 +6,11 @@ import { SafeError } from "@/lib/server/config";
 import { safeError } from "@/lib/server/response";
 import { reportIssue } from "@/lib/server/diagnostics";
 import { isDatabaseFailure } from "@/lib/server/diagnostic-buffer";
-import { intakeStatus, syncIntake } from "@/lib/google/gmail/sync";
+import {
+  intakeStatus,
+  restartQueuedIntake,
+  syncIntake,
+} from "@/lib/google/gmail/sync";
 import { syncGmailThreadActivity } from "@/lib/google/gmail/activity";
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -46,13 +50,16 @@ export async function POST(request: Request) {
     const user = await requireUser();
     if (!canManage(user))
       throw new SafeError("Recruitment manager access required.", 403);
-    const force = new URL(request.url).searchParams.get("force") === "1";
+    const url = new URL(request.url);
+    const force = url.searchParams.get("force") === "1";
+    const reset = url.searchParams.get("reset") === "1";
     if ((await intakeStatus()).status === "paused")
       return Response.json({
         queued: false,
         message:
           "Gmail intake is paused. Resume it in Settings before importing applications.",
       });
+    const resetJob = reset ? await restartQueuedIntake(user) : undefined;
     after(async () => {
       const started = Date.now();
       // Thread replies must not wait behind a long application-import backlog.
@@ -77,7 +84,10 @@ export async function POST(request: Request) {
           reportIssue("notification.failed"),
         );
     });
-    return Response.json({ queued: true }, { status: 202 });
+    return Response.json(
+      { queued: true, reset: !!resetJob, job: resetJob },
+      { status: 202 },
+    );
   } catch (e) {
     return safeError(e);
   }

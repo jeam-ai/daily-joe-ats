@@ -13,6 +13,7 @@ import { initialState } from "../../lib/server/initial-state";
 import { withStore } from "../../lib/server/store";
 import {
   AUTOMATIC_INTAKE_BATCH_SIZE,
+  restartQueuedIntake,
   syncIntake,
   intakeStatus,
 } from "../../lib/google/gmail/sync";
@@ -375,4 +376,32 @@ test("an aged Gmail worker becomes actionable even before its stale lease expire
   const job = await intakeStatus();
   assert.equal(job.status, "error");
   assert.match(job.message, /stopped before completion/i);
+});
+test("restart clears only the unsynced Gmail queue and preserves imported applicants", async () => {
+  const before = (await transaction(getState)).applications.map(
+    (item) => item.id,
+  );
+  await transaction((tx) =>
+    putRecord(tx, "jobs", "gmail", {
+      status: "complete",
+      message: "Backfill waiting",
+      pending: ["queued-1", "queued-2"],
+      page: "older-page",
+      seenIds: ["already-imported", "queued-1"],
+      imported: 0,
+      checked: 0,
+      issues: [],
+      retryAt: Date.now() + 60000,
+    }),
+  );
+  const job = await restartQueuedIntake(
+    (await transaction(getState)).users![0],
+  );
+  assert.equal(job.pending.length, 0);
+  assert.equal(job.page, undefined);
+  assert.equal(job.seenIds, undefined);
+  assert.deepEqual(
+    (await transaction(getState)).applications.map((item) => item.id),
+    before,
+  );
 });

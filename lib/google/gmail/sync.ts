@@ -127,6 +127,41 @@ export async function intakeStatus() {
     return state;
   });
 }
+
+/**
+ * Discard only the resumable Gmail cursor. Existing application records and
+ * their Gmail message IDs remain intact, so the following pass safely starts
+ * over and skips anything already imported.
+ */
+export async function restartQueuedIntake(requestedBy: User) {
+  if (!canManage(requestedBy))
+    throw new SafeError("Recruitment manager access required.", 403);
+  return retryableTransaction(async (tx) => {
+    const workspace = await getState(tx);
+    const actor = workspace.users?.find(
+      (user) => user.email === requestedBy.email && user.active,
+    );
+    if (!actor || !canManage(actor))
+      throw new SafeError("Recruitment manager access required.", 403);
+    const job = (await readRecord<IntakeSync>(tx, "jobs", "gmail")) || empty();
+    Object.assign(job, empty(), {
+      message:
+        "Queued Gmail backlog cleared. Restarting from the newest eligible applications…",
+      query: workspace.intakeQuery?.trim(),
+    });
+    delete job.page;
+    delete job.seenIds;
+    delete job.retryAt;
+    delete job.nextSyncAt;
+    delete job.nextPhase;
+    delete job.runId;
+    delete job.leaseUntil;
+    delete job.databaseState;
+    delete job.lastDatabaseCommitAt;
+    await putRecord(tx, "jobs", "gmail", job);
+    return job;
+  });
+}
 // A durable lease serializes cron, login and browser triggers. Each invocation
 // processes a small resumable batch; 100 is active capacity, not a lifetime limit.
 export async function syncIntake(

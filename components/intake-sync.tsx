@@ -13,7 +13,7 @@ export function IntakeSyncStatus() {
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false),
     [now, setNow] = useState(() => Date.now()),
-    last = useRef("");
+    lastDatabaseCommit = useRef("");
   const enabled = dataset === "real" && canManage(state?.currentUser);
   const paused = !!state?.intakePaused;
   const working =
@@ -41,9 +41,13 @@ export function IntakeSyncStatus() {
   async function check() {
     const value = await requestJson<IntakeSync>("/api/intake/sync");
     setJob(value);
-    if (value.completedAt && last.current !== value.completedAt) {
-      last.current = value.completedAt;
-      if (value.imported) await refresh();
+    if (
+      value.databaseState === "saved" &&
+      value.lastDatabaseCommitAt &&
+      lastDatabaseCommit.current !== value.lastDatabaseCommitAt
+    ) {
+      lastDatabaseCommit.current = value.lastDatabaseCommitAt;
+      await refresh();
     }
     return value;
   }
@@ -59,10 +63,6 @@ export function IntakeSyncStatus() {
       timer: ReturnType<typeof setTimeout>;
     async function tick() {
       if (stopped || running) return;
-      if (document.hidden) {
-        timer = setTimeout(() => void tick(), 60000);
-        return;
-      }
       running = true;
       let delay = 60000;
       try {
@@ -121,7 +121,7 @@ export function IntakeSyncStatus() {
       }
     }
     function onVisibilityChange() {
-      if (document.hidden || stopped) return;
+      if (stopped) return;
       clearTimeout(timer);
       if (!running) void tick();
     }
@@ -213,40 +213,70 @@ export function IntakeSyncStatus() {
             Connect Gmail
           </a>
         ) : (
-          <Button
-            variant="secondary"
-            disabled={
-              busy ||
-              coolingDown ||
-              (!error && ["checking", "processing"].includes(job?.status || ""))
-            }
-            onClick={async () => {
-              setBusy(true);
-              try {
-                await requestJson("/api/intake/sync?force=1", {
-                  method: "POST",
-                });
-                setError("");
-                setJob((old) =>
-                  old
-                    ? { ...old, status: "checking", message: "Sync requested…" }
-                    : old,
-                );
-                await check();
-              } catch (e) {
-                setError((e as Error).message);
-              } finally {
-                setBusy(false);
+          <>
+            {(job?.pending.length || job?.page) && (
+              <Button
+                variant="ghost"
+                disabled={busy || working}
+                onClick={async () => {
+                  setBusy(true);
+                  try {
+                    const result = await requestJson<{ job?: IntakeSync }>(
+                      "/api/intake/sync?reset=1",
+                      { method: "POST" },
+                    );
+                    if (result.job) setJob(result.job);
+                    setError("");
+                  } catch (e) {
+                    setError((e as Error).message);
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
+              >
+                Restart queued intake
+              </Button>
+            )}
+            <Button
+              variant="secondary"
+              disabled={
+                busy ||
+                coolingDown ||
+                (!error &&
+                  ["checking", "processing"].includes(job?.status || ""))
               }
-            }}
-          >
-            <RefreshCw size={15} />
-            {busy
-              ? "Starting…"
-              : job?.status === "error"
-                ? "Retry sync"
-                : "Sync Now"}
-          </Button>
+              onClick={async () => {
+                setBusy(true);
+                try {
+                  await requestJson("/api/intake/sync?force=1", {
+                    method: "POST",
+                  });
+                  setError("");
+                  setJob((old) =>
+                    old
+                      ? {
+                          ...old,
+                          status: "checking",
+                          message: "Sync requested…",
+                        }
+                      : old,
+                  );
+                  await check();
+                } catch (e) {
+                  setError((e as Error).message);
+                } finally {
+                  setBusy(false);
+                }
+              }}
+            >
+              <RefreshCw size={15} />
+              {busy
+                ? "Starting…"
+                : job?.status === "error"
+                  ? "Retry sync"
+                  : "Sync Now"}
+            </Button>
+          </>
         )}
       </div>
     </div>
