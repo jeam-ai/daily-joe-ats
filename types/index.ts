@@ -158,6 +158,8 @@ export interface Application {
   timeline: ApplicationTimelineEvent[];
   gmailMessageId?: string;
   gmailThreadId?: string;
+  /** Read-model timestamp only; original appliedAt remains immutable. */
+  gmailActivityAt?: string;
   hiredAt?: string;
   talentPoolAddedAt?: string;
   talentPoolExpiredAt?: string;

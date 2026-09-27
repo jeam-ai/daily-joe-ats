@@ -1595,6 +1595,12 @@ th,
   background: var(--info-bg);
   flex: 0 0 auto;
 }
+.recent-row small {
+  display: block;
+  margin-top: 3px;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
 .card-bottom-link:is(button) {
   width: 100%;
   border-right: 0;

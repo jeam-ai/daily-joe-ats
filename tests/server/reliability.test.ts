@@ -133,6 +133,41 @@ test("latest 100 membership, promotion, indexed server pages and HR source prote
     (await listApplications(new URLSearchParams({ tab: "Queued" }))).total,
     5,
   );
+  await transaction((tx) =>
+    tx.query(
+      "INSERT INTO gmail_thread_events(message_id,application_id,thread_id,occurred_at,direction,subject) VALUES($1,$2,$3,$4,$5,$6)",
+      [
+        "reply-to-old-application",
+        "window-000",
+        "thread-window-000",
+        "2026-09-27T12:00:00.000Z",
+        "incoming",
+        "Follow-up",
+      ],
+    ),
+  );
+  const conversations = await listApplications(
+    new URLSearchParams({
+      tab: "All applications",
+      sort: "activity",
+      limit: "4",
+    }),
+  );
+  assert.equal(conversations.applications.length, 4);
+  assert.equal(conversations.applications[0].id, "window-000");
+  assert.equal(
+    conversations.applications[0].appliedAt,
+    "2026-09-01T00:00:00.000Z",
+  );
+  assert.equal(
+    conversations.applications[0].gmailActivityAt,
+    "2026-09-27T12:00:00.000Z",
+  );
+  assert.equal(
+    (await listApplications(new URLSearchParams({ tab: "Queued" })))
+      .applications[0].id,
+    "window-004",
+  );
   assert.equal(
     (
       await listApplications(

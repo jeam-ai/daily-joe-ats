@@ -70,7 +70,7 @@ export function Applications({ talent = false }: { talent?: boolean }) {
   );
   const [experience, setExperience] = useState("");
   const [tab, setTab] = useState(
-    params.get("view") === "interviews" ? "Interviews" : "Active",
+    params.get("view") === "interviews" ? "Interviews" : "All applications",
   );
   const [page, setPage] = useState(1);
   const [employmentStatus, setEmploymentStatus] = useState("");
@@ -104,6 +104,10 @@ export function Applications({ talent = false }: { talent?: boolean }) {
     employment: tab === "Hired" ? employmentStatus : "",
     page: String(page),
     tab,
+    sort:
+      !talent && ["All applications", "Queued"].includes(tab)
+        ? "activity"
+        : "received",
     talent: talent ? "1" : "0",
     since:
       date === "week"
@@ -232,6 +236,8 @@ export function Applications({ talent = false }: { talent?: boolean }) {
             {INTAKE_QUEUE_LIMIT}-application live queue. Gmail intake continues
             beyond the queue; older records receive retention review and
             protected active applications remain available.
+            {tab === "All applications" &&
+              " This list is sorted by latest Gmail thread activity; a reply can move an existing applicant to the top without changing their original application date."}
           </p>
         )}
         {!talent && (
@@ -498,6 +504,7 @@ export function Applications({ talent = false }: { talent?: boolean }) {
                     <Link
                       className="applicant-cell"
                       href={`/applications/${a.id}`}
+                      prefetch={false}
                     >
                       <ApplicantCard
                         name={applicantDisplayName(a)}
@@ -582,9 +589,20 @@ export function Applications({ talent = false }: { talent?: boolean }) {
                     {formatDate(
                       tab === "Hired"
                         ? a.hiredAt || a.lastActivity
-                        : a.lastActivity,
+                        : ["All applications", "Queued"].includes(tab) &&
+                            a.gmailActivityAt
+                          ? a.gmailActivityAt
+                          : a.lastActivity,
                       state.preferences,
+                      Boolean(a.gmailActivityAt) &&
+                        ["All applications", "Queued"].includes(tab),
                     )}
+                    {a.gmailActivityAt &&
+                      ["All applications", "Queued"].includes(tab) && (
+                        <small className="cell-secondary">
+                          Gmail thread updated
+                        </small>
+                      )}
                   </td>
                   <td>
                     <ActionMenu

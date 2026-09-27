@@ -135,6 +135,28 @@ test("Requirements are protected outside 500 and return to the queue cancels gra
     (await retention()).map((r) => String(r.application_id)),
     ["older"],
   );
+  const replyAt = new Date(Date.now() + 60000).toISOString();
+  await transaction((tx) =>
+    tx.query(
+      "INSERT INTO gmail_thread_events(message_id,application_id,thread_id,occurred_at,direction,subject) VALUES($1,$2,$3,$4,$5,$6)",
+      [
+        "old-applicant-reply",
+        "older",
+        "thread-older",
+        replyAt,
+        "incoming",
+        "Follow-up",
+      ],
+    ),
+  );
+  await runRetentionCleanup();
+  const replyGrace = await readTransaction((tx) =>
+    tx.query(
+      "SELECT started_at FROM application_retention WHERE application_id=$1",
+      ["older"],
+    ),
+  );
+  assert.equal(replyGrace[0].started_at, replyAt);
   await transaction(async (tx) => {
     const current = await getState(tx);
     for (const id of ["new-0", "new-1", "new-2", "new-3", "new-4"]) {

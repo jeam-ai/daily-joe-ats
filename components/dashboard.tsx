@@ -36,6 +36,7 @@ import {
 import { formatDate, formatTime } from "@/lib/dates";
 import { requestJson } from "@/lib/client-request";
 import { applicantDisplayName } from "@/lib/applicant-information";
+import type { Application } from "@/types";
 import type { GmailThreadActivity } from "@/lib/gmail-activity";
 import { activityLabel } from "@/lib/gmail-activity";
 type RetentionSnapshot = {
@@ -60,6 +61,26 @@ export function Dashboard() {
   const [showAllNeeds, setShowAllNeeds] = useState(false);
   const [retention, setRetention] = useState<RetentionSnapshot | null>(null);
   const [mailActivity, setMailActivity] = useState<GmailThreadActivity[]>([]);
+  const [recentConversations, setRecentConversations] = useState<
+    Application[] | null
+  >(null);
+  useEffect(() => {
+    if (dataset !== "real") return;
+    const abort = new AbortController();
+    const load = () =>
+      requestJson<{ applications: Application[] }>(
+        "/api/applications?tab=All%20applications&sort=activity&limit=4",
+        { signal: abort.signal },
+      )
+        .then((result) => setRecentConversations(result.applications))
+        .catch(() => {});
+    void load();
+    const interval = setInterval(load, 60000);
+    return () => {
+      abort.abort();
+      clearInterval(interval);
+    };
+  }, [dataset, state?.revision]);
   useEffect(() => {
     if (dataset !== "real") return;
     const abort = new AbortController();
@@ -98,9 +119,10 @@ export function Dashboard() {
   );
   const summary = state.applicationSummary?.[dataset];
   const apps = state.applications;
-  const recentApps = [...apps].sort((a, b) =>
-    b.appliedAt.localeCompare(a.appliedAt),
-  );
+  const recentApps =
+    dataset === "real"
+      ? recentConversations || []
+      : [...apps].sort((a, b) => b.appliedAt.localeCompare(a.appliedAt));
   const monthly = summary?.currentMonthByStatus || {};
   const metrics = [
     [
@@ -251,6 +273,7 @@ export function Dashboard() {
                 (need) => (
                   <Link
                     href={`/hiring-needs?edit=${need.id}`}
+                    prefetch={false}
                     key={need.id}
                     className="hiring-row"
                   >
@@ -298,8 +321,8 @@ export function Dashboard() {
           <Card className="recent-card">
             <div className="card-heading">
               <div>
-                <h2>Recent applications</h2>
-                <p>Meet the people who want to join us.</p>
+                <h2>Recent applicant conversations</h2>
+                <p>Latest Gmail reply or application received first.</p>
               </div>
               <Link className="text-link" href="/applications">
                 View all <ArrowUpRight size={16} />
@@ -310,6 +333,7 @@ export function Dashboard() {
                 <Link
                   key={a.id}
                   href={`/applications/${a.id}`}
+                  prefetch={false}
                   className="recent-row"
                 >
                   <Avatar name={applicantDisplayName(a)} />
@@ -318,11 +342,20 @@ export function Dashboard() {
                     <span>
                       {a.position} · {a.location}
                     </span>
+                    {a.gmailActivityAt && (
+                      <small>
+                        Gmail activity{" "}
+                        {formatDate(a.gmailActivityAt, state.preferences, true)}
+                      </small>
+                    )}
                   </div>
                   <StatusBadge status={a.status} />
                   <ArrowUpRight size={16} />
                 </Link>
               ))}
+              {dataset === "real" && !recentConversations && (
+                <p className="padded muted">Loading recent conversations…</p>
+              )}
             </div>
           </Card>
           {dataset === "real" && (
@@ -331,8 +364,9 @@ export function Dashboard() {
                 <div>
                   <h2>Recent Gmail activity</h2>
                   <p>
-                    Replies and sent mail in applicant threads. Applications
-                    keep their original received order.
+                    Replies and sent mail in applicant threads. Original
+                    submission dates and the 500-item retention queue stay
+                    unchanged.
                   </p>
                 </div>
               </div>
@@ -342,6 +376,7 @@ export function Dashboard() {
                     <Link
                       key={event.messageId}
                       href={`/applications/${event.applicationId}`}
+                      prefetch={false}
                       className="recent-row"
                     >
                       <span className="mail-activity-icon">

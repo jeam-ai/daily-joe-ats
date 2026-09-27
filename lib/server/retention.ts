@@ -128,6 +128,16 @@ export async function runRetentionCleanup(options: RetentionRunOptions = {}) {
       "SELECT application_id,category,started_at,expires_at FROM application_retention",
     );
     const existing = new Map(records.map((r) => [String(r.application_id), r]));
+    const incomingMail = new Map(
+      (
+        await tx.query(
+          "SELECT application_id,MAX(occurred_at) AS latest_at FROM gmail_thread_events WHERE direction='incoming' GROUP BY application_id",
+        )
+      ).map((row) => [
+        String(row.application_id),
+        Date.parse(String(row.latest_at)),
+      ]),
+    );
     const pendingRetention: string[][] = [];
     const scheduleRetention = (
       applicationId: string,
@@ -199,9 +209,13 @@ export async function runRetentionCleanup(options: RetentionRunOptions = {}) {
           ],
         );
       } else if (terminal) {
-        const started = Date.parse(
+        const lastActivity = Date.parse(
           application.lastActivity || application.appliedAt,
         );
+        const started =
+          application.status === "No Response"
+            ? Math.max(lastActivity, incomingMail.get(application.id) || 0)
+            : lastActivity;
         scheduleRetention(
           application.id,
           "terminal",
@@ -216,7 +230,10 @@ export async function runRetentionCleanup(options: RetentionRunOptions = {}) {
           existingRecord?.category === "outside_live_queue"
             ? Date.parse(String(existingRecord.started_at))
             : NaN;
-        const started = Number.isFinite(existingStart) ? existingStart : nowMs;
+        const started = Math.max(
+          Number.isFinite(existingStart) ? existingStart : nowMs,
+          incomingMail.get(application.id) || 0,
+        );
         scheduleRetention(
           application.id,
           "outside_live_queue",

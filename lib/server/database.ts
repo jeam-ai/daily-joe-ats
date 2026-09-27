@@ -158,7 +158,11 @@ async function databaseTransaction<T>(
       globalDb.djPool = new Pool({
         connectionString,
         ...(aivenCa ? { ssl: { ca: aivenCa, rejectUnauthorized: true } } : {}),
-        max: process.env.VERCEL ? 2 : 5,
+        // Each serverless instance owns its own pool. Aiven Free allows only
+        // 20 total connections, so one idle connection per instance is safer
+        // than multiplying a 2-client pool by concurrent route instances.
+        max: process.env.VERCEL ? 1 : 5,
+        idleTimeoutMillis: process.env.VERCEL ? 1000 : 10000,
         connectionTimeoutMillis: 10000,
         statement_timeout: 30000,
         query_timeout: 35000,

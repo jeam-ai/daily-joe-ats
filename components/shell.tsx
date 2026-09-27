@@ -3,7 +3,7 @@ import { IntakeSyncStatus } from "./intake-sync";
 import Link from "next/link";
 import { canManage } from "@/lib/data-policy";
 import { DemoControls } from "./system-settings";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { useState, useEffect, useRef } from "react";
 import {
   House,
@@ -48,7 +48,6 @@ function Frame({
   demo: boolean;
 }) {
   const path = usePathname();
-  const router = useRouter();
   const { state, dataset } = useApp();
   const [open, setOpen] = useState(false);
   const [mobile, setMobile] = useState(false);
@@ -64,16 +63,6 @@ function Frame({
   }, []);
   const sidebar = useRef<HTMLElement>(null);
   const menuButton = useRef<HTMLButtonElement>(null);
-  const prefetched = useRef(false);
-  useEffect(() => {
-    if (prefetched.current) return;
-    const timer = window.setTimeout(() => {
-      prefetched.current = true;
-      for (const [, href] of navigation)
-        if (href !== path) router.prefetch(href);
-    }, 700);
-    return () => window.clearTimeout(timer);
-  }, [path, router]);
   useEffect(() => {
     if (!open) return;
     const focusable = () =>
@@ -157,6 +146,7 @@ function Frame({
           {navigation.map(([label, href, Icon]) => (
             <Link
               href={href}
+              prefetch={false}
               key={href}
               onClick={() => setOpen(false)}
               title={label}
