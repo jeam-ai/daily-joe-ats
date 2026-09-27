@@ -328,9 +328,19 @@ export async function retryableTransaction<T>(
       return await transaction(fn);
     } catch (error) {
       lastError = error;
-      if (!retryableSheetsConflict(error) || attempt === attempts - 1)
-        throw error;
-      await new Promise((resolve) => setTimeout(resolve, 75 * 2 ** attempt));
+      // This helper is restricted to callbacks with no external side effects.
+      // Replaying a failed Aiven connection before COMMIT is therefore safe and
+      // keeps Gmail intake from abandoning a newly received application during
+      // a short serverless/database connection interruption.
+      const retryable =
+        retryableSheetsConflict(error) || isDatabaseFailure(error);
+      if (!retryable || attempt === attempts - 1) throw error;
+      await new Promise((resolve) =>
+        setTimeout(
+          resolve,
+          isDatabaseFailure(error) ? 150 * 2 ** attempt : 75 * 2 ** attempt,
+        ),
+      );
     }
   }
   throw lastError;
@@ -361,9 +371,12 @@ export function readTransaction<T>(fn: (tx: Transaction) => Promise<T>) {
             error.status === 503 &&
             /temporarily unavailable|could not complete this operation|timed out before confirming/.test(
               error.message,
-            );
-        if (!revisionChanged && !temporarySheetsRead) throw error;
-        if (temporarySheetsRead && attempt >= 2) throw error;
+            ),
+          temporaryDatabaseRead = isDatabaseFailure(error);
+        if (!revisionChanged && !temporarySheetsRead && !temporaryDatabaseRead)
+          throw error;
+        if ((temporarySheetsRead || temporaryDatabaseRead) && attempt >= 2)
+          throw error;
         // Intake checkpoints can create a short burst of revisions. A small
         // bounded backoff lets the reader hydrate one coherent revision while
         // keeping every browser request within its deadline.
@@ -371,7 +384,8 @@ export function readTransaction<T>(fn: (tx: Transaction) => Promise<T>) {
           await new Promise((resolve) =>
             setTimeout(
               resolve,
-              (temporarySheetsRead ? 500 : 50) * 2 ** attempt,
+              (temporarySheetsRead ? 500 : temporaryDatabaseRead ? 150 : 50) *
+                2 ** attempt,
             ),
           );
       }
