@@ -29,6 +29,10 @@ const createSchema = z.object({
   hiringNeedId: z.string().max(254).optional(),
   notes: z.string().trim().max(10000),
 });
+// Profile edits intentionally use a small, field-level payload.  The browser
+// workspace is a bounded read model, and an older imported record outside the
+// current profile must never prevent HR from correcting this applicant.
+const updateSchema = createSchema.omit({ requestId: true });
 export async function createApplicant(input: unknown, user: User) {
   if (!canManage(user))
     throw new SafeError("A recruitment manager must add applicants.", 403);
@@ -160,6 +164,172 @@ export async function createApplicant(input: unknown, user: User) {
       id,
     });
     return { id };
+  });
+}
+
+export async function updateApplicant(id: string, input: unknown, user: User) {
+  if (!canManage(user))
+    throw new SafeError(
+      "A recruitment manager must edit applicant profiles.",
+      403,
+    );
+  const parsed = updateSchema.safeParse(input);
+  if (!parsed.success)
+    throw new SafeError(
+      "Enter a name, valid email, position, and preferred work location.",
+    );
+  const values = parsed.data;
+  return transaction(async (tx) => {
+    const state = await getState(tx);
+    const application = state.applications.find(
+      (item) => item.id === id && !item.deletedAt,
+    );
+    if (!application) throw new SafeError("Applicant not found.", 404);
+    const sameDataset = (needId: string) =>
+      state.hiringNeeds.find(
+        (need) =>
+          need.id === needId &&
+          !!need.isDemo === !!application.isDemo &&
+          (need.status === "Open" || need.id === application.hiringNeedId),
+      );
+    const need = values.hiringNeedId
+      ? sameDataset(values.hiringNeedId)
+      : undefined;
+    if (values.hiringNeedId && !need)
+      throw new SafeError(
+        "Choose an open hiring need from the same workspace.",
+      );
+    if (
+      state.applications.some(
+        (item) =>
+          item.id !== application.id &&
+          item.applicant.email.toLowerCase() === values.email.toLowerCase(),
+      )
+    )
+      throw new SafeError("Enter a unique applicant email.");
+
+    const before = structuredClone(application);
+    const now = new Date().toISOString();
+    application.position = values.position;
+    application.location = values.location;
+    application.hiringNeedId = need?.id;
+    application.assignedBranch = values.assignedBranch || undefined;
+    application.appliedAt = values.appliedAt || application.appliedAt;
+    application.applicant = {
+      ...application.applicant,
+      name:
+        application.isDemo && !values.name.startsWith("DEMO — ")
+          ? `DEMO — ${formalName(values.name)}`
+          : formalName(values.name),
+      firstName: values.firstName || undefined,
+      middleName: values.middleName || undefined,
+      lastName: values.lastName || undefined,
+      email: values.email.toLowerCase(),
+      phone: values.phone,
+      location:
+        values.residence ||
+        "Residence not confirmed from submitted information.",
+      education: values.education || undefined,
+      availability: values.availability || undefined,
+      experienceDetails: values.experienceDetails || undefined,
+      skills: values.skills || undefined,
+      certifications: values.certifications || undefined,
+    };
+    if (values.notes) application.notes.push(values.notes);
+
+    application.information = structuredClone(
+      before.information || { fields: {}, conflicts: [] },
+    );
+    for (const field of [
+      "name",
+      "firstName",
+      "middleName",
+      "lastName",
+      "email",
+      "phone",
+      "location",
+      "education",
+      "availability",
+      "experienceDetails",
+      "skills",
+      "certifications",
+    ] as const)
+      if (application.applicant[field] !== before.applicant[field])
+        application.information.fields[
+          field === "location" ? "residence" : field
+        ] = {
+          source: "HR verified",
+          evidence: "Updated by authorized HR",
+          confidence: "Confident",
+          verifiedBy: user.email,
+        };
+    for (const field of ["position", "location"] as const)
+      if (application[field] !== before[field])
+        application.information.fields[field] = {
+          source: "HR verified",
+          evidence: "Updated by authorized HR",
+          confidence: "Confident",
+          verifiedBy: user.email,
+        };
+
+    if (application.hiringNeedId !== before.hiringNeedId)
+      application.screening = need
+        ? {
+            outcome: "Requires Review",
+            completedAt: "",
+            criteria: (need.criteria || []).map((rule) => ({
+              id: rule.id,
+              requirement: rule.label,
+              result: "Unclear",
+              evidence:
+                "HR review required after the hiring-need assignment changed.",
+            })),
+          }
+        : {
+            outcome: "Requires Review",
+            completedAt: "",
+            criteria: [],
+            insight:
+              "Assign a hiring need with configured qualifications before screening.",
+          };
+
+    const changedFields = [
+      "applicant",
+      "position",
+      "location",
+      "hiringNeedId",
+      "assignedBranch",
+      "appliedAt",
+      "screening",
+      "notes",
+    ].filter(
+      (field) =>
+        JSON.stringify(before[field as keyof Application]) !==
+        JSON.stringify(application[field as keyof Application]),
+    );
+    if (!changedFields.length) return structuredClone(application);
+    application.editedBy = user.email;
+    application.editedAt = now;
+    application.lastActivity = now;
+    application.timeline.push({
+      id: crypto.randomUUID(),
+      timestamp: now,
+      user: user.email,
+      action: "HR record updated",
+      applicationId: application.id,
+      metadata: {
+        fields: changedFields.join(", "),
+        note: values.notes || "",
+        communication: "No email sent",
+      },
+    });
+    await audit(tx, user.email, "application.edited", application.id, {
+      fields: changedFields,
+      previous: before,
+      next: application,
+    });
+    await saveState(tx, state, { sync: !application.isDemo });
+    return structuredClone(application);
   });
 }
 

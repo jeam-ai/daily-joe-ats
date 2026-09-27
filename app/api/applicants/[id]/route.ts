@@ -1,6 +1,10 @@
 import { requireOrigin, requireUser } from "@/lib/auth/session";
 import { safeError } from "@/lib/server/response";
-import { deleteApplicant, restoreApplicant } from "@/lib/server/applicants";
+import {
+  deleteApplicant,
+  restoreApplicant,
+  updateApplicant,
+} from "@/lib/server/applicants";
 import { readTransaction } from "@/lib/server/database";
 import { getState } from "@/lib/server/repository";
 import { demoEnabled, SafeError } from "@/lib/server/config";
@@ -66,6 +70,22 @@ export async function DELETE(request: Request, { params }: Context) {
     return Response.json({
       ...result,
       syncStatus: result.isDemo
+        ? "Demo isolated"
+        : "Changes saved to the ATS database.",
+    });
+  } catch (error) {
+    return safeError(error);
+  }
+}
+export async function PATCH(request: Request, { params }: Context) {
+  try {
+    requireOrigin(request);
+    const user = await requireUser();
+    const { id } = await params;
+    const application = await updateApplicant(id, await request.json(), user);
+    return Response.json({
+      application,
+      syncStatus: application.isDemo
         ? "Demo isolated"
         : "Changes saved to the ATS database.",
     });

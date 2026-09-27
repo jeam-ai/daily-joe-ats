@@ -15,6 +15,7 @@ import {
   createApplicant,
   deleteApplicant,
   restoreApplicant,
+  updateApplicant,
 } from "../../lib/server/applicants";
 import { trackerRows } from "../../lib/tracker";
 import { detectResumeType, extractResume } from "../../lib/server/documents";
@@ -175,6 +176,56 @@ test("demo lifecycle, soft deletion, restoration, audit, and production isolatio
   } finally {
     globalThis.fetch = fetch;
   }
+});
+test("profile edits do not fail because an unrelated imported record is malformed", async () => {
+  await transaction((tx) => putRecord(tx, "workspace", "main", initialState()));
+  const base = {
+    phone: "",
+    position: "Barista",
+    location: "Naga City",
+    notes: "",
+  };
+  const first = await createApplicant(
+    {
+      ...base,
+      requestId: crypto.randomUUID(),
+      name: "Editable Applicant",
+      email: "editable@example.invalid",
+    },
+    user,
+  );
+  await createApplicant(
+    {
+      ...base,
+      requestId: crypto.randomUUID(),
+      name: "Older Imported Applicant",
+      email: "older@example.invalid",
+    },
+    user,
+  );
+  await transaction(async (tx) => {
+    const state = await getState(tx);
+    state.applications.find((item) => item.id !== first.id)!.applicant.email =
+      "legacy-import-without-an-email";
+    await putRecord(tx, "workspace", "main", state);
+  });
+  const edited = await updateApplicant(
+    first.id,
+    {
+      ...base,
+      name: "Edited Applicant",
+      email: "editable@example.invalid",
+      residence: "Naga City, Camarines Sur",
+    },
+    user,
+  );
+  assert.equal(edited.applicant.name, "Edited Applicant");
+  assert.equal(
+    (await transaction(getState)).applications.find(
+      (item) => item.id === first.id,
+    )?.applicant.location,
+    "Naga City, Camarines Sur",
+  );
 });
 test("resume detection rejects renamed executable content and reports unreadable input", async () => {
   assert.throws(

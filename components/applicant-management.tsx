@@ -15,7 +15,7 @@ export function ApplicantEditor({
   application?: Application;
   onClose: () => void;
 }) {
-  const { state, updateApplication, refresh, notify } = useApp();
+  const { state, refresh, notify } = useApp();
   const router = useRouter();
   const [busy, setBusy] = useState(false),
     [error, setError] = useState("");
@@ -74,43 +74,12 @@ export function ApplicantEditor({
           };
           try {
             if (application) {
-              const saved = await updateApplication(
-                application.id,
-                (a) => ({
-                  ...a,
-                  position: fields.position,
-                  location: fields.location,
-                  hiringNeedId: fields.hiringNeedId,
-                  assignedBranch: fields.assignedBranch,
-                  appliedAt: fields.appliedAt || a.appliedAt,
-                  applicant: {
-                    ...a.applicant,
-                    name:
-                      a.isDemo && !fields.name.startsWith("DEMO — ")
-                        ? `DEMO — ${fields.name}`
-                        : fields.name,
-                    firstName: fields.firstName,
-                    middleName: fields.middleName,
-                    lastName: fields.lastName,
-                    email: fields.email,
-                    phone: fields.phone,
-                    location: fields.residence,
-                    education: fields.education,
-                    availability: fields.availability,
-                    experienceDetails: fields.experienceDetails,
-                    skills: fields.skills,
-                    certifications: fields.certifications,
-                  },
-                  notes: fields.notes ? [...a.notes, fields.notes] : a.notes,
-                }),
-                true,
-              );
-              if (!saved) {
-                setError(
-                  "Changes were not saved. Review the notification and try again.",
-                );
-                return;
-              }
+              await requestJson(`/api/applicants/${application.id}`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(fields),
+              });
+              await refresh({ clearDetails: true });
               const photo = form.get("photo");
               const removePhoto = form.get("removePhoto") === "on";
               if (photo instanceof File && photo.size) {
