@@ -60,6 +60,8 @@ export type IntakeSync = {
   lastBatchPhase?: "latest" | "backfill";
   nextPhase?: "latest" | "backfill";
   nextSyncAt?: number;
+  databaseState?: "processing" | "saved" | "queued";
+  lastDatabaseCommitAt?: string;
 };
 // Process up to fifteen messages per automatic pass. Resume extraction has a
 // separate deadline/fallback so a slow document cannot hold the whole batch;
@@ -177,6 +179,7 @@ export async function syncIntake(
       batchChecked: 0,
       batchImported: 0,
       phase: "latest",
+      databaseState: "processing",
     });
     delete job.nextSyncAt;
     delete job.nextPhase;
@@ -352,6 +355,10 @@ export async function syncIntake(
       );
       job.imported = result.imported;
       job.batchImported = result.imported;
+      // confirmImport resolves only after the application records and their
+      // Gmail IDs have committed. The cooldown starts after this point.
+      job.databaseState = "saved";
+      job.lastDatabaseCommitAt = new Date().toISOString();
     }
     const retryIds = preview.issues.filter((i) =>
       /Failed to retrieve|time limit|Failed to read/.test(i.reason),

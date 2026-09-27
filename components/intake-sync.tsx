@@ -19,6 +19,7 @@ export function IntakeSyncStatus() {
   const working =
     busy || ["checking", "processing"].includes(job?.status || "");
   const coolingDown = !working && !!job?.nextSyncAt && job.nextSyncAt > now;
+  const queuedForDatabase = job?.databaseState === "queued";
   const secondsToNext = coolingDown
     ? Math.max(0, Math.ceil((job!.nextSyncAt! - now) / 1000))
     : 0;
@@ -32,9 +33,11 @@ export function IntakeSyncStatus() {
         : 100;
   const progressLabel = busy
     ? "Starting secure sync"
-    : job?.status === "checking"
-      ? "Checking Gmail for eligible applications"
-      : "Reading and validating the current application batch";
+    : queuedForDatabase
+      ? "Waiting for the ATS database to accept the next batch"
+      : job?.status === "checking"
+        ? "Checking Gmail for eligible applications"
+        : "Reading and validating the current application batch";
   async function check() {
     const value = await requestJson<IntakeSync>("/api/intake/sync");
     setJob(value);
@@ -89,13 +92,18 @@ export function IntakeSyncStatus() {
           (!value.retryAt || value.retryAt <= Date.now())
         ) {
           await requestJson("/api/intake/sync", { method: "POST" });
-          delay = 5000;
+          // The server now owns the next claim. Give its Aiven transaction a
+          // short, visible queue window instead of firing another request.
+          delay = 30000;
           setJob((old) =>
             old
               ? {
                   ...old,
                   status: "checking",
-                  message: "Checking the recruitment inbox…",
+                  databaseState: "queued",
+                  nextSyncAt: Date.now() + 30000,
+                  message:
+                    "The next intake batch is queued for the ATS database. Waiting for the prior save to finish safely…",
                 }
               : old,
           );
@@ -154,6 +162,15 @@ export function IntakeSyncStatus() {
             <small>
               Waiting for the prior database save to finish — preventing
               concurrent Aiven writes and duplicate imports.
+            </small>
+          </div>
+        )}
+        {queuedForDatabase && (
+          <div className="intake-cooldown" role="status">
+            <strong>Next batch is queued for the ATS database</strong>
+            <small>
+              The previous intake is still being confirmed. The browser will
+              extend the wait and retry safely; no duplicate import is made.
             </small>
           </div>
         )}

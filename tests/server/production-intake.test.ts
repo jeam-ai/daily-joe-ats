@@ -142,6 +142,8 @@ test("automatic intake uses safe batches, maintains latest 100 with an older que
     assert.equal(cooldown.phase, "cooldown");
     assert.ok(cooldown.nextSyncAt! > Date.now());
     assert.equal(cooldown.nextPhase, "backfill");
+    assert.equal(cooldown.databaseState, "saved");
+    assert.ok(cooldown.lastDatabaseCommitAt);
     assert.equal(
       Number(
         (
