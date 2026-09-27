@@ -27,6 +27,7 @@ import {
   readRecord,
   putRecord,
   readTransaction,
+  postgresConfigured,
 } from "@/lib/server/database";
 import { audit } from "@/lib/server/repository";
 import { persistenceMaintenance } from "@/lib/server/persistence-maintenance";
@@ -95,8 +96,7 @@ export async function GET(request: Request) {
         job,
         provider: sheetsPrimary()
           ? "Google Sheets"
-          : process.env.PERSISTENCE_PROVIDER !== "local" &&
-              process.env.DATABASE_URL
+          : postgresConfigured()
             ? "PostgreSQL"
             : "Local SQLite",
         gatewayConfigured: gatewayConfigured(),

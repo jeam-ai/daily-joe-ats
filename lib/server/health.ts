@@ -13,6 +13,7 @@ import {
   transaction,
   readRecord,
   putRecord,
+  postgresConfigured,
 } from "./database";
 import { withStore } from "./store";
 import { config } from "./config";
@@ -284,8 +285,7 @@ async function performChecks(): Promise<HealthSnapshot> {
           detail:
             (sheetsPrimary()
               ? "Google Sheets transaction gateway"
-              : process.env.PERSISTENCE_PROVIDER !== "local" &&
-                  process.env.DATABASE_URL
+              : postgresConfigured()
                 ? "PostgreSQL"
                 : "Local SQLite") +
             " connectivity and required table reads verified. No schema changes were performed by this check.",

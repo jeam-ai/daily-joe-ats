@@ -4,7 +4,9 @@ import { transaction } from "../lib/server/database";
 loadEnvConfig(process.cwd());
 
 const connectionString =
-  process.env.DATABASE_POOL_URL || process.env.DATABASE_URL;
+  process.env.AIVEN_DATABASE_URL ||
+  process.env.DATABASE_POOL_URL ||
+  process.env.DATABASE_URL;
 if (!connectionString)
   throw new Error("DATABASE_URL is required (it is never printed).");
 const url = new URL(connectionString);

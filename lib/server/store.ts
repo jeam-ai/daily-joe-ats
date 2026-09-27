@@ -4,7 +4,12 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { seal, unseal } from "@/lib/auth/security";
 import { config } from "./config";
-import { transaction, readRecord, putRecord } from "./database";
+import {
+  transaction,
+  readRecord,
+  putRecord,
+  postgresConfigured,
+} from "./database";
 export interface StoredConnection {
   scopes?: string[];
   email: string;
@@ -52,13 +57,16 @@ export function withStore<T>(
   persist = true,
 ): Promise<T> {
   let step = "start";
+  // Keep the legacy remote-store behavior until the Sheets pipeline is
+  // retired, while also honoring an Aiven-only deployment after cutover.
+  const remoteConfigured = postgresConfigured() || !!process.env.DATABASE_URL;
   return transaction(
     async (tx) => {
       step = "read_secure_record";
       const encrypted = await readRecord<string>(tx, "secure", "auth");
       const store = encrypted
         ? unseal<Store>(encrypted, config().encryptionKey)
-        : process.env.DATABASE_URL
+        : remoteConfigured
           ? ({ sessions: {}, events: [], requests: {} } as Store)
           : await read();
       const count = store.events.length;
@@ -75,7 +83,7 @@ export function withStore<T>(
             event.metadata,
           );
       }
-      if (persist || (!encrypted && !process.env.DATABASE_URL)) {
+      if (persist || (!encrypted && !remoteConfigured)) {
         step = "write_secure_record";
         await putRecord(
           tx,

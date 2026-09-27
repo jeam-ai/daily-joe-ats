@@ -63,6 +63,18 @@ function postgresConnectionUrl() {
   return pooled || direct;
 }
 
+export function postgresConfigured() {
+  return (
+    !sheetsPrimary() &&
+    process.env.PERSISTENCE_PROVIDER !== "local" &&
+    !!postgresConnectionUrl()
+  );
+}
+
+export function aivenConfigured() {
+  return postgresConfigured() && isAivenConnection(postgresConnectionUrl());
+}
+
 const schema = [
   "CREATE TABLE IF NOT EXISTS records (collection TEXT NOT NULL, id TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(collection,id))",
   "CREATE TABLE IF NOT EXISTS audit_logs (id TEXT PRIMARY KEY, occurred_at TEXT NOT NULL, actor TEXT NOT NULL, action TEXT NOT NULL, application_id TEXT, payload TEXT NOT NULL)",

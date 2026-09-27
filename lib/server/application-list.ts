@@ -1,6 +1,6 @@
 import "server-only";
 import type { Application } from "@/types";
-import { transaction, readTransaction } from "./database";
+import { transaction, readTransaction, postgresConfigured } from "./database";
 import { getState, saveState } from "./repository";
 export async function listApplications(params: URLSearchParams, demo = false) {
   // Backfill the indexed read model once for workspaces created before the queue.
@@ -23,8 +23,7 @@ export async function listApplications(params: URLSearchParams, demo = false) {
     return `$${values.length}`;
   };
   const json = (alias: string, path: string) =>
-    process.env.DATABASE_URL &&
-    !["sheets", "local"].includes(process.env.PERSISTENCE_PROVIDER || "")
+    postgresConfigured()
       ? `(${alias}.payload::jsonb #>> '{${path.replaceAll(".", ",")}}')`
       : `json_extract(${alias}.payload,'$.${path}')`;
   const where = [

@@ -1,5 +1,10 @@
 import { requireUser } from "@/lib/auth/session";
-import { readTransaction, type Transaction } from "@/lib/server/database";
+import {
+  aivenConfigured,
+  postgresConfigured,
+  readTransaction,
+  type Transaction,
+} from "@/lib/server/database";
 import { getState } from "@/lib/server/repository";
 import { safeError } from "@/lib/server/response";
 import { SafeError } from "@/lib/server/config";
@@ -37,27 +42,22 @@ export async function GET() {
         "SELECT COUNT(*) AS count FROM audit_logs WHERE occurred_at<$1",
         [activityCutoff],
       );
-      const connectionLimit =
-        process.env.DATABASE_URL &&
-        process.env.DATABASE_URL.includes(".aivencloud.com")
-          ? String(
-              (
-                await tx.query("SELECT current_setting('max_connections') AS n")
-              )[0]?.n || "",
-            )
-          : "";
-      const storage =
-        process.env.DATABASE_URL &&
-        process.env.PERSISTENCE_PROVIDER !== "local" &&
-        process.env.PERSISTENCE_PROVIDER !== "sheets"
-          ? Number(
-              (
-                await tx.query(
-                  "SELECT pg_database_size(current_database()) AS bytes",
-                )
-              )[0]?.bytes || 0,
-            )
-          : null;
+      const connectionLimit = aivenConfigured()
+        ? String(
+            (
+              await tx.query("SELECT current_setting('max_connections') AS n")
+            )[0]?.n || "",
+          )
+        : "";
+      const storage = postgresConfigured()
+        ? Number(
+            (
+              await tx.query(
+                "SELECT pg_database_size(current_database()) AS bytes",
+              )
+            )[0]?.bytes || 0,
+          )
+        : null;
       const configuredLimit = Number(process.env.DB_STORAGE_LIMIT_BYTES || 0);
       // Aiven's observed 20-connection default identifies its Free tier;
       // use its documented 1 GiB allocation as a conservative fallback.
