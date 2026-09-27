@@ -166,8 +166,13 @@ function Frame({
               <Icon size={19} />
               <span>{label}</span>
               {label === "Applications" && (
-                <span className="nav-count">
-                  {state ? state.applicationSummary?.[dataset].liveQueue ?? 0 : "…"}
+                <span
+                  className="nav-count"
+                  title="Applications in the newest 500-item live queue"
+                >
+                  {state
+                    ? (state.applicationSummary?.[dataset].liveQueue ?? 0)
+                    : "…"}
                 </span>
               )}
             </Link>
@@ -222,7 +227,7 @@ function Frame({
             </form>
             <Badge tone="blue">
               {dataset === "demo" ? "DEMO" : "LIVE WORKSPACE"} ·{" "}
-              {!state ? "…" : state.applicationSummary?.[dataset].active ?? 0}{" "}
+              {!state ? "…" : (state.applicationSummary?.[dataset].active ?? 0)}{" "}
               / 100 active
             </Badge>
             <Link

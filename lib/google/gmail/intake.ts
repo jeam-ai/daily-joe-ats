@@ -115,7 +115,7 @@ export async function gmail<T>(token: string, url: string): Promise<T> {
       r.status === 401
         ? "Gmail authorization expired. Reconnect the official mailbox."
         : "Gmail could not complete the request. Check authorization and retry.",
-      r.status === 401 ? 401 : 502,
+      r.status === 401 ? 401 : r.status === 404 ? 404 : 502,
     );
   return r.json();
 }

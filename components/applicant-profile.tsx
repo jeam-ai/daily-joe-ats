@@ -33,6 +33,7 @@ import {
 } from "lucide-react";
 import type {
   Application,
+  ApplicationTimelineEvent,
   ScreeningCriterion as Criterion,
   Interview,
 } from "@/types";
@@ -90,34 +91,73 @@ export function ScreeningCriterion({ criterion: c }: { criterion: Criterion }) {
     </div>
   );
 }
-export function Timeline({ application }: { application: Application }) {
+export function Timeline({
+  application,
+  limit,
+}: {
+  application: Application;
+  limit?: number;
+}) {
   const { state } = useApp();
+  const [gmailEvents, setGmailEvents] = useState<
+    import("@/lib/gmail-activity").GmailThreadActivity[]
+  >([]);
+  useEffect(() => {
+    if (!application.gmailThreadId || application.isDemo) return;
+    const abort = new AbortController();
+    const load = () =>
+      requestJson<{
+        events: import("@/lib/gmail-activity").GmailThreadActivity[];
+      }>(
+        `/api/gmail-activity?application=${encodeURIComponent(application.id)}`,
+        { signal: abort.signal },
+      )
+        .then((result) => setGmailEvents(result.events))
+        .catch(() => {});
+    void load();
+    const interval = setInterval(load, 60000);
+    return () => {
+      abort.abort();
+      clearInterval(interval);
+    };
+  }, [application.id, application.gmailThreadId, application.isDemo]);
+  const events: ApplicationTimelineEvent[] = [
+    ...application.timeline,
+    ...gmailEvents.map((event) => ({
+      id: `gmail-${event.messageId}`,
+      timestamp: event.occurredAt,
+      user: "Careers Gmail",
+      action:
+        event.direction === "incoming"
+          ? "Applicant replied"
+          : "Email sent from Careers Gmail",
+      metadata: { note: event.subject ? `Subject: ${event.subject}` : "" },
+    })),
+  ].sort((a, b) => b.timestamp.localeCompare(a.timestamp));
   return (
     <ol className="timeline">
-      {[...application.timeline]
-        .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
-        .map((event) => (
-          <li key={event.id}>
-            <span className="timeline-dot" />
-            <div>
-              <strong>{event.action}</strong>
-              <p>
-                {event.user} ·{" "}
-                {formatDate(event.timestamp, state?.preferences, true)}
-              </p>
-              {event.metadata.note && <p>{event.metadata.note}</p>}
-              {event.metadata.emailId && (
-                <ViewEmail
-                  applicationId={application.id}
-                  emailId={event.metadata.emailId}
-                />
-              )}
-              {event.metadata.communication && (
-                <small>{event.metadata.communication}</small>
-              )}
-            </div>
-          </li>
-        ))}
+      {events.slice(0, limit).map((event) => (
+        <li key={event.id}>
+          <span className="timeline-dot" />
+          <div>
+            <strong>{event.action}</strong>
+            <p>
+              {event.user} ·{" "}
+              {formatDate(event.timestamp, state?.preferences, true)}
+            </p>
+            {event.metadata.note && <p>{event.metadata.note}</p>}
+            {event.metadata.emailId && (
+              <ViewEmail
+                applicationId={application.id}
+                emailId={event.metadata.emailId}
+              />
+            )}
+            {event.metadata.communication && (
+              <small>{event.metadata.communication}</small>
+            )}
+          </div>
+        </li>
+      ))}
     </ol>
   );
 }
@@ -980,9 +1020,7 @@ export function ApplicantProfile({ id }: { id: string }) {
               <div className="card-heading">
                 <h2>Recent activity</h2>
               </div>
-              <Timeline
-                application={{ ...a, timeline: a.timeline.slice(-3) }}
-              />
+              <Timeline application={a} limit={3} />
             </Card>
           )}
         </aside>

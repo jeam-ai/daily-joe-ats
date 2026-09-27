@@ -9,7 +9,11 @@ import { requestJson } from "@/lib/client-request";
 import { useApp } from "./provider";
 import { Badge, Button, Card, Field, Input } from "./ui";
 
-type Snapshot = { policies: RetentionPolicies; dryRun: boolean };
+type Snapshot = {
+  policies: RetentionPolicies;
+  dryRun: boolean;
+  queue?: { retentionPending: number; retentionAwaitingMarker: number };
+};
 const fields: { name: RetentionPolicyName; label: string; note: string }[] = [
   {
     name: "application_queue_days",
@@ -101,6 +105,46 @@ export function RetentionSettings() {
               QA dry run is on: changing a period updates warnings and the
               would-delete preview, but does not permanently delete records.
             </p>
+          )}
+          {!!snapshot?.queue?.retentionAwaitingMarker && (
+            <p className="fine-print">
+              {snapshot.queue.retentionAwaitingMarker} applications are outside
+              the live queue but have not yet received a grace-period marker.
+              Run a dry-run scan to set their dates without deleting anything.
+            </p>
+          )}
+          {snapshot?.dryRun && (
+            <Button
+              variant="secondary"
+              disabled={saving || loading || dataset === "demo"}
+              onClick={async () => {
+                setSaving(true);
+                setError("");
+                try {
+                  const result = await requestJson<{
+                    wouldDeleteApplications: number;
+                  }>("/api/system/retention", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ action: "preview-scan" }),
+                  });
+                  const latest = await requestJson<Snapshot>(
+                    "/api/system/retention",
+                  );
+                  setSnapshot(latest);
+                  await refresh({ clearDetails: true });
+                  notify(
+                    `Dry-run retention scan complete. ${result.wouldDeleteApplications} applications would be eligible for cleanup; none were deleted.`,
+                  );
+                } catch (reason) {
+                  setError((reason as Error).message);
+                } finally {
+                  setSaving(false);
+                }
+              }}
+            >
+              {saving ? "Scanning…" : "Run dry-run retention scan"}
+            </Button>
           )}
           {error && (
             <p className="error-banner" role="alert">

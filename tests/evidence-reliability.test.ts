@@ -95,6 +95,14 @@ test("resume contact locality and lowercase submitted facts are displayed formal
     "Junior Accounting Analyst",
   );
   assert.equal(
+    formalFact("education", "Cavite state university 2023-2024"),
+    "Cavite State University 2023–2024",
+  );
+  assert.equal(
+    formalFact("education", "Dasmarinas Integrated High School 2021- 2023"),
+    "Dasmarinas Integrated High School 2021–2023",
+  );
+  assert.equal(
     formalFact(
       "experienceDetails",
       "work experience in the social welfare field",

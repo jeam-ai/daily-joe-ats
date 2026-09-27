@@ -7,6 +7,7 @@ import { SafeError } from "@/lib/server/config";
 import { safeError } from "@/lib/server/response";
 import { reportIssue } from "@/lib/server/diagnostics";
 import { intakeStatus, syncIntake } from "@/lib/google/gmail/sync";
+import { syncGmailThreadActivity } from "@/lib/google/gmail/activity";
 export const runtime = "nodejs";
 export const maxDuration = 120;
 export async function GET() {
@@ -42,6 +43,8 @@ export async function POST(request: Request) {
       await syncIntake(user, force, 75000).catch(() =>
         reportIssue("gmail.sync"),
       );
+      if (Date.now() - started < 85000)
+        await syncGmailThreadActivity().catch(() => reportIssue("gmail.sync"));
       if (Date.now() - started < 85000)
         await runExtractionJobs(1).catch(() => reportIssue("ai.provider"));
       if (Date.now() - started < 100000)

@@ -17,6 +17,10 @@ export function Reports() {
   const [range, setRange] = useState("all");
   const [report, setReport] = useState<RecruitmentReport | null>(null);
   const [reportError, setReportError] = useState("");
+  const [expandedGroups, setExpandedGroups] = useState({
+    position: false,
+    location: false,
+  });
   useEffect(() => {
     const abort = new AbortController();
     setReport(null);
@@ -117,7 +121,11 @@ export function Reports() {
               ["Applications", data.total, UsersRound],
               ["Hired", data.hired, UserCheck],
               ["Talent pool", data.talentPool, Bookmark],
-              ["Interview pipeline", data.interviewPipeline, ChartNoAxesCombined],
+              [
+                "Interview pipeline",
+                data.interviewPipeline,
+                ChartNoAxesCombined,
+              ],
             ].map(([label, count, Icon]) => {
               const I = Icon as typeof UsersRound;
               return (
@@ -161,7 +169,8 @@ export function Reports() {
               <h2>Screening outcomes</h2>
               {["Meets Criteria", "Requires Review", "Criteria Not Met"].map(
                 (s, i) => {
-                  const count = data.screening.find((item) => item.name === s)?.count || 0;
+                  const count =
+                    data.screening.find((item) => item.name === s)?.count || 0;
                   return (
                     <div className="report-bar" key={s}>
                       <div>
@@ -183,28 +192,54 @@ export function Reports() {
               </p>
             </Card>
             {(["position", "location", "stage", "status"] as const).map(
-              (key) => (
-                <Card className="padded" key={key}>
-                  <h2>
-                    {key === "stage"
-                      ? "Interview & recruitment pipeline"
-                      : key === "status"
-                        ? "Application outcomes"
-                        : `Applications by ${key}`}
-                  </h2>
-                  {group(key).map(({ name, count }: ReportBucket) => (
-                    <div className="report-bar" key={name}>
-                      <div>
-                        <span>{name}</span>
-                        <strong>{count}</strong>
+              (key) => {
+                const buckets = group(key);
+                const expandable = key === "position" || key === "location";
+                const expanded = expandable && expandedGroups[key];
+                const visible =
+                  expandable && !expanded ? buckets.slice(0, 5) : buckets;
+                return (
+                  <Card className="padded" key={key}>
+                    <h2>
+                      {key === "stage"
+                        ? "Interview & recruitment pipeline"
+                        : key === "status"
+                          ? "Application outcomes"
+                          : `Applications by ${key}`}
+                    </h2>
+                    {visible.map(({ name, count }: ReportBucket) => (
+                      <div className="report-bar" key={name}>
+                        <div>
+                          <span>{name}</span>
+                          <strong>{count}</strong>
+                        </div>
+                        <div className="report-track">
+                          <i
+                            style={{ width: `${(count / data.total) * 100}%` }}
+                          />
+                        </div>
                       </div>
-                      <div className="report-track">
-                        <i style={{ width: `${(count / data.total) * 100}%` }} />
-                      </div>
-                    </div>
-                  ))}
-                </Card>
-              ),
+                    ))}
+                    {expandable && buckets.length > 5 && (
+                      <Button
+                        variant="secondary"
+                        className="report-group-toggle"
+                        aria-expanded={expanded}
+                        onClick={() =>
+                          setExpandedGroups((current) => ({
+                            ...current,
+                            [key]: !current[key],
+                          }))
+                        }
+                      >
+                        {expanded
+                          ? "Show less"
+                          : `Show all ${buckets.length} ${key === "position" ? "positions" : "locations"}`}
+                      </Button>
+                    )}
+                  </Card>
+                );
+              },
             )}
           </div>
         </>

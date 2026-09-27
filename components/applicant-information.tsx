@@ -75,6 +75,18 @@ export function ApplicantInformation({
       .split(/\s+·\s+|\n+/)
       .map((item) => item.trim())
       .filter(Boolean);
+  const educationItem = (item: string) => {
+    const formatted = formalFact("education", item);
+    const dated = /^(.*?)\s+(\d{4}–(?:\d{4}|Present))$/.exec(formatted);
+    return dated ? (
+      <>
+        <strong>{dated[1]}</strong>
+        <span className="information-period">{dated[2]}</span>
+      </>
+    ) : (
+      formatted
+    );
+  };
   const display = (key: string, value?: string) => {
     if (missingInformation(value))
       return key === "position"
@@ -136,7 +148,9 @@ export function ApplicantInformation({
                     <ul className="information-list">
                       {structuredItems(value!).map((item, index) => (
                         <li key={`${index}-${item}`}>
-                          {formalFact(key, item)}
+                          {key === "education"
+                            ? educationItem(item)
+                            : formalFact(key, item)}
                         </li>
                       ))}
                     </ul>

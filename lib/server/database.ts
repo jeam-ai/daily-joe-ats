@@ -109,6 +109,9 @@ const schema = [
   "CREATE TABLE IF NOT EXISTS screening_results (application_id TEXT PRIMARY KEY REFERENCES applications(id), payload TEXT NOT NULL)",
   "CREATE TABLE IF NOT EXISTS employment_records (application_id TEXT PRIMARY KEY REFERENCES applications(id), hired_at TEXT NOT NULL, payload TEXT NOT NULL)",
   "CREATE TABLE IF NOT EXISTS application_events (id TEXT PRIMARY KEY, application_id TEXT NOT NULL REFERENCES applications(id), occurred_at TEXT NOT NULL, actor TEXT NOT NULL, payload TEXT NOT NULL)",
+  "CREATE TABLE IF NOT EXISTS gmail_thread_events (message_id TEXT PRIMARY KEY, application_id TEXT NOT NULL REFERENCES applications(id), thread_id TEXT NOT NULL, occurred_at TEXT NOT NULL, direction TEXT NOT NULL CHECK(direction IN ('incoming','outgoing')), subject TEXT NOT NULL)",
+  "CREATE INDEX IF NOT EXISTS gmail_thread_events_recent_idx ON gmail_thread_events(occurred_at,application_id)",
+  "CREATE INDEX IF NOT EXISTS gmail_thread_events_application_idx ON gmail_thread_events(application_id,occurred_at)",
   ...[
     "qualification_templates",
     "requirements",

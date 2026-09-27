@@ -36,12 +36,15 @@ import {
 import { formatDate, formatTime } from "@/lib/dates";
 import { requestJson } from "@/lib/client-request";
 import { applicantDisplayName } from "@/lib/applicant-information";
+import type { GmailThreadActivity } from "@/lib/gmail-activity";
+import { activityLabel } from "@/lib/gmail-activity";
 type RetentionSnapshot = {
   dryRun: boolean;
   queue: {
     active: number;
     queued: number;
     retentionPending: number;
+    retentionAwaitingMarker: number;
     rejectedOrWithdrawnPending: number;
   };
   talentPoolExpiring: number;
@@ -54,7 +57,25 @@ type RetentionSnapshot = {
 };
 export function Dashboard() {
   const { state, dataset } = useApp();
+  const [showAllNeeds, setShowAllNeeds] = useState(false);
   const [retention, setRetention] = useState<RetentionSnapshot | null>(null);
+  const [mailActivity, setMailActivity] = useState<GmailThreadActivity[]>([]);
+  useEffect(() => {
+    if (dataset !== "real") return;
+    const abort = new AbortController();
+    const load = () =>
+      requestJson<{ events: GmailThreadActivity[] }>("/api/gmail-activity", {
+        signal: abort.signal,
+      })
+        .then((result) => setMailActivity(result.events))
+        .catch(() => {});
+    void load();
+    const interval = setInterval(load, 60000);
+    return () => {
+      abort.abort();
+      clearInterval(interval);
+    };
+  }, [dataset, state?.revision]);
   useEffect(() => {
     if (state?.currentUser?.role !== "Admin") return;
     const abort = new AbortController();
@@ -83,7 +104,7 @@ export function Dashboard() {
   const monthly = summary?.currentMonthByStatus || {};
   const metrics = [
     [
-      "Total Applications",
+      "Applications This Month",
       Object.values(monthly).reduce((sum, count) => sum + (count || 0), 0),
       UsersRound,
       "Received this month",
@@ -128,6 +149,7 @@ export function Dashboard() {
     ],
   ] as const;
   const upcoming = summary?.upcomingInterviews || [];
+  const openNeeds = state.hiringNeeds.filter((need) => need.status === "Open");
   const attention = [
     {
       title: "Applications awaiting review",
@@ -216,13 +238,7 @@ export function Dashboard() {
             <div className="card-heading">
               <div>
                 <h2>
-                  Active hiring needs{" "}
-                  <Badge>
-                    {
-                      state.hiringNeeds.filter((n) => n.status === "Open")
-                        .length
-                    }
-                  </Badge>
+                  Active hiring needs <Badge>{openNeeds.length}</Badge>
                 </h2>
                 <p>Finding the right people for every branch.</p>
               </div>
@@ -231,9 +247,8 @@ export function Dashboard() {
               </Link>
             </div>
             <div className="hiring-list">
-              {state.hiringNeeds
-                .filter((n) => n.status === "Open")
-                .map((need) => (
+              {(showAllNeeds ? openNeeds : openNeeds.slice(0, 5)).map(
+                (need) => (
                   <Link
                     href={`/hiring-needs?edit=${need.id}`}
                     key={need.id}
@@ -261,8 +276,21 @@ export function Dashboard() {
                     </div>
                     <ChevronRight size={17} />
                   </Link>
-                ))}
+                ),
+              )}
             </div>
+            {openNeeds.length > 5 && (
+              <button
+                type="button"
+                className="card-bottom-link"
+                aria-expanded={showAllNeeds}
+                onClick={() => setShowAllNeeds((current) => !current)}
+              >
+                {showAllNeeds
+                  ? "Show fewer hiring needs"
+                  : `Show all ${openNeeds.length} hiring needs`}
+              </button>
+            )}
             <Link href="/hiring-needs?new=1" className="card-bottom-link">
               <Plus size={16} /> Create a hiring need
             </Link>
@@ -297,6 +325,51 @@ export function Dashboard() {
               ))}
             </div>
           </Card>
+          {dataset === "real" && (
+            <Card className="recent-card gmail-activity-card">
+              <div className="card-heading">
+                <div>
+                  <h2>Recent Gmail activity</h2>
+                  <p>
+                    Replies and sent mail in applicant threads. Applications
+                    keep their original received order.
+                  </p>
+                </div>
+              </div>
+              {mailActivity.length ? (
+                <div className="recent-list">
+                  {mailActivity.map((event) => (
+                    <Link
+                      key={event.messageId}
+                      href={`/applications/${event.applicationId}`}
+                      className="recent-row"
+                    >
+                      <span className="mail-activity-icon">
+                        <Inbox size={16} />
+                      </span>
+                      <div>
+                        <strong>{event.applicantName}</strong>
+                        <span>
+                          {activityLabel(event.direction)} ·{" "}
+                          {formatDate(
+                            event.occurredAt,
+                            state.preferences,
+                            true,
+                          )}
+                        </span>
+                      </div>
+                      <ArrowUpRight size={16} />
+                    </Link>
+                  ))}
+                </div>
+              ) : (
+                <p className="padded muted">
+                  No recent applicant-thread replies or sent messages have been
+                  recorded yet.
+                </p>
+              )}
+            </Card>
+          )}
         </div>
         <div>
           {state.currentUser?.role === "Admin" && retention && (
@@ -351,6 +424,13 @@ export function Dashboard() {
                 Live queue: {retention.queue.active + retention.queue.queued} ·
                 active HR view: {retention.queue.active}
               </p>
+              {retention.queue.retentionAwaitingMarker > 0 && (
+                <p className="fine-print">
+                  {retention.queue.retentionAwaitingMarker} outside-queue
+                  records await the next dry-run retention scan before their
+                  grace dates are set.
+                </p>
+              )}
               <div className="retention-metrics">
                 <strong>Cleanup totals this month</strong>
                 {retention.metrics

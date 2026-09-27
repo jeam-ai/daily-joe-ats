@@ -13,7 +13,9 @@ import {
   readRetentionPolicies,
   retentionDryRunEnabled,
   runRetentionCleanup,
+  protectedApplication,
 } from "@/lib/server/retention";
+import { eligibleIntake, INTAKE_QUEUE_LIMIT } from "@/lib/data-policy";
 import {
   retentionPolicyDefaults,
   type RetentionPolicies,
@@ -21,6 +23,7 @@ import {
 } from "@/lib/retention-policy";
 
 export const runtime = "nodejs";
+export const maxDuration = 240;
 
 async function count(tx: Transaction, sql: string, values: unknown[] = []) {
   const rows = await tx.query(sql, values);
@@ -84,6 +87,22 @@ export async function GET() {
       const applications = state.applications.filter(
         (a) => !a.isDemo && !a.deletedAt,
       );
+      const outsideQueue = applications
+        .filter(eligibleIntake)
+        .sort(
+          (a, b) =>
+            Date.parse(b.appliedAt) - Date.parse(a.appliedAt) ||
+            b.id.localeCompare(a.id),
+        )
+        .slice(INTAKE_QUEUE_LIMIT)
+        .filter((application) => !protectedApplication(application));
+      const outsideMarked = new Set(
+        (
+          await tx.query(
+            "SELECT application_id FROM application_retention WHERE category='outside_live_queue'",
+          )
+        ).map((row) => String(row.application_id)),
+      );
       const talentPool = applications.filter((a) => a.status === "Talent Pool");
       const poolDays = policies.talent_pool_days;
       const talentExpiring = talentPool.filter((a) => {
@@ -116,7 +135,10 @@ export async function GET() {
         queue: {
           active: applications.filter((a) => a.queueState === "Active").length,
           queued: applications.filter((a) => a.queueState === "Queued").length,
-          retentionPending: pendingByType.outside_live_queue || 0,
+          retentionPending: outsideQueue.length,
+          retentionAwaitingMarker: outsideQueue.filter(
+            (application) => !outsideMarked.has(application.id),
+          ).length,
           rejectedOrWithdrawnPending: pendingByType.terminal || 0,
         },
         talentPoolExpiring: talentExpiring,
@@ -157,6 +179,8 @@ export async function POST(request: Request) {
     if (user.role !== "Admin")
       throw new SafeError("Administrator access required.", 403);
     const body = await request.json();
+    if (body?.action === "preview-scan")
+      return Response.json(await runRetentionCleanup({ dryRun: true }));
     const input = body?.policies;
     const names = Object.keys(retentionPolicyDefaults) as RetentionPolicyName[];
     if (

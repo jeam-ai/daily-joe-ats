@@ -1540,9 +1540,10 @@ th,
 .information-grid dt {
   color: var(--text-primary);
   font-family: "Manrope", Arial, sans-serif;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 700;
-  margin-bottom: 4px;
+  margin-bottom: 5px;
+  letter-spacing: 0.01em;
 }
 .information-grid dd {
   margin: 0;
@@ -1561,10 +1562,47 @@ th,
   margin: 0;
   padding-left: 18px;
   display: grid;
-  gap: 2px;
+  gap: 6px;
 }
 .information-list li {
   padding-left: 1px;
+}
+.information-list strong {
+  font-weight: 650;
+}
+.information-period {
+  display: block;
+  color: var(--text-secondary);
+  font-size: 12px;
+  margin-top: 1px;
+}
+.report-group-toggle {
+  margin-top: 14px;
+  width: 100%;
+  justify-content: center;
+}
+.gmail-activity-card {
+  margin-top: 18px;
+}
+.mail-activity-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent);
+  background: var(--info-bg);
+  flex: 0 0 auto;
+}
+.card-bottom-link:is(button) {
+  width: 100%;
+  border-right: 0;
+  border-bottom: 0;
+  border-left: 0;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
 }
 .applicant-information > .padded > .info-banner,
 .applicant-information > .padded > .warning-banner {

@@ -7,6 +7,7 @@ import {
 } from "@/lib/server/document-recovery";
 import { timingSafeEqual } from "node:crypto";
 import { syncIntake, intakeStatus } from "@/lib/google/gmail/sync";
+import { syncGmailThreadActivity } from "@/lib/google/gmail/activity";
 export const runtime = "nodejs";
 export const maxDuration = 240;
 export async function GET(request: Request) {
@@ -26,6 +27,8 @@ export async function GET(request: Request) {
     const job = await intakeStatus();
     if (job.status !== "complete" || (!job.pending.length && !job.page)) break;
   }
+  if (Date.now() - started < 160000)
+    await syncGmailThreadActivity().catch(() => reportIssue("gmail.sync"));
   if (Date.now() - started < 90000) await recoverOneDeferredDocument();
   if (Date.now() - started < 150000)
     await refreshStoredEvidenceBatch(25).catch(() =>

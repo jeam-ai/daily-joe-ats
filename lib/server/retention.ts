@@ -12,7 +12,7 @@ import { transaction, type Transaction } from "./database";
 
 const at = (time: number) => new Date(time).toISOString();
 const plusDays = (time: number, days: number) => time + days * 86400000;
-const protectedApplication = (application: Application) =>
+export const protectedApplication = (application: Application) =>
   application.status === "Hired" ||
   [
     "Initial Interview",
@@ -50,20 +50,6 @@ async function policies(tx: Transaction) {
   return values;
 }
 
-async function putRetention(
-  tx: Transaction,
-  applicationId: string,
-  category: string,
-  startedAt: string,
-  expiresAt: string,
-  reason: string,
-) {
-  await tx.query(
-    "INSERT INTO application_retention(application_id,category,started_at,expires_at,reason) VALUES($1,$2,$3,$4,$5) ON CONFLICT(application_id) DO UPDATE SET category=excluded.category,started_at=excluded.started_at,expires_at=excluded.expires_at,reason=excluded.reason",
-    [applicationId, category, startedAt, expiresAt, reason],
-  );
-}
-
 async function deleteApplication(tx: Transaction, application: Application) {
   const source = await tx.query(
     "SELECT resume_id,applicant_id FROM applications WHERE id=$1",
@@ -78,6 +64,7 @@ async function deleteApplication(tx: Transaction, application: Application) {
   for (const table of [
     "application_retention",
     "application_events",
+    "gmail_thread_events",
     "application_requirements",
     "interviews",
     "screening_results",
@@ -141,6 +128,29 @@ export async function runRetentionCleanup(options: RetentionRunOptions = {}) {
       "SELECT application_id,category,started_at,expires_at FROM application_retention",
     );
     const existing = new Map(records.map((r) => [String(r.application_id), r]));
+    const pendingRetention: string[][] = [];
+    const scheduleRetention = (
+      applicationId: string,
+      category: string,
+      startedAt: string,
+      expiresAt: string,
+      reason: string,
+    ) => {
+      const previous = existing.get(applicationId);
+      if (
+        previous?.category === category &&
+        previous.started_at === startedAt &&
+        previous.expires_at === expiresAt
+      )
+        return;
+      pendingRetention.push([
+        applicationId,
+        category,
+        startedAt,
+        expiresAt,
+        reason,
+      ]);
+    };
 
     for (const application of state.applications) {
       if (isDemo(application) || application.deletedAt) continue;
@@ -162,8 +172,7 @@ export async function runRetentionCleanup(options: RetentionRunOptions = {}) {
         const started = Date.parse(
           application.talentPoolAddedAt || application.appliedAt,
         );
-        await putRetention(
-          tx,
+        scheduleRetention(
           application.id,
           "talent_pool",
           at(started),
@@ -193,8 +202,7 @@ export async function runRetentionCleanup(options: RetentionRunOptions = {}) {
         const started = Date.parse(
           application.lastActivity || application.appliedAt,
         );
-        await putRetention(
-          tx,
+        scheduleRetention(
           application.id,
           "terminal",
           at(started),
@@ -209,8 +217,7 @@ export async function runRetentionCleanup(options: RetentionRunOptions = {}) {
             ? Date.parse(String(existingRecord.started_at))
             : NaN;
         const started = Number.isFinite(existingStart) ? existingStart : nowMs;
-        await putRetention(
-          tx,
+        scheduleRetention(
           application.id,
           "outside_live_queue",
           at(started),
@@ -234,6 +241,19 @@ export async function runRetentionCleanup(options: RetentionRunOptions = {}) {
             },
           );
       }
+    }
+    for (let offset = 0; offset < pendingRetention.length; offset += 100) {
+      const batch = pendingRetention.slice(offset, offset + 100);
+      await tx.query(
+        `INSERT INTO application_retention(application_id,category,started_at,expires_at,reason) VALUES ${batch
+          .map(
+            (_, row) =>
+              `(${Array.from({ length: 5 }, (_, col) => `$${row * 5 + col + 1}`).join(",")})`,
+          )
+          .join(",")}
+         ON CONFLICT(application_id) DO UPDATE SET category=excluded.category,started_at=excluded.started_at,expires_at=excluded.expires_at,reason=excluded.reason`,
+        batch.flat(),
+      );
     }
 
     const refreshed = await tx.query(
