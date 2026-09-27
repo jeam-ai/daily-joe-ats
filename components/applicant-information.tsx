@@ -117,7 +117,11 @@ export function ApplicantInformation({
             {column.map(([key, label, value]) => (
               <div className="information-item" key={key}>
                 <dt>{label}</dt>
-                <dd>
+                <dd
+                  className={
+                    missingInformation(value) ? "information-empty" : undefined
+                  }
+                >
                   {(key === "skills" || key === "certifications") &&
                   !missingInformation(value) ? (
                     <ul className="information-list">

@@ -463,7 +463,7 @@ input[type="radio"] {
   min-height: 32px;
 }
 .badge {
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.5;
   padding: 3px 8px;
   font-weight: 600;
@@ -1519,32 +1519,43 @@ th,
 .information-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 20px;
-  padding: 18px 24px;
+  gap: 24px;
+  padding: 8px 24px 18px;
   margin: 0;
 }
 .information-column {
   display: grid;
   align-content: start;
-  gap: 15px;
+  gap: 0;
   min-width: 0;
 }
 .information-item {
   min-width: 0;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+}
+.information-column .information-item:last-child {
+  border-bottom: 0;
 }
 .information-grid dt {
-  color: var(--text-secondary);
-  font-size: 12px;
-  margin-bottom: 6px;
+  color: var(--text-primary);
+  font-family: "Manrope", Arial, sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  margin-bottom: 4px;
 }
 .information-grid dd {
   margin: 0;
   overflow-wrap: anywhere;
   line-height: 1.5;
 }
+.information-grid dd.information-empty {
+  color: var(--text-secondary);
+}
 .information-source {
   display: block;
-  margin-top: 3px;
+  margin-top: 4px;
+  font-size: 11px;
 }
 .information-list {
   margin: 0;

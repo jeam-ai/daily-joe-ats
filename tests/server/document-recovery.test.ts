@@ -197,7 +197,14 @@ test("saved evidence refresh updates missing skills once without Gmail or workfl
     const state = await getState(tx);
     const application = state.applications[0];
     application.applicant.skills = "";
+    application.applicant.education =
+      "High school graduate · Ncii Cookery 2023";
     application.applicant.location = "443 Zone 4, Fictional Barangay,";
+    application.information!.fields.education = {
+      source: "Resume",
+      evidence: "Old mixed section",
+      confidence: "Confident",
+    };
     application.information!.fields.residence = {
       source: "Resume",
       evidence: "Original address line",
@@ -205,7 +212,7 @@ test("saved evidence refresh updates missing skills once without Gmail or workfl
     };
     await tx.query("UPDATE resumes SET extracted_text=$1 WHERE id=$2", [
       seal(
-        "FICTIONAL TEST PERSON\nAddress: 443 Zone 4, Fictional Barangay,\nCamarines Sur, Philippines\nSKILLS AND COMPETENCIES\n• Good communication skills\n• Basic accounting and reporting\nEDUCATION\nHigh school graduate",
+        "FICTIONAL TEST PERSON\nAddress: 443 Zone 4, Fictional Barangay,\nCamarines Sur, Philippines\nSKILLS AND COMPETENCIES\n• Good communication skills\n• Basic accounting and reporting\nEDUCATION\nHigh school graduate\nCERTIFICATE/TRAINING\nNCII Cookery 2023",
         process.env.TOKEN_ENCRYPTION_KEY!,
       ),
       application.resumeId,
@@ -277,5 +284,104 @@ test("saved evidence refresh updates missing skills once without Gmail or workfl
   );
   assert.match(saved.applicant.skills || "", /Communication Skills/i);
   assert.match(saved.applicant.location, /Camarines Sur, Philippines/);
+  assert.doesNotMatch(saved.applicant.education || "", /Cookery/);
+  assert.match(saved.applicant.certifications || "", /NCII Cookery/);
   assert.equal(saved.stage, "Screening");
+});
+test("saved Gmail subjects refresh email-only applicants without downloading a resume", async () => {
+  const id = "DJC-FIXTURE-00002";
+  await transaction(async (tx) => {
+    const state = await getState(tx);
+    const original = state.applications[0];
+    const application: Application = {
+      ...structuredClone(original),
+      id,
+      applicant: {
+        ...structuredClone(original.applicant),
+        id: "fixture-email-only-person",
+        email: "email-only@example.invalid",
+      },
+      resumeId: undefined,
+      resumeHash: undefined,
+      source: "Gmail",
+      gmailMessageId: "fixture-email-only-message",
+      position:
+        "Applied position was not clearly stated in the submitted application.",
+      location:
+        "Preferred work location was not clearly stated in the submitted application.",
+      information: { fields: {}, conflicts: [] },
+    };
+    state.applications.push(application);
+    await saveState(tx, state, { sync: false });
+    await putRecord(
+      tx,
+      "application_sources",
+      id,
+      seal(
+        {
+          subject: "Application for Barista - General Trias",
+          body: "I am applying for this opening.",
+          from: "<email-only@example.invalid>",
+        },
+        process.env.TOKEN_ENCRYPTION_KEY!,
+      ),
+    );
+  });
+  assert.deepEqual(await refreshStoredEvidenceBatch(1, id), {
+    examined: 1,
+    updated: 1,
+  });
+  const saved = await readTransaction(async (tx) =>
+    (await getState(tx)).applications.find(
+      (application) => application.id === id,
+    ),
+  );
+  assert.equal(saved?.position, "Barista");
+  assert.equal(saved?.location, "General Trias");
+  assert.equal(saved?.information?.fields.location?.source, "Email subject");
+});
+test("background evidence refresh corrects saved General Trias settings and hiring needs", async () => {
+  const id = "DJC-FIXTURE-00002";
+  await transaction(async (tx) => {
+    const state = await getState(tx);
+    state.locations ||= [];
+    state.locations.push({
+      id: "old-general-trias",
+      name: "Gen. Tri",
+      city: "",
+      province: "",
+      active: true,
+    });
+    state.hiringNeeds.push({
+      id: "old-general-trias-need",
+      position: "Barista",
+      location: "Gen. Tri",
+      slots: 1,
+      filled: 0,
+      urgency: "High",
+      targetDate: "2026-10-15",
+      status: "Open",
+      criteria: [],
+      qualifications: "",
+      questions: "",
+    });
+    state.applications.find((application) => application.id === id)!.location =
+      "Gen. Tri";
+    await saveState(tx, state, { sync: false });
+  });
+  assert.ok((await refreshStoredEvidenceBatch(1, id)).updated >= 3);
+  const state = await readTransaction(getState);
+  assert.ok(
+    state.locations?.some((location) => location.name === "General Trias"),
+  );
+  assert.ok(!state.locations?.some((location) => location.name === "Gen. Tri"));
+  assert.equal(
+    state.hiringNeeds.find((need) => need.id === "old-general-trias-need")
+      ?.location,
+    "General Trias",
+  );
+  assert.equal(
+    state.applications.find((application) => application.id === id)?.location,
+    "General Trias",
+  );
 });

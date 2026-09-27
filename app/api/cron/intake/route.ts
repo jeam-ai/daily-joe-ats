@@ -28,7 +28,7 @@ export async function GET(request: Request) {
   }
   if (Date.now() - started < 90000) await recoverOneDeferredDocument();
   if (Date.now() - started < 150000)
-    await refreshStoredEvidenceBatch(10).catch(() =>
+    await refreshStoredEvidenceBatch(25).catch(() =>
       reportIssue("documents.extraction"),
     );
   if (Date.now() - started < 170000) await runExtractionJobs(1);

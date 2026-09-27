@@ -39,7 +39,7 @@ export async function GET(request: Request) {
       // compete with the ten-message intake batch.
       after(async () => {
         const recovered = await recoverOneDeferredDocument().catch(() => false);
-        await refreshStoredEvidenceBatch(10).catch(() =>
+        await refreshStoredEvidenceBatch(25).catch(() =>
           reportIssue("documents.extraction"),
         );
         if (!recovered && ready && data.enabled && data.configured)

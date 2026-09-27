@@ -131,6 +131,7 @@ test("skills and competencies plus a wrapped postal address are recovered withou
   );
   assert.match(result.skills, /Good Communication Skills/i);
   assert.match(result.skills, /Basic Accounting And Reporting/i);
+  assert.match(result.experienceDetails, /Graphic Designer/i);
   assert.doesNotMatch(result.experienceDetails, /Good communication/i);
   assert.equal(result.warnings.length, 0);
   const application = {
@@ -153,6 +154,90 @@ test("skills and competencies plus a wrapped postal address are recovered withou
   applyRecoveredResumeEvidence(application, result);
   assert.equal(application.applicant.location, result.residence);
   assert.ok(application.applicant.skills);
+});
+test("General Trias in a Gmail subject is a preferred branch, not part of the job title", () => {
+  for (const subject of [
+    "Application for Barista - General Trias",
+    "Application for Barista General Trias",
+    "Barista application — Gen. Tri",
+  ]) {
+    const result = intakeEvidence({
+      subject,
+      body: "I would like to apply for this vacancy.",
+      locations: ["Gen. Tri"],
+      positions: ["Barista"],
+    });
+    assert.equal(result.position, "Barista", subject);
+    assert.equal(result.location, "General Trias", subject);
+    assert.equal(result.sources.location, "Email subject", subject);
+  }
+  const corrected = {
+    applicant: { name: "Fictional Person", location: "Not verified" },
+    position: "Barista General Trias",
+    location:
+      "Preferred work location was not clearly stated in the submitted application.",
+    information: {
+      fields: {
+        position: {
+          source: "Email subject",
+          evidence: "Application for Barista General Trias",
+          confidence: "Confident",
+        },
+      },
+      conflicts: [],
+    },
+  } as unknown as Application;
+  applyRecoveredResumeEvidence(
+    corrected,
+    intakeEvidence({ subject: "Application for Barista General Trias" }),
+  );
+  assert.equal(corrected.position, "Barista");
+  assert.equal(corrected.location, "General Trias");
+});
+test("a plain Experience heading preserves separate job entries and stops at Skills", () => {
+  const result = intakeEvidence({
+    subject: "Barista application - General Trias",
+    resume:
+      "FICTIONAL TEST PERSON\nExperience\nHIGH LANDS EXAMPLE (ON CALL) 2025\nWorked as an on-call table setter and waiter during events.\nSINANGAG EXAMPLE 2024-2025\nCook\nSkills\nFood preparation and basic cooking",
+  });
+  assert.match(result.experienceDetails, /High lands example/i);
+  assert.match(result.experienceDetails, /On-call table setter/i);
+  assert.match(result.experienceDetails, /Sinangag example/i);
+  assert.match(result.experienceDetails, /Cook/i);
+  assert.doesNotMatch(result.experienceDetails, /Food preparation/i);
+});
+test("certificate/training is separate from Education and repairs unverified saved fields", () => {
+  const result = intakeEvidence({
+    subject: "Barista application - General Trias",
+    resume:
+      "FICTIONAL TEST PERSON\nEDUCATION\nCavite State University 2023-2024\nDasmarinas Integrated High School 2021-2023\nCERTIFICATE/TRAINING\nNCII – COOKERY 2023\nNCII – FOOD AND BEVERAGE SERVICES 2023\nSKILLS\nFood preparation",
+  });
+  assert.match(result.education, /Cavite State University/);
+  assert.doesNotMatch(result.education, /Cookery|Beverage Services/i);
+  assert.match(result.certifications, /NCII.*Cookery/i);
+  assert.match(result.certifications, /NCII.*Food And Beverage Services/i);
+  assert.equal(result.sources.certifications, "Resume");
+  const application = {
+    applicant: {
+      name: "Fictional Test Person",
+      education:
+        "Cavite State University 2023-2024 · Dasmarinas Integrated High School 2021-2023 · Ncii – Cookery 2023 · Ncii – Food And Beverage Services 2023",
+      certifications: "",
+    },
+    information: {
+      fields: {
+        education: {
+          source: "Resume",
+          evidence: "Old mixed education evidence",
+          confidence: "Confident",
+        },
+      },
+      conflicts: [],
+    },
+  } as unknown as Application;
+  applyRecoveredResumeEvidence(application, result);
+  assert.doesNotMatch(application.applicant.education || "", /Cookery/);
+  assert.match(application.applicant.certifications || "", /NCII.*Cookery/i);
 });
 test("resume filename can recover an uncertain name and subject role omits the sender suffix", () => {
   const result = intakeEvidence({

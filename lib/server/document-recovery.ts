@@ -4,6 +4,7 @@ import type { User } from "@/types";
 import { canEdit } from "@/lib/data-policy";
 import { unseal, seal } from "@/lib/auth/security";
 import { intakeEvidence } from "@/lib/intake-evidence";
+import { canonicalizeStoredLocations } from "@/lib/locations";
 import { applyRecoveredResumeEvidence } from "@/lib/applicant-information";
 import { screenResumeAgainstCriteria, buildInsight } from "@/lib/screening";
 import { queueExtraction } from "./ai-extraction";
@@ -28,13 +29,14 @@ const sparse = (warnings?: string[]) =>
     /very little readable text was extracted/i.test(warning),
   );
 const OCR_UPGRADE = "bundled-english-v1";
-const EVIDENCE_PARSER_VERSION = "skills-address-v2";
+const EVIDENCE_PARSER_VERSION = "general-trias-certifications-v4";
 
 // Re-evaluate saved text after a deterministic parser improvement. This does
 // not fetch Gmail, write files, call AI, or touch HR-verified fields/stages.
-export async function refreshStoredEvidenceBatch(limit = 10, onlyId?: string) {
+export async function refreshStoredEvidenceBatch(limit = 25, onlyId?: string) {
   return transaction(async (tx) => {
     const state = await getState(tx);
+    const normalized = canonicalizeStoredLocations(state);
     const processed =
       (await readRecord<Record<string, string>>(
         tx,
@@ -58,27 +60,29 @@ export async function refreshStoredEvidenceBatch(limit = 10, onlyId?: string) {
         (item) =>
           !item.isDemo &&
           !item.deletedAt &&
-          !!item.resumeId &&
+          (!!item.resumeId ||
+            !!item.gmailMessageId ||
+            item.source === "Gmail") &&
           (!onlyId || item.id === onlyId) &&
           processed[item.id] !==
-            `${item.resumeId}:${EVIDENCE_PARSER_VERSION}:${vocabulary}`,
+            `${item.resumeId || "email"}:${EVIDENCE_PARSER_VERSION}:${vocabulary}`,
       )
-      .slice(0, Math.max(1, Math.min(limit, 10)));
-    let updated = 0;
+      .slice(0, Math.max(1, Math.min(limit, 25)));
+    let updated = normalized;
     for (const application of candidates) {
       processed[application.id] =
-        `${application.resumeId}:${EVIDENCE_PARSER_VERSION}:${vocabulary}`;
-      const resume = (
-        await tx.query(
-          "SELECT filename,extracted_text FROM resumes WHERE id=$1",
-          [application.resumeId],
-        )
-      )[0];
-      if (!resume?.extracted_text) continue;
-      const text = unseal<string>(
-        String(resume.extracted_text),
-        config().encryptionKey,
-      );
+        `${application.resumeId || "email"}:${EVIDENCE_PARSER_VERSION}:${vocabulary}`;
+      const resume = application.resumeId
+        ? (
+            await tx.query(
+              "SELECT filename,extracted_text FROM resumes WHERE id=$1",
+              [application.resumeId],
+            )
+          )[0]
+        : null;
+      const text = resume?.extracted_text
+        ? unseal<string>(String(resume.extracted_text), config().encryptionKey)
+        : "";
       const savedSource = await readRecord<string>(
         tx,
         "application_sources",
@@ -105,7 +109,7 @@ export async function refreshStoredEvidenceBatch(limit = 10, onlyId?: string) {
         application,
         intakeEvidence({
           ...source,
-          filename: String(resume.filename),
+          filename: String(resume?.filename || ""),
           resume: text,
           positions,
           locations,
@@ -132,6 +136,11 @@ export async function refreshStoredEvidenceBatch(limit = 10, onlyId?: string) {
     }
     if (candidates.length)
       await putRecord(tx, "document_recovery", "evidence_parser", processed);
+    if (normalized)
+      await audit(tx, "System", "locations.canonicalized", undefined, {
+        canonical: "General Trias",
+        correctedReferences: normalized,
+      });
     if (updated) await saveState(tx, state, { sync: false });
     return { examined: candidates.length, updated };
   });

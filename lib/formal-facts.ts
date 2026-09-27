@@ -11,6 +11,8 @@ const acronyms = new Set([
   "MBA",
   "BS",
   "BA",
+  "NCII",
+  "TESDA",
 ]);
 
 export function formalFact(field: string, value: string): string {

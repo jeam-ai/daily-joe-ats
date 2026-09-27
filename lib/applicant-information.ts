@@ -96,6 +96,18 @@ export function applyRecoveredResumeEvidence(
       !!evidence.name &&
       current?.trim().toLocaleLowerCase() ===
         `${value} - ${evidence.name}`.toLocaleLowerCase();
+    const subjectPositionIncludesBranch =
+      key === "position" &&
+      evidence.location === "General Trias" &&
+      !!current &&
+      current
+        .replace(
+          /(?:\s+(?:at|in|for|branch)\s+|\s*[-—–|,]\s*|\s+)(?:general\s+trias|gen\.?\s*tri(?:as)?)\s*$/i,
+          "",
+        )
+        .trim()
+        .toLocaleLowerCase() === value.toLocaleLowerCase() &&
+      current.trim().toLocaleLowerCase() !== value.toLocaleLowerCase();
     const longerResumeAddress =
       key === "residence" &&
       incoming.fields.residence?.source === "Resume" &&
@@ -105,10 +117,23 @@ export function applyRecoveredResumeEvidence(
         .toLocaleLowerCase()
         .startsWith(current.trim().toLocaleLowerCase()) &&
       value.length > current.trim().length + 4;
+    const correctedEducation =
+      key === "education" &&
+      fields.education?.source === "Resume" &&
+      incoming.fields.education?.source === "Resume" &&
+      !!current &&
+      /\b(?:certifications?|certificates?|trainings?|tesda|nc\s*i{1,3})\b/i.test(
+        current,
+      ) &&
+      !/\b(?:certifications?|certificates?|trainings?|tesda|nc\s*i{1,3})\b/i.test(
+        value,
+      );
     if (
       !missingInformation(current) &&
       !subjectPositionIncludesName &&
-      !longerResumeAddress
+      !subjectPositionIncludesBranch &&
+      !longerResumeAddress &&
+      !correctedEducation
     )
       continue;
     if (key === "position" || key === "location")

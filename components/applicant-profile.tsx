@@ -171,7 +171,8 @@ export function ApplicantProfile({ id }: { id: string }) {
   useEffect(() => {
     const application = state?.applications.find((item) => item.id === id);
     if (
-      !application?.resumeId ||
+      !application ||
+      (!application.resumeId && application.source !== "Gmail") ||
       application.isDemo ||
       !canManage(state?.currentUser) ||
       evidenceChecked.current.has(id)

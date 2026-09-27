@@ -4,6 +4,7 @@ import type {
   Location,
   QualificationRule,
 } from "@/types";
+import { canonicalLocationName } from "@/lib/locations";
 
 // Transcribed from the company vacancies report dated 21 September 2026.
 // The report supplies branch, position and slots; HR supplied 15 October 2026
@@ -13,8 +14,8 @@ import type {
 export const vacancyReport20260921 = [
   ["ops-01", "Barista", "Tagapo", 1],
   ["ops-02", "Barista", "Naic", 1],
-  ["ops-03", "Barista", "Gen. Tri", 3],
-  ["ops-04", "Team Leader", "Gen. Tri", 1],
+  ["ops-03", "Barista", "General Trias", 3],
+  ["ops-04", "Team Leader", "General Trias", 1],
   ["ops-05", "Barista", "SM San Pedro", 2],
   ["ops-06", "Team Leader", "SM San Pedro", 1],
   ["ops-07", "Barista-Reliever", "Magsaysay", 1],
@@ -69,7 +70,7 @@ const draftCriteria: Record<string, string[]> = {
 };
 
 const key = (position: string, location: string) =>
-  `${position.trim().toLocaleLowerCase()}|${location.trim().toLocaleLowerCase()}`;
+  `${position.trim().toLocaleLowerCase()}|${canonicalLocationName(location).toLocaleLowerCase()}`;
 
 export function planVacancyReportImport(state: AppState) {
   const existing = new Set(
@@ -79,7 +80,7 @@ export function planVacancyReportImport(state: AppState) {
   );
   const knownLocations = new Set(
     (state.locations || []).map((location) =>
-      location.name.toLocaleLowerCase(),
+      canonicalLocationName(location.name).toLocaleLowerCase(),
     ),
   );
   const locations: Location[] = [];
@@ -90,7 +91,10 @@ export function planVacancyReportImport(state: AppState) {
       locations.push({
         id: `report-2026-09-21-location-${location.toLocaleLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
         name: location,
-        city: location === "Naga City" ? "Naga City" : "",
+        city:
+          location === "Naga City" || location === "General Trias"
+            ? location
+            : "",
         province: location === "Naga City" ? "Camarines Sur" : "",
         active: true,
       });
