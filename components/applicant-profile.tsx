@@ -147,7 +147,10 @@ export function ApplicantProfile({ id }: { id: string }) {
     value: Application;
   } | null>(null);
   useEffect(() => {
-    if (!state || state.applications.some((application) => application.id === id))
+    if (
+      !state ||
+      state.applications.some((application) => application.id === id)
+    )
       return;
     let current = true;
     setDetailLoading(true);
@@ -164,8 +167,7 @@ export function ApplicantProfile({ id }: { id: string }) {
   }, [state?.revision, state?.applications.length, id, ensureApplication]);
   if (!state) return <LoadingSkeleton />;
   const a = state.applications.find((a) => a.id === id);
-  if (!a)
-    if (detailLoading) return <LoadingSkeleton />;
+  if (!a) if (detailLoading) return <LoadingSkeleton />;
   if (!a)
     return (
       <EmptyState
@@ -176,17 +178,20 @@ export function ApplicantProfile({ id }: { id: string }) {
   const app = a;
   const editable = canEdit(state.currentUser, a);
   const manager = canManage(state.currentUser);
-  const talentPoolDays = Math.ceil(
-    (Date.parse(a.talentPoolAddedAt || a.appliedAt) +
-      30 * 86400000 -
-      Date.now()) /
-      86400000,
-  );
+  const talentStarted = Date.parse(a.talentPoolAddedAt || a.appliedAt);
+  const talentExpires = a.talentPoolExpiresAt
+    ? Date.parse(a.talentPoolExpiresAt)
+    : talentStarted + 30 * 86400000;
+  const talentGraceExpires = a.talentPoolGraceExpiresAt
+    ? Date.parse(a.talentPoolGraceExpiresAt)
+    : talentStarted + 40 * 86400000;
+  const talentPoolDays = Math.ceil((talentExpires - Date.now()) / 86400000);
   const talentGraceDays = Math.ceil(
-    (Date.parse(a.talentPoolAddedAt || a.appliedAt) +
-      40 * 86400000 -
-      Date.now()) /
-      86400000,
+    (talentGraceExpires - Date.now()) / 86400000,
+  );
+  const configuredTalentDays = Math.max(
+    1,
+    Math.round((talentExpires - talentStarted) / 86400000),
   );
   const actorEmail = state.currentUser?.email;
   const next = nextStage(a);
@@ -424,6 +429,29 @@ export function ApplicantProfile({ id }: { id: string }) {
         editable={editable}
         onEdit={requestEdit}
       />
+      {a.retentionExpiresAt &&
+        ["outside_live_queue", "terminal"].includes(
+          a.retentionCategory || "",
+        ) && (
+          <Card className="spaced retention-card">
+            <h2>
+              <Clock3 size={17} /> Application retention
+            </h2>
+            <p>
+              {a.retentionCategory === "outside_live_queue"
+                ? "Outside the newest 500 live applications."
+                : "Rejected, withdrawn, or no-response retention is pending."}{" "}
+              Permanent cleanup becomes eligible in{" "}
+              {Math.max(
+                0,
+                Math.ceil(
+                  (Date.parse(a.retentionExpiresAt) - Date.now()) / 86400000,
+                ),
+              )}{" "}
+              days. HR can correct the application while it remains available.
+            </p>
+          </Card>
+        )}
       {a.status === "Talent Pool" && (
         <Card className="spaced retention-card">
           <div className="card-heading">
@@ -436,17 +464,14 @@ export function ApplicantProfile({ id }: { id: string }) {
                   ? "This applicant has left the Talent Pool. Their application history remains available."
                   : talentPoolDays > 0
                     ? `Talent Pool expires in ${talentPoolDays} day${talentPoolDays === 1 ? "" : "s"}.`
-                    : `Talent Pool retention expires in ${Math.max(0, talentGraceDays)} day${talentGraceDays === 1 ? "" : "s"}. Retain applicant to keep them in the pool.`}
+                    : `Talent Pool grace ${talentGraceDays > 0 ? `ends in ${talentGraceDays} day${talentGraceDays === 1 ? "" : "s"}` : "has ended"}. Retain applicant to keep them in the pool.`}
               </p>
             </div>
             {!a.talentPoolExpiredAt && (
-              <Badge tone={talentGraceDays <= 10 ? "orange" : "neutral"}>
+              <Badge tone={talentPoolDays <= 7 ? "orange" : "neutral"}>
                 Expires{" "}
                 {formatDate(
-                  new Date(
-                    Date.parse(a.talentPoolAddedAt || a.appliedAt) +
-                      30 * 86400000,
-                  ).toISOString(),
+                  new Date(talentExpires).toISOString(),
                   state.preferences,
                 )}
               </Badge>
@@ -468,7 +493,9 @@ export function ApplicantProfile({ id }: { id: string }) {
                     },
                   );
                   await refresh();
-                  notify("Talent Pool retention reset for 30 days.");
+                  notify(
+                    `Talent Pool retention reset for ${configuredTalentDays} days.`,
+                  );
                 } catch (error) {
                   notify((error as Error).message, "error");
                 } finally {
@@ -476,7 +503,7 @@ export function ApplicantProfile({ id }: { id: string }) {
                 }
               }}
             >
-              Retain / Reset 30 days
+              Retain / Reset {configuredTalentDays} days
             </Button>
           )}
         </Card>

@@ -59,7 +59,8 @@ export function HiringNeeds() {
     .reduce((total, need) => total + need.slots, 0);
   const pipeline = openNeeds.reduce(
     (total, need) =>
-      total + (state.applicationSummary?.[dataset].activeByHiringNeed[need.id] || 0),
+      total +
+      (state.applicationSummary?.[dataset].activeByHiringNeed[need.id] || 0),
     0,
   );
   async function save(e: React.FormEvent<HTMLFormElement>) {
@@ -190,7 +191,9 @@ export function HiringNeeds() {
               </div>
               <div>
                 <strong>
-                  {state.applicationSummary?.[dataset].activeByHiringNeed[n.id] || 0}
+                  {state.applicationSummary?.[dataset].activeByHiringNeed[
+                    n.id
+                  ] || 0}
                 </strong>
                 <span>in pipeline</span>
               </div>
@@ -214,16 +217,24 @@ export function HiringNeeds() {
               const days = Math.ceil(
                 (Date.parse(n.targetDate) - Date.now()) / 86400000,
               );
-              if (!Number.isFinite(days) || n.status === "Closed") return null;
+              if (!Number.isFinite(days)) return null;
               if (days > 7) return null;
-              const graceDays = Math.max(0, days + 10);
+              const graceDays = n.retentionExpiresAt
+                ? Math.max(
+                    0,
+                    Math.ceil(
+                      (Date.parse(n.retentionExpiresAt) - Date.now()) /
+                        86400000,
+                    ),
+                  )
+                : Math.max(0, days + 10);
               return (
                 <p className="retention-inline">
                   {days > 0
                     ? `Hiring request target date is in ${days} day${days === 1 ? "" : "s"}.`
                     : graceDays > 0
-                      ? `This hiring need will be permanently removed in ${graceDays} day${graceDays === 1 ? "" : "s"} unless retained or reopened.`
-                      : "Hiring need retention period has elapsed. Reopen or update the target date to retain it."}
+                      ? `This hiring need becomes eligible for permanent cleanup in ${graceDays} day${graceDays === 1 ? "" : "s"} unless its target date is extended.`
+                      : "Hiring need retention period has elapsed. Extend the target date to retain it."}
                 </p>
               );
             })()}

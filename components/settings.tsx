@@ -8,6 +8,7 @@ import {
   AiIntegration,
 } from "./operations";
 import { AttendanceSettings } from "./attendance-settings";
+import { RetentionSettings } from "./retention-settings";
 import Link from "next/link";
 import { canManage } from "@/lib/data-policy";
 import { SystemSettings } from "./system-settings";
@@ -60,6 +61,7 @@ const sections = [
   ["timekeeping", "Attendance & Odoo Mapping", ClipboardList],
   ["preferences", "Appearance & Preferences", SlidersHorizontal],
   ["health", "System Health", SlidersHorizontal],
+  ["retention", "Data Retention", SlidersHorizontal],
   ["diagnostics", "Error Center", SlidersHorizontal],
   ["audit", "Activity History", ClipboardList],
   ["system", "Demo & Data Management", SlidersHorizontal],
@@ -81,6 +83,7 @@ export function Settings({ section = "integrations" }: { section?: string }) {
       "requirements",
       "email-templates",
       "locations",
+      "retention",
     ].includes(section);
   const template =
     state.emailTemplates.find((t) => t.id === selected) ||
@@ -142,6 +145,7 @@ export function Settings({ section = "integrations" }: { section?: string }) {
           )}
           <fieldset className="settings-section-fields" disabled={demoReadOnly}>
             {section === "health" && <SystemHealth />}
+            {section === "retention" && <RetentionSettings />}
             {section === "data" && <SheetsSettings />}
             {section === "diagnostics" && <Diagnostics />}
             {section === "audit" && <AuditHistory />}

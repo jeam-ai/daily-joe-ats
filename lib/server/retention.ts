@@ -1,28 +1,14 @@
 import "server-only";
 import type { Application } from "@/types";
 import { INTAKE_QUEUE_LIMIT, eligibleIntake, isDemo } from "@/lib/data-policy";
+import {
+  retentionPolicyDefaults,
+  type RetentionPolicies,
+  type RetentionPolicyName,
+} from "@/lib/retention-policy";
 import { writeAudit } from "./audit";
 import { getState, saveState } from "./repository";
 import { transaction, type Transaction } from "./database";
-
-type PolicyName =
-  | "application_queue_days"
-  | "terminal_application_days"
-  | "talent_pool_days"
-  | "talent_pool_grace_days"
-  | "hiring_need_days"
-  | "report_days"
-  | "activity_log_days";
-
-const defaults: Record<PolicyName, number> = {
-  application_queue_days: 10,
-  terminal_application_days: 10,
-  talent_pool_days: 30,
-  talent_pool_grace_days: 10,
-  hiring_need_days: 10,
-  report_days: 365,
-  activity_log_days: 30,
-};
 
 const at = (time: number) => new Date(time).toISOString();
 const plusDays = (time: number, days: number) => time + days * 86400000;
@@ -36,17 +22,27 @@ const protectedApplication = (application: Application) =>
     "Hired",
   ].includes(application.stage);
 
-async function policies(tx: Transaction) {
+export async function readRetentionPolicies(tx: Transaction) {
   const rows = await tx.query("SELECT name,days FROM retention_policies");
-  const values = { ...defaults };
+  const values: RetentionPolicies = { ...retentionPolicyDefaults };
   for (const row of rows) {
-    const name = String(row.name) as PolicyName;
+    const name = String(row.name) as RetentionPolicyName;
     const days = Number(row.days);
-    if (name in values && Number.isInteger(days) && days >= 1 && days <= 3650)
+    if (
+      Object.hasOwn(values, name) &&
+      Number.isInteger(days) &&
+      days >= 1 &&
+      days <= 3650
+    )
       values[name] = days;
   }
+  return values;
+}
+
+async function policies(tx: Transaction) {
+  const values = await readRetentionPolicies(tx);
   const now = new Date().toISOString();
-  for (const [name, days] of Object.entries(defaults))
+  for (const [name, days] of Object.entries(retentionPolicyDefaults))
     await tx.query(
       "INSERT INTO retention_policies(name,days,updated_at) VALUES($1,$2,$3) ON CONFLICT(name) DO NOTHING",
       [name, days, now],
@@ -123,7 +119,9 @@ export function retentionDryRunEnabled() {
 }
 export async function runRetentionCleanup(options: RetentionRunOptions = {}) {
   return transaction(async (tx) => {
-    const dryRun = options.dryRun ?? retentionDryRunEnabled();
+    // A caller may demand a preview, but may never bypass the two deployment
+    // safety switches by passing dryRun:false.
+    const dryRun = retentionDryRunEnabled() || options.dryRun === true;
     const nowMs = Date.now();
     const now = at(nowMs);
     const policy = await policies(tx);
@@ -175,7 +173,21 @@ export async function runRetentionCleanup(options: RetentionRunOptions = {}) {
               policy.talent_pool_days + policy.talent_pool_grace_days,
             ),
           ),
-          "Talent Pool 30-day retention plus grace period",
+          `Talent Pool ${policy.talent_pool_days}-day retention plus ${policy.talent_pool_grace_days}-day grace period`,
+        );
+        await tx.query(
+          "UPDATE talent_pool_memberships SET expires_at=$1,grace_expires_at=$2 WHERE applicant_id=$3 AND started_at=$4",
+          [
+            at(plusDays(started, policy.talent_pool_days)),
+            at(
+              plusDays(
+                started,
+                policy.talent_pool_days + policy.talent_pool_grace_days,
+              ),
+            ),
+            application.applicant.id,
+            at(started),
+          ],
         );
       } else if (terminal) {
         const started = Date.parse(
@@ -192,16 +204,17 @@ export async function runRetentionCleanup(options: RetentionRunOptions = {}) {
       } else if (outsideQueue && !protectedApplication(application)) {
         // Preserve the original grace clock only while the record remains
         // outside the newest 500. Returning to the queue cancels it below.
+        const existingStart =
+          existingRecord?.category === "outside_live_queue"
+            ? Date.parse(String(existingRecord.started_at))
+            : NaN;
+        const started = Number.isFinite(existingStart) ? existingStart : nowMs;
         await putRetention(
           tx,
           application.id,
           "outside_live_queue",
-          existingRecord?.category === "outside_live_queue"
-            ? String(existingRecord.started_at)
-            : now,
-          existingRecord?.category === "outside_live_queue"
-            ? String(existingRecord.expires_at)
-            : at(plusDays(nowMs, policy.application_queue_days)),
+          at(started),
+          at(plusDays(started, policy.application_queue_days)),
           "Outside the newest 500 eligible applications",
         );
       } else if (existingRecord) {
@@ -312,7 +325,7 @@ export async function runRetentionCleanup(options: RetentionRunOptions = {}) {
       }
       const expiresAt = at(plusDays(due, policy.hiring_need_days));
       await tx.query(
-        "INSERT INTO hiring_need_retention(hiring_need_id,started_at,expires_at,reason) VALUES($1,$2,$3,$4) ON CONFLICT(hiring_need_id) DO NOTHING",
+        "INSERT INTO hiring_need_retention(hiring_need_id,started_at,expires_at,reason) VALUES($1,$2,$3,$4) ON CONFLICT(hiring_need_id) DO UPDATE SET started_at=excluded.started_at,expires_at=excluded.expires_at,reason=excluded.reason",
         [
           need.id,
           at(due),

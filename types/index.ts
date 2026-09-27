@@ -161,6 +161,8 @@ export interface Application {
   hiredAt?: string;
   talentPoolAddedAt?: string;
   talentPoolExpiredAt?: string;
+  talentPoolExpiresAt?: string;
+  talentPoolGraceExpiresAt?: string;
   retentionCategory?: string;
   retentionStartedAt?: string;
   retentionExpiresAt?: string;
@@ -178,6 +180,7 @@ export interface HiringNeed {
   filled: number;
   urgency: "Urgent" | "High" | "Medium" | "Low";
   targetDate: string;
+  retentionExpiresAt?: string;
   status: "Open" | "Paused" | "Filled" | "Closed";
   criteria?: QualificationRule[];
   qualifications: string;

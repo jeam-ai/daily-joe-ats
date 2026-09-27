@@ -24,15 +24,33 @@ import {
   LoadingSkeleton,
 } from "./ui";
 import type { Application } from "@/types";
-import {
-  canManage,
-  canEdit,
-  INTAKE_QUEUE_LIMIT,
-} from "@/lib/data-policy";
+import { canManage, canEdit, INTAKE_QUEUE_LIMIT } from "@/lib/data-policy";
 import { requestJson, downloadFile } from "@/lib/client-request";
 import { ApplicantEditor, DeleteApplicantDialog } from "./applicant-management";
 import { ActionMenu } from "./action-menu";
 import { formatDate, monthKey } from "@/lib/dates";
+const daysUntil = (timestamp: number) =>
+  Math.max(0, Math.ceil((timestamp - Date.now()) / 86400000));
+function talentRetentionWarning(application: Application) {
+  const started = Date.parse(
+    application.talentPoolAddedAt || application.appliedAt,
+  );
+  const expires = application.talentPoolExpiresAt
+    ? Date.parse(application.talentPoolExpiresAt)
+    : started + 30 * 86400000;
+  const graceEnds = application.talentPoolGraceExpiresAt
+    ? Date.parse(application.talentPoolGraceExpiresAt)
+    : started + 40 * 86400000;
+  if (!Number.isFinite(expires) || !Number.isFinite(graceEnds))
+    return "Talent Pool expiration date needs review.";
+  const poolDays = daysUntil(expires);
+  if (poolDays > 0)
+    return `Talent Pool expires in ${poolDays} day${poolDays === 1 ? "" : "s"}`;
+  const graceDays = daysUntil(graceEnds);
+  return graceDays > 0
+    ? `Talent Pool grace ends in ${graceDays} day${graceDays === 1 ? "" : "s"}. Retain to keep in pool.`
+    : "Talent Pool grace ended. Retain to keep in pool.";
+}
 export function Applications({ talent = false }: { talent?: boolean }) {
   const { state, notify, dataset } = useApp();
   const router = useRouter();
@@ -210,9 +228,9 @@ export function Applications({ talent = false }: { talent?: boolean }) {
             Latest 100 active applications ·{" "}
             {state.applicationSummary?.[dataset].active ?? 0} active ·{" "}
             {state.applicationSummary?.[dataset].queued ?? 0} queued within the{" "}
-            {" "}{INTAKE_QUEUE_LIMIT}-application live queue. Gmail intake continues
-            beyond the queue; older records receive retention review and protected
-            active applications remain available.
+            {INTAKE_QUEUE_LIMIT}-application live queue. Gmail intake continues
+            beyond the queue; older records receive retention review and
+            protected active applications remain available.
           </p>
         )}
         {!talent && (
@@ -484,30 +502,23 @@ export function Applications({ talent = false }: { talent?: boolean }) {
                     </Link>
                     {a.isDemo && <Badge tone="amber">DEMO</Badge>}
                     {a.queueState === "Queued" && <Badge>Queued</Badge>}
-                    {a.retentionCategory === "outside_live_queue" &&
-                      a.retentionExpiresAt && (
+                    {a.retentionExpiresAt &&
+                      ["outside_live_queue", "terminal"].includes(
+                        a.retentionCategory || "",
+                      ) && (
                         <small className="retention-inline">
-                          Outside live queue — deletion in{" "}
-                          {Math.max(
-                            0,
-                            Math.ceil(
-                              (Date.parse(a.retentionExpiresAt) - Date.now()) /
-                                86400000,
-                            ),
-                          )}{" "}
-                          days
+                          {a.retentionCategory === "outside_live_queue"
+                            ? "Outside live queue"
+                            : "Status retention pending"}{" "}
+                          — permanent cleanup eligible{" "}
+                          {daysUntil(Date.parse(a.retentionExpiresAt)) > 0
+                            ? `in ${daysUntil(Date.parse(a.retentionExpiresAt))} days`
+                            : "now"}
                         </small>
                       )}
                     {talent && !a.talentPoolExpiredAt && (
                       <small className="retention-inline">
-                        {Math.ceil(
-                          (Date.parse(a.talentPoolAddedAt || a.appliedAt) +
-                            30 * 86400000 -
-                            Date.now()) /
-                            86400000,
-                        ) > 0
-                          ? `Talent Pool expires in ${Math.ceil((Date.parse(a.talentPoolAddedAt || a.appliedAt) + 30 * 86400000 - Date.now()) / 86400000)} days`
-                          : `Talent Pool retention expires in ${Math.max(0, Math.ceil((Date.parse(a.talentPoolAddedAt || a.appliedAt) + 40 * 86400000 - Date.now()) / 86400000))} days`}
+                        {talentRetentionWarning(a)}
                       </small>
                     )}
                   </td>

@@ -1,14 +1,24 @@
-import { requireUser } from "@/lib/auth/session";
+import { requireOrigin, requireUser } from "@/lib/auth/session";
 import {
   aivenConfigured,
   postgresConfigured,
   readTransaction,
+  transaction,
   type Transaction,
 } from "@/lib/server/database";
-import { getState } from "@/lib/server/repository";
+import { audit, getState } from "@/lib/server/repository";
 import { safeError } from "@/lib/server/response";
 import { SafeError } from "@/lib/server/config";
-import { retentionDryRunEnabled } from "@/lib/server/retention";
+import {
+  readRetentionPolicies,
+  retentionDryRunEnabled,
+  runRetentionCleanup,
+} from "@/lib/server/retention";
+import {
+  retentionPolicyDefaults,
+  type RetentionPolicies,
+  type RetentionPolicyName,
+} from "@/lib/retention-policy";
 
 export const runtime = "nodejs";
 
@@ -24,9 +34,12 @@ export async function GET() {
       throw new SafeError("Administrator access required.", 403);
     const result = await readTransaction(async (tx) => {
       const state = await getState(tx);
+      const policies = await readRetentionPolicies(tx);
       const now = Date.now();
       const week = new Date(now + 7 * 86400000).toISOString();
-      const activityCutoff = new Date(now - 30 * 86400000).toISOString();
+      const activityCutoff = new Date(
+        now - policies.activity_log_days * 86400000,
+      ).toISOString();
       const pending = await tx.query(
         "SELECT category,COUNT(*) AS count FROM application_retention GROUP BY category",
       );
@@ -72,23 +85,12 @@ export async function GET() {
         (a) => !a.isDemo && !a.deletedAt,
       );
       const talentPool = applications.filter((a) => a.status === "Talent Pool");
-      const retentionPolicies = await tx.query(
-        "SELECT name,days FROM retention_policies WHERE name IN ('talent_pool_days','talent_pool_grace_days')",
-      );
-      const poolDays = Number(
-        retentionPolicies.find((row) => row.name === "talent_pool_days")
-          ?.days || 30,
-      );
-      const graceDays = Number(
-        retentionPolicies.find((row) => row.name === "talent_pool_grace_days")
-          ?.days || 10,
-      );
+      const poolDays = policies.talent_pool_days;
       const talentExpiring = talentPool.filter((a) => {
         const start = Date.parse(a.talentPoolAddedAt || a.appliedAt);
         return (
           !a.talentPoolExpiredAt &&
-          start + (poolDays + graceDays) * 86400000 <=
-            now + graceDays * 86400000
+          start + poolDays * 86400000 <= now + 7 * 86400000
         );
       }).length;
       const hiringSoon = state.hiringNeeds.filter((need) => {
@@ -96,6 +98,7 @@ export async function GET() {
         return (
           need.status !== "Closed" &&
           Number.isFinite(target) &&
+          target > now &&
           target <= now + 7 * 86400000
         );
       }).length;
@@ -109,6 +112,7 @@ export async function GET() {
       );
       return {
         dryRun: retentionDryRunEnabled(),
+        policies,
         queue: {
           active: applications.filter((a) => a.queueState === "Active").length,
           queued: applications.filter((a) => a.queueState === "Queued").length,
@@ -141,6 +145,76 @@ export async function GET() {
       };
     });
     return Response.json(result, { headers: { "Cache-Control": "no-store" } });
+  } catch (error) {
+    return safeError(error);
+  }
+}
+
+export async function POST(request: Request) {
+  try {
+    requireOrigin(request);
+    const user = await requireUser();
+    if (user.role !== "Admin")
+      throw new SafeError("Administrator access required.", 403);
+    const body = await request.json();
+    const input = body?.policies;
+    const names = Object.keys(retentionPolicyDefaults) as RetentionPolicyName[];
+    if (
+      body?.action !== "update-policies" ||
+      !input ||
+      typeof input !== "object" ||
+      Array.isArray(input) ||
+      Object.keys(input).length !== names.length ||
+      !names.every(
+        (name) =>
+          typeof input[name] === "number" &&
+          Number.isInteger(input[name]) &&
+          input[name] >= 1 &&
+          input[name] <= 3650,
+      )
+    )
+      throw new SafeError("Enter every retention period as 1–3650 whole days.");
+    const requested = Object.fromEntries(
+      names.map((name) => [name, input[name]]),
+    ) as RetentionPolicies;
+    const result = await transaction(async (tx) => {
+      const previous = await readRetentionPolicies(tx);
+      const changes = names
+        .filter((name) => requested[name] !== previous[name])
+        .map((name) => ({
+          name,
+          from: previous[name],
+          to: requested[name],
+        }));
+      if (
+        !retentionDryRunEnabled() &&
+        changes.some((change) => change.to < change.from) &&
+        body.confirmShorterRetention !== true
+      )
+        throw new SafeError(
+          "Confirm shorter retention before making existing records eligible for cleanup.",
+          409,
+        );
+      const now = new Date().toISOString();
+      for (const change of changes)
+        await tx.query(
+          "INSERT INTO retention_policies(name,days,updated_at) VALUES($1,$2,$3) ON CONFLICT(name) DO UPDATE SET days=excluded.days,updated_at=excluded.updated_at",
+          [change.name, change.to, now],
+        );
+      if (changes.length)
+        await audit(tx, user.email, "retention.policies_updated", undefined, {
+          changes,
+        });
+      return { policies: requested, changed: changes.length > 0 };
+    });
+    // An admin policy edit is rare. Recalculate warnings immediately in safe
+    // preview mode; this can never permanently remove a record.
+    const preview = await runRetentionCleanup({ dryRun: true });
+    return Response.json({
+      ...result,
+      dryRun: retentionDryRunEnabled(),
+      preview,
+    });
   } catch (error) {
     return safeError(error);
   }

@@ -88,24 +88,40 @@ export async function listApplications(params: URLSearchParams, demo = false) {
   const since = params.get("since");
   if (since && /^\d{4}-\d{2}-\d{2}/.test(since))
     where.push(`w.received_at>=${bind(since)}`);
-  const from = `FROM applications a JOIN intake_window w ON w.application_id=a.id LEFT JOIN hiring_needs n ON n.id=a.hiring_need_id WHERE ${where.join(" AND ")}`;
+  const from = `FROM applications a JOIN intake_window w ON w.application_id=a.id LEFT JOIN hiring_needs n ON n.id=a.hiring_need_id LEFT JOIN application_retention r ON r.application_id=a.id LEFT JOIN talent_pool_memberships tp ON tp.applicant_id=a.applicant_id WHERE ${where.join(" AND ")}`;
   return readTransaction(async (tx) => {
     const total = Number(
       (await tx.query(`SELECT COUNT(*) AS n ${from}`, values))[0].n,
     );
     const actual = Math.min(page, Math.max(1, Math.ceil(total / 20)));
     const rows = await tx.query(
-      `SELECT a.payload,r.category AS retention_category,r.started_at AS retention_started_at,r.expires_at AS retention_expires_at,r.reason AS retention_reason ${from.replace(" WHERE ", " LEFT JOIN application_retention r ON r.application_id=a.id WHERE ")} ORDER BY w.received_at DESC,a.id DESC LIMIT 20 OFFSET ${bind((actual - 1) * 20)}`,
+      `SELECT a.payload,r.category AS retention_category,r.started_at AS retention_started_at,r.expires_at AS retention_expires_at,r.reason AS retention_reason,tp.expires_at AS talent_pool_expires_at,tp.grace_expires_at AS talent_pool_grace_expires_at ${from} ORDER BY w.received_at DESC,a.id DESC LIMIT 20 OFFSET ${bind((actual - 1) * 20)}`,
       values,
     );
     return {
       applications: rows.map((r) => {
         const application = JSON.parse(String(r.payload)) as Application;
+        delete application.retentionCategory;
+        delete application.retentionStartedAt;
+        delete application.retentionExpiresAt;
+        delete application.retentionReason;
+        delete application.talentPoolExpiresAt;
+        delete application.talentPoolGraceExpiresAt;
         if (r.retention_category) {
           application.retentionCategory = String(r.retention_category);
           application.retentionStartedAt = String(r.retention_started_at);
           application.retentionExpiresAt = String(r.retention_expires_at);
           application.retentionReason = String(r.retention_reason);
+        }
+        if (
+          r.talent_pool_expires_at &&
+          application.status === "Talent Pool" &&
+          !application.talentPoolExpiredAt
+        ) {
+          application.talentPoolExpiresAt = String(r.talent_pool_expires_at);
+          application.talentPoolGraceExpiresAt = String(
+            r.talent_pool_grace_expires_at,
+          );
         }
         return application;
       }),

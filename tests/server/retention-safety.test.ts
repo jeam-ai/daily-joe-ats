@@ -73,7 +73,18 @@ test("Talent Pool expiry runs once and removes only the membership", async () =>
   assert.equal(preview.dryRun, true);
   assert.equal(preview.wouldExpireTalentPool, 1);
   assert.equal(await countMemberships(), 1);
-  const applied = await runRetentionCleanup({ dryRun: false });
+  const attemptedOverride = await runRetentionCleanup({ dryRun: false });
+  assert.equal(attemptedOverride.dryRun, true);
+  assert.equal(await countMemberships(), 1);
+  process.env.DRY_RUN_RETENTION_CLEANUP = "false";
+  process.env.RETENTION_CLEANUP_VERIFIED = "true";
+  let applied;
+  try {
+    applied = await runRetentionCleanup({ dryRun: false });
+  } finally {
+    process.env.DRY_RUN_RETENTION_CLEANUP = "true";
+    process.env.RETENTION_CLEANUP_VERIFIED = "false";
+  }
   assert.equal(applied.deletedTalentPoolMemberships, 1);
   assert.equal(await countMemberships(), 0);
   const next = await runRetentionCleanup({ dryRun: false });
@@ -89,7 +100,24 @@ test("Requirements are protected outside 500 and return to the queue cancels gra
   const protectedNeed = application("requirements", "2026-01-02T00:00:00.000Z");
   protectedNeed.stage = "Requirements";
   protectedNeed.status = "In Progress";
-  state.applications.push(older, protectedNeed);
+  const protectedStages = [
+    protectedNeed,
+    ...(["Initial Interview", "Final Interview", "Onboarding"] as const).map(
+      (stage, index) => {
+        const selected = application(
+          `protected-${index}`,
+          `2026-01-0${index + 3}T00:00:00.000Z`,
+        );
+        selected.stage = stage;
+        selected.status = "In Progress";
+        return selected;
+      },
+    ),
+  ];
+  const hired = application("hired", "2026-01-06T00:00:00.000Z");
+  hired.stage = "Hired";
+  hired.status = "Hired";
+  state.applications.push(older, ...protectedStages, hired);
   for (let i = 0; i < 500; i++)
     state.applications.push(
       application(
@@ -109,7 +137,7 @@ test("Requirements are protected outside 500 and return to the queue cancels gra
   );
   await transaction(async (tx) => {
     const current = await getState(tx);
-    for (const id of ["new-0", "new-1"]) {
+    for (const id of ["new-0", "new-1", "new-2", "new-3", "new-4"]) {
       const selected = current.applications.find((a) => a.id === id)!;
       selected.status = "Hired";
       selected.stage = "Hired";

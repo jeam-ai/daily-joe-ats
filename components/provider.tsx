@@ -25,7 +25,7 @@ type Context = {
   ) => Promise<boolean>;
   ensureApplication: (id: string) => Promise<void>;
   notify: (message: string, tone?: "success" | "error" | "info") => void;
-  refresh: () => Promise<void>;
+  refresh: (options?: { clearDetails?: boolean }) => Promise<void>;
   saving: boolean;
   dataset: "real" | "demo";
   setDataset: (value: "real" | "demo") => void;
@@ -97,40 +97,46 @@ export function AppProvider({
       setToast({ message, tone }),
     [],
   );
-  const refresh = useCallback(async () => {
-    const request = ++generation.current;
-    setLoading(true);
-    try {
-      const r = await clientFetch("/api/workspace", { cache: "no-store" });
-      const data = await r.json();
-      if (!r.ok) throw Error(data.error);
-      if (request !== generation.current) return;
-      const merged = {
-        ...data,
-        applications: [
-          ...data.applications,
-          ...[...detailCache.current.values()].filter(
-            (application) =>
-              !data.applications.some((item: Application) => item.id === application.id),
-          ),
-        ],
-      } as AppState;
-      ref.current = merged;
-      setState(merged);
-      if (cacheKey)
-        try {
-          sessionStorage.setItem(
-            cacheKey,
-            JSON.stringify({ savedAt: Date.now(), state: merged }),
-          );
-        } catch {}
-      setError("");
-    } catch (e) {
-      if (request === generation.current) setError((e as Error).message);
-    } finally {
-      if (request === generation.current) setLoading(false);
-    }
-  }, [cacheKey]);
+  const refresh = useCallback(
+    async (options?: { clearDetails?: boolean }) => {
+      const request = ++generation.current;
+      setLoading(true);
+      try {
+        const r = await clientFetch("/api/workspace", { cache: "no-store" });
+        const data = await r.json();
+        if (!r.ok) throw Error(data.error);
+        if (request !== generation.current) return;
+        if (options?.clearDetails) detailCache.current.clear();
+        const merged = {
+          ...data,
+          applications: [
+            ...data.applications,
+            ...[...detailCache.current.values()].filter(
+              (application) =>
+                !data.applications.some(
+                  (item: Application) => item.id === application.id,
+                ),
+            ),
+          ],
+        } as AppState;
+        ref.current = merged;
+        setState(merged);
+        if (cacheKey)
+          try {
+            sessionStorage.setItem(
+              cacheKey,
+              JSON.stringify({ savedAt: Date.now(), state: merged }),
+            );
+          } catch {}
+        setError("");
+      } catch (e) {
+        if (request === generation.current) setError((e as Error).message);
+      } finally {
+        if (request === generation.current) setLoading(false);
+      }
+    },
+    [cacheKey],
+  );
   useLayoutEffect(() => {
     // A short-lived, same-user cache lets the shell and current page render
     // immediately from a recent same-user cache. A background refresh always
@@ -194,7 +200,9 @@ export function AppProvider({
             ...data.applications,
             ...[...detailCache.current.values()].filter(
               (application) =>
-                !data.applications.some((item: Application) => item.id === application.id),
+                !data.applications.some(
+                  (item: Application) => item.id === application.id,
+                ),
             ),
           ],
         } as AppState;
@@ -219,11 +227,19 @@ export function AppProvider({
     [refresh, notify, dataset],
   );
   const updateApplication = useCallback(
-    async (id: string, fn: (a: Application) => Application, confirmed = false) => {
-      const current = ref.current?.applications.find((item) => item.id === id) ||
+    async (
+      id: string,
+      fn: (a: Application) => Application,
+      confirmed = false,
+    ) => {
+      const current =
+        ref.current?.applications.find((item) => item.id === id) ||
         detailCache.current.get(id);
       if (!current) {
-        notify("Applicant details are still loading. Try again in a moment.", "info");
+        notify(
+          "Applicant details are still loading. Try again in a moment.",
+          "info",
+        );
         return false;
       }
       const changed = fn(current);
@@ -260,21 +276,30 @@ export function AppProvider({
     if (cached) {
       const next = ref.current;
       if (next && !next.applications.some((item) => item.id === id)) {
-        const merged = { ...next, applications: [...next.applications, cached] };
+        const merged = {
+          ...next,
+          applications: [...next.applications, cached],
+        };
         ref.current = merged;
         setState(merged);
       }
       return;
     }
-    const response = await clientFetch(`/api/applicants/${encodeURIComponent(id)}`, {
-      cache: "no-store",
-    });
+    const response = await clientFetch(
+      `/api/applicants/${encodeURIComponent(id)}`,
+      {
+        cache: "no-store",
+      },
+    );
     const application = await response.json();
     if (!response.ok) throw Error(application.error || "Applicant not found.");
     detailCache.current.set(id, application as Application);
     const next = ref.current;
     if (next && !next.applications.some((item) => item.id === id)) {
-      const merged = { ...next, applications: [...next.applications, application] };
+      const merged = {
+        ...next,
+        applications: [...next.applications, application],
+      };
       ref.current = merged;
       setState(merged);
     }

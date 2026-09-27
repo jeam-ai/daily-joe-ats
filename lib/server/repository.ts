@@ -314,21 +314,56 @@ export async function findUser(email: string) {
 export async function publicState(user: User) {
   return readTransaction(async (tx) => {
     const s = await getState(tx);
-    s.notifications = deriveNotifications(s);
     const retention = await tx.query(
       "SELECT application_id,category,started_at,expires_at,reason FROM application_retention",
+    );
+    const memberships = await tx.query(
+      "SELECT applicant_id,expires_at,grace_expires_at FROM talent_pool_memberships",
+    );
+    const hiringRetention = await tx.query(
+      "SELECT hiring_need_id,expires_at FROM hiring_need_retention",
     );
     const retentionByApplication = new Map(
       retention.map((row) => [String(row.application_id), row]),
     );
+    const membershipByApplicant = new Map(
+      memberships.map((row) => [String(row.applicant_id), row]),
+    );
+    const retentionByNeed = new Map(
+      hiringRetention.map((row) => [String(row.hiring_need_id), row]),
+    );
     for (const application of s.applications) {
+      delete application.retentionCategory;
+      delete application.retentionStartedAt;
+      delete application.retentionExpiresAt;
+      delete application.retentionReason;
+      delete application.talentPoolExpiresAt;
+      delete application.talentPoolGraceExpiresAt;
       const row = retentionByApplication.get(application.id);
-      if (!row) continue;
-      application.retentionCategory = String(row.category);
-      application.retentionStartedAt = String(row.started_at);
-      application.retentionExpiresAt = String(row.expires_at);
-      application.retentionReason = String(row.reason);
+      if (row) {
+        application.retentionCategory = String(row.category);
+        application.retentionStartedAt = String(row.started_at);
+        application.retentionExpiresAt = String(row.expires_at);
+        application.retentionReason = String(row.reason);
+      }
+      const membership = membershipByApplicant.get(application.applicant.id);
+      if (
+        membership &&
+        application.status === "Talent Pool" &&
+        !application.talentPoolExpiredAt
+      ) {
+        application.talentPoolExpiresAt = String(membership.expires_at);
+        application.talentPoolGraceExpiresAt = String(
+          membership.grace_expires_at,
+        );
+      }
     }
+    for (const need of s.hiringNeeds) {
+      delete need.retentionExpiresAt;
+      const row = retentionByNeed.get(need.id);
+      if (row) need.retentionExpiresAt = String(row.expires_at);
+    }
+    s.notifications = deriveNotifications(s);
     if (
       user.role === "Admin" ||
       user.role === "HR Generalist" ||

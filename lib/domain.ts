@@ -424,17 +424,27 @@ export function deriveNotifications(state: AppState) {
     if (a.deletedAt) continue;
     if (a.status === "Talent Pool" && !a.talentPoolExpiredAt) {
       const started = Date.parse(a.talentPoolAddedAt || a.appliedAt);
-      const poolExpiry = started + 30 * 86400000;
+      const poolExpiry = a.talentPoolExpiresAt
+        ? Date.parse(a.talentPoolExpiresAt)
+        : started + 30 * 86400000;
+      const graceExpiry = a.talentPoolGraceExpiresAt
+        ? Date.parse(a.talentPoolGraceExpiresAt)
+        : started + 40 * 86400000;
       const days = Math.ceil((poolExpiry - Date.now()) / 86400000);
+      const graceDays = Math.ceil((graceExpiry - Date.now()) / 86400000);
       if (days <= 7)
         add(
           `talent-retention-${a.id}`,
-          days <= 0
-            ? "Talent Pool retention grace period"
-            : "Talent Pool expiry approaching",
-          days <= 0
-            ? `${a.applicant.name} is in the 10-day Talent Pool grace period. Retain applicant to reset the pool.`
-            : `${a.applicant.name} will leave the Talent Pool in ${days} day${days === 1 ? "" : "s"}.`,
+          days > 0
+            ? "Talent Pool expiry approaching"
+            : graceDays > 0
+              ? "Talent Pool retention grace period"
+              : "Talent Pool retention overdue",
+          days > 0
+            ? `${a.applicant.name} enters the Talent Pool grace period in ${days} day${days === 1 ? "" : "s"}.`
+            : graceDays > 0
+              ? `${a.applicant.name} has ${graceDays} day${graceDays === 1 ? "" : "s"} of Talent Pool grace remaining. Retain applicant to reset the pool.`
+              : `${a.applicant.name}'s Talent Pool grace period has ended. Retain applicant to keep them in the pool.`,
           `/applications/${a.id}`,
           a.talentPoolAddedAt || a.appliedAt,
         );
@@ -524,7 +534,7 @@ export function deriveNotifications(state: AppState) {
         days <= 0
           ? "Hiring need target date reached"
           : `Hiring need target in ${days} days`,
-        `${n.position} · ${n.location}. Extend, reopen, or close this hiring need before retention begins.`,
+        `${n.position} · ${n.location}. Extend the target date to retain this hiring need.`,
         `/hiring-needs?edit=${n.id}`,
         n.targetDate,
       );
