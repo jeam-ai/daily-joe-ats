@@ -325,7 +325,7 @@ function retryableSheetsConflict(error: unknown) {
 // from stalling behind another independent writer.
 export async function retryableTransaction<T>(
   fn: (tx: Transaction) => Promise<T>,
-  attempts = 5,
+  attempts = 7,
 ) {
   let lastError: unknown;
   for (let attempt = 0; attempt < attempts; attempt++) {
@@ -359,7 +359,7 @@ export function readTransaction<T>(fn: (tx: Transaction) => Promise<T>) {
   // Gmail status polling look like a failed sync.
   return (async () => {
     let lastError: unknown;
-    for (let attempt = 0; attempt < 6; attempt++) {
+    for (let attempt = 0; attempt < 8; attempt++) {
       try {
         return await transaction(fn, { readOnly: true });
       } catch (error) {
@@ -382,12 +382,12 @@ export function readTransaction<T>(fn: (tx: Transaction) => Promise<T>) {
           throw error;
         if (temporarySheetsRead && attempt >= 2)
           throw error;
-        if (temporaryDatabaseRead && attempt >= 5)
+        if (temporaryDatabaseRead && attempt >= 7)
           throw error;
         // Intake checkpoints can create a short burst of revisions. A small
         // bounded backoff lets the reader hydrate one coherent revision while
         // keeping every browser request within its deadline.
-        if (attempt < 5)
+        if (attempt < 7)
           await new Promise((resolve) =>
             setTimeout(
               resolve,

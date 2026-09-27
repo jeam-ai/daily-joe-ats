@@ -9,6 +9,7 @@ import {
   odooDate,
   parseOdooReports,
   reviewStatuses,
+  attendanceClassifications,
   type OdooAnalysis,
   type OdooReports,
   type OdooMatrix,
@@ -298,6 +299,33 @@ export async function analyzeOdooUpload(
       const cutoff = `${analysis.period.start}:${analysis.period.end}`,
         previousBatchId = await readRecord<string>(tx, "odoo_cutoffs", cutoff),
         now = new Date().toISOString();
+      // Reprocessing a cutoff must not discard HR's already-confirmed
+      // classification, resolution, or Odoo-correction trail. Carry it to the
+      // matching employee/day in the replacement analysis; the new source
+      // data remains authoritative for calculated results.
+      if (previousBatchId) {
+        const previous = await readRecord<string>(
+          tx,
+          "odoo_batches",
+          previousBatchId,
+        );
+        if (previous) {
+          const prior = unseal<OdooBatch>(previous, config().encryptionKey);
+          const reviews = new Map(
+            prior.records.map((record) => [
+              `${record.employeeId || record.employee}|${record.date}`,
+              record.review,
+            ]),
+          );
+          for (const record of analysis.records) {
+            const saved = reviews.get(
+              `${record.employeeId || record.employee}|${record.date}`,
+            );
+            if (saved?.history.length || saved?.classification || saved?.note)
+              record.review = saved;
+          }
+        }
+      }
       const batch: OdooBatch = {
         ...analysis,
         id: crypto.randomUUID(),
@@ -332,10 +360,8 @@ export async function analyzeOdooUpload(
           "DELETE FROM records WHERE collection='odoo_exceptions' AND id LIKE $1",
           [`${previousBatchId}:%`],
         );
-        await tx.query(
-          "DELETE FROM records WHERE collection='odoo_reviews' AND payload LIKE $1",
-          [`%\"batchId\":\"${previousBatchId}\"%`],
-        );
+        // Keep the append-only review/correction history. The active cutoff
+        // pointer changes, but HR can still audit the earlier source version.
         await tx.query(
           "DELETE FROM records WHERE collection='odoo_fingerprints' AND payload=$1",
           [JSON.stringify(previousBatchId)],
@@ -391,6 +417,9 @@ export async function reviewOdoo(input: unknown, user: User) {
       revision: z.number().int(),
       status: z.enum(reviewStatuses),
       note: z.string().max(4000),
+      classification: z.enum(attendanceClassifications).optional(),
+      correctedInOdoo: z.boolean().optional(),
+      correctionNote: z.string().max(4000).optional(),
     })
     .safeParse(input);
   if (!parsed.success)
@@ -411,11 +440,38 @@ export async function reviewOdoo(input: unknown, user: User) {
       );
     const row = batch.records.find((r) => r.id === body.recordId);
     if (!row) throw new SafeError("Attendance record not found.", 404);
+    const permittedClassifications = row.results.includes("Negative Attendance")
+      ? ["Late", "Undertime", "Early Out"]
+      : row.results.includes("No Attendance")
+        ? ["Absent", "Day Off"]
+        : [];
+    if (
+      body.classification &&
+      !permittedClassifications.includes(body.classification)
+    )
+      throw new SafeError(
+        "That classification is not available for this attendance record.",
+        409,
+      );
+    if (
+      permittedClassifications.length &&
+      body.status !== "For Review" &&
+      !body.classification &&
+      !row.review.classification
+    )
+      throw new SafeError(
+        "Confirm the attendance classification before resolving this record.",
+        409,
+      );
     const now = new Date().toISOString(),
       previous = row.review.status;
     row.review = {
       status: body.status,
       note: body.note,
+      classification: body.classification || row.review.classification,
+      correctedInOdoo:
+        body.correctedInOdoo ?? row.review.correctedInOdoo ?? false,
+      correctionNote: body.correctionNote || row.review.correctionNote || "",
       reviewer: user.email,
       reviewedAt: now,
       history: [
@@ -487,7 +543,10 @@ export async function exportOdoo(batch: OdooBatch, csv: boolean) {
     "Over Time",
     "Extra Hours",
     "Result",
+    "Attendance Classification",
     "Review Status",
+    "Corrected in Odoo",
+    "Odoo Correction Note",
     "Resolution Note",
     "Reviewer",
     "Reviewed At",
@@ -526,7 +585,10 @@ export async function exportOdoo(batch: OdooBatch, csv: boolean) {
     r.overtime,
     r.extra,
     r.results.join("; "),
+    r.review.classification || "",
     r.review.status,
+    r.review.correctedInOdoo ? "Yes" : "No",
+    r.review.correctionNote || "",
     r.review.note,
     r.review.reviewer,
     r.review.reviewedAt,
@@ -587,7 +649,7 @@ export async function exportOdoo(batch: OdooBatch, csv: boolean) {
     ...batch.sources.map((s) => [s.filename, `${s.sheet} · SHA-256 ${s.hash}`]),
     [
       "Review notice",
-      "Timekeeping classifications are calculated from uploaded Odoo reports and configured HR rules. Review before payroll or employee action.",
+      "Detected conditions come from uploaded Odoo reports. For negative or missing attendance, HR—not the system—confirms the classification before payroll or employee action.",
     ],
   ]);
   source.getColumn(1).width = 32;

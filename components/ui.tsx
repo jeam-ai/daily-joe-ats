@@ -7,6 +7,7 @@ import {
   CheckCircle2,
   AlertCircle,
   Info,
+  ArrowRight,
 } from "lucide-react";
 export function Button({
   children,
@@ -82,7 +83,7 @@ export function StatusBadge({ status }: { status: string }) {
               : "neutral");
   return <Badge tone={tone}>{status}</Badge>;
 }
-const stageLegend = [
+export const recruitmentStages = [
   ["Screening", "blue"],
   ["Initial Interview", "purple"],
   ["Final Interview", "orange"],
@@ -92,12 +93,43 @@ const stageLegend = [
   ["Rejected", "red"],
   ["Withdrawn", "neutral"],
 ] as const;
+
+export function RecruitmentStageGuide({
+  currentStage,
+}: {
+  currentStage?: string;
+}) {
+  const currentIndex = recruitmentStages.findIndex(
+    ([stage]) => stage === currentStage,
+  );
+  return (
+    <ol className="recruitment-stage-guide" aria-label="Recruitment stages">
+      {recruitmentStages.slice(0, 6).map(([stage, tone], index) => {
+        const state =
+          index < currentIndex
+            ? "complete"
+            : index === currentIndex
+              ? "current"
+              : "upcoming";
+        return (
+          <li className={`${tone} ${state}`} key={stage}>
+            <span className="stage-number" aria-hidden="true">
+              {index + 1}
+            </span>
+            <span>{stage}</span>
+            {index < 5 && <ArrowRight className="stage-arrow" size={16} />}
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
 export function StageLegend() {
   return (
     <div className="stage-legend" aria-label="Recruitment stage legend">
       <strong>Stage guide</strong>
       <div className="stage-legend-items">
-        {stageLegend.map(([stage, tone]) => (
+        {recruitmentStages.map(([stage, tone]) => (
           <span className={`stage-key ${tone}`} key={stage}>
             <i className="stage-dot" aria-hidden="true" />
             {stage}

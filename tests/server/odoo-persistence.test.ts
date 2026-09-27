@@ -80,11 +80,16 @@ test("combined Odoo uploads persist reviews, deduplicate exact reports, version 
       recordId: b.records[0].id,
       revision: b.revision,
       status: "Excused",
+      classification: "Undertime",
+      correctedInOdoo: true,
+      correctionNote: "Odoo correction requested in the fictional fixture.",
       note: "Fictional fixture: approved schedule adjustment.",
     },
     user,
   );
   assert.equal(reviewed.records[0].review.history[0].previous, "For Review");
+  assert.equal(reviewed.records[0].review.classification, "Undertime");
+  assert.equal(reviewed.records[0].review.correctedInOdoo, true);
   assert.equal(
     (await getOdooBatch(b.id, user)).records[0].review.reviewer,
     user.email,
@@ -114,6 +119,8 @@ test("combined Odoo uploads persist reviews, deduplicate exact reports, version 
   );
   assert.notEqual(changed.id, b.id);
   assert.equal(changed.previousBatchId, b.id);
+  assert.equal(changed.records[0].review.classification, "Undertime");
+  assert.equal(changed.records[0].review.correctedInOdoo, true);
   assert.deepEqual(
     (await listOdooBatches(user)).map((item) => item.id),
     [changed.id],
@@ -128,7 +135,7 @@ test("combined Odoo uploads persist reviews, deduplicate exact reports, version 
         ),
       )
     ).length,
-    0,
+    1,
   );
   const xlsx = await exportOdoo(reviewed, false),
     book = new ExcelJS.Workbook();
@@ -148,6 +155,10 @@ test("combined Odoo uploads persist reviews, deduplicate exact reports, version 
   );
   assert.equal(
     book.getWorksheet("Attendance review")!.getRow(2).getCell(17).text,
+    "Undertime",
+  );
+  assert.equal(
+    book.getWorksheet("Attendance review")!.getRow(2).getCell(18).text,
     "Excused",
   );
   assert.match(

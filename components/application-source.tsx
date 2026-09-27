@@ -3,6 +3,7 @@ import { useEffect } from "react";
 import type { Application } from "@/types";
 import { requestJson } from "@/lib/client-request";
 import { Badge, Button, Card } from "./ui";
+import { formalFact } from "@/lib/formal-facts";
 import { Pencil } from "lucide-react";
 export function ApplicationSource({
   application: a,
@@ -43,11 +44,12 @@ export function ApplicationSource({
       </div>
       <div className="padded form-stack">
         <p>
-          <strong>Submitted position:</strong> {a.position}
+          <strong>Submitted position:</strong> {formalFact("position", a.position)}
           <br />
-          <strong>Preferred work location:</strong> {a.location}
+          <strong>Preferred work location:</strong> {formalFact("location", a.location)}
           <br />
-          <strong>Residence:</strong> {a.applicant.location || "Not verified"}
+          <strong>Residence:</strong>{" "}
+          {formalFact("residence", a.applicant.location || "Not verified")}
         </p>
         {a.gmailMessageId && (
           <p>

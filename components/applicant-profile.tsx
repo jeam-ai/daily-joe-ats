@@ -57,6 +57,7 @@ import {
   Tabs,
   Modal,
   EmptyState,
+  RecruitmentStageGuide,
   LoadingSkeleton,
 } from "./ui";
 import { ResumeViewer } from "./resume-viewer";
@@ -616,22 +617,7 @@ export function ApplicantProfile({ id }: { id: string }) {
         </Card>
       )}
       <DocumentRecovery application={a} />
-      <div className="stage-track">
-        {[
-          "Screening",
-          "Initial Interview",
-          "Final Interview",
-          "Requirements",
-          "Onboarding",
-          "Hired",
-        ].map((s, i) => (
-          <div className={s === a.stage ? "current" : ""} key={s}>
-            <span>{i + 1}</span>
-            {s}
-            {i < 5 && <ArrowRight size={14} />}
-          </div>
-        ))}
-      </div>
+      <RecruitmentStageGuide currentStage={a.stage} />
       <Tabs
         items={[
           "Overview",

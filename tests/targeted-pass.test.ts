@@ -181,10 +181,13 @@ test("Odoo zero expected hours are errors, missing checkout is retained, and onl
       assert.ok(r.results.some((s) => s.startsWith("System Error")));
     } else {
       assert.equal(
-        r.results.includes("Excessive Overtime / System Review"),
-        Number(r.employee) > 14,
+        r.results.includes("Excessive Overtime"),
+        Number(r.employee) >= 14,
       );
-      assert.ok(r.results.includes("Overtime"));
+      assert.equal(
+        r.results.includes("Overtime"),
+        Number(r.employee) >= 9 && Number(r.employee) < 14,
+      );
     }
   }
   assert.ok(

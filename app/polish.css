@@ -1235,6 +1235,28 @@ fieldset {
 .odoo-metrics .card {
   padding: 16px;
 }
+.timekeeping-metric-filter {
+  display: grid;
+  gap: 5px;
+  width: 100%;
+  min-height: 86px;
+  padding: 16px;
+  text-align: left;
+  color: inherit;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  cursor: pointer;
+}
+.timekeeping-metric-filter:not(:disabled):hover,
+.timekeeping-metric-filter:not(:disabled):focus-visible {
+  border-color: var(--info);
+  box-shadow: 0 0 0 3px var(--info-bg);
+}
+.timekeeping-metric-filter:disabled {
+  cursor: default;
+  opacity: 0.78;
+}
 .odoo-metrics strong {
   display: block;
   font-size: 24px;
@@ -1349,6 +1371,36 @@ summary {
 .issue-button:focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: 3px;
+}
+.attendance-classification {
+  margin: 16px 0;
+  padding: 15px;
+  border: 1px solid var(--orange-border, var(--line));
+  border-radius: 10px;
+  background: var(--orange-bg);
+}
+.attendance-classification .eyebrow {
+  color: var(--orange);
+}
+.attendance-classification p {
+  margin: 7px 0 12px;
+}
+.classification-current {
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+.classification-confirmation {
+  display: grid;
+  gap: 7px;
+  margin-top: 12px;
+  padding: 13px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+.classification-confirmation > span {
+  color: var(--text-secondary);
+  font-size: 13px;
 }
 
 .odoo-upload-heading {

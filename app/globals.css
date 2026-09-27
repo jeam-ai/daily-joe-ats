@@ -1397,24 +1397,28 @@ tbody tr:hover {
   font-size: 12px;
   color: var(--text-secondary);
 }
-.stage-track {
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 18px 20px;
+.recruitment-stage-guide {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(116px, 1fr));
+  align-items: center;
+  gap: 10px;
+  list-style: none;
+  margin: 0 0 20px;
+  padding: 14px;
   background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: 10px;
-  margin-bottom: 20px;
+  border-radius: 12px;
 }
-.stage-track > div {
+.recruitment-stage-guide > li {
   display: flex;
   align-items: center;
-  gap: 8px;
+  min-width: 0;
+  gap: 9px;
+  padding: 8px 4px;
   font-size: 12px;
   color: var(--text-secondary);
 }
-.stage-track > div > span {
+.recruitment-stage-guide .stage-number {
   width: 21px;
   height: 21px;
   background: var(--surface-subtle);
@@ -1423,17 +1427,38 @@ tbody tr:hover {
   justify-content: center;
   border-radius: 50%;
   font-size: 12px;
+  flex: 0 0 auto;
 }
-.stage-track > div.current {
+.recruitment-stage-guide .stage-arrow {
+  margin-left: auto;
+  color: var(--text-secondary);
+  flex: 0 0 auto;
+}
+.recruitment-stage-guide > li.current {
   color: var(--text-primary);
   font-weight: 600;
 }
-.stage-track > div.current > span {
+.recruitment-stage-guide > li.current .stage-number {
   background: var(--info-bg);
+  color: var(--info);
 }
-.stage-track > div > svg {
-  margin-left: 8px;
-  color: var(--text-secondary);
+.recruitment-stage-guide > li.complete .stage-number {
+  background: var(--success-bg);
+  color: var(--success);
+}
+.recruitment-stage-guide > li.complete .stage-arrow {
+  color: var(--success);
+}
+@media (max-width: 880px) {
+  .recruitment-stage-guide {
+    display: flex;
+    overflow-x: auto;
+    padding: 10px;
+    scrollbar-width: thin;
+  }
+  .recruitment-stage-guide > li {
+    min-width: max-content;
+  }
 }
 .profile-columns {
   display: grid;

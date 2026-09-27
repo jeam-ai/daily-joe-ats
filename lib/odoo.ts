@@ -1,5 +1,5 @@
 import { attendanceTimestamp, defaultAttendanceRules } from "./timekeeping";
-export const ODOO_ANALYSIS_VERSION = 4;
+export const ODOO_ANALYSIS_VERSION = 5;
 
 export type OdooCell = string | number | null;
 export type OdooMatrix = OdooCell[][];
@@ -69,8 +69,22 @@ export const reviewStatuses = [
   "Payroll Ready",
 ] as const;
 export type ReviewStatus = (typeof reviewStatuses)[number];
+export const attendanceClassifications = [
+  "Late",
+  "Undertime",
+  "Early Out",
+  "Absent",
+  "Day Off",
+] as const;
+export type AttendanceClassification =
+  (typeof attendanceClassifications)[number];
 export type OdooReview = {
   status: ReviewStatus;
+  // Classification answers what happened. Status is the separate HR
+  // resolution workflow; source data alone may not choose a classification.
+  classification?: AttendanceClassification;
+  correctedInOdoo?: boolean;
+  correctionNote?: string;
   note: string;
   reviewer: string;
   reviewedAt: string;
@@ -538,21 +552,22 @@ function* analyzeOdooSteps(
           "The system could not determine scheduled working hours for this date. HR must verify the schedule before payroll use.",
         );
       }
-      if (!incomplete && difference !== null && difference < -1e-7)
-        results.push("Undertime");
-      if (
-        !incomplete &&
-        ((difference !== null &&
-          difference * 60 > rules.overtimeMinutes + 1e-7) ||
-          (overtime !== null && overtime * 60 > rules.overtimeMinutes + 1e-7) ||
-          (extra !== null && extra * 60 > rules.overtimeMinutes + 1e-7))
-      )
-        results.push("Overtime");
-      if (worked !== null && worked > (rules.excessiveWorkedHours ?? 14)) {
-        results.push("Excessive Overtime / System Review");
+      const negativeAttendance =
+        !incomplete && difference !== null && difference < -1e-7;
+      if (negativeAttendance) {
+        results.push("Negative Attendance");
         issues.push(
-          `Total worked time exceeds the configured ${rules.excessiveWorkedHours ?? 14}-hour system-review threshold. This is a review flag, not a payroll policy. HR review is required before payroll use.`,
+          "Negative attendance is ambiguous from Odoo data. HR must confirm Late, Undertime, or Early Out; no classification was selected automatically.",
         );
+      }
+      const excessiveThreshold = rules.excessiveWorkedHours ?? 14;
+      if (worked !== null && worked >= excessiveThreshold) {
+        results.push("Excessive Overtime");
+        issues.push(
+          `Total worked time meets the ${excessiveThreshold}-hour excessive-overtime threshold. A forgotten time-out is possible; HR must verify before treating this as actual overtime.`,
+        );
+      } else if (worked !== null && worked >= 9) {
+        results.push("Overtime");
       }
       let lateMinutes: number | null = null,
         earlyMinutes: number | null = null;
@@ -580,8 +595,13 @@ function* analyzeOdooSteps(
           end === null
             ? null
             : Math.max(0, Math.round((end - ends.at(-1)!) / 60000));
-        if (lateMinutes) results.push("Late");
-        if (earlyMinutes) results.push("Early Out");
+        // A negative variance cannot establish whether time was lost through
+        // lateness, undertime, or an early out. Preserve timing observations,
+        // but leave the visible classification to HR confirmation.
+        if (!negativeAttendance) {
+          if (lateMinutes) results.push("Late");
+          if (earlyMinutes) results.push("Early Out");
+        }
       }
       if (!results.length)
         results.push(issues.length ? "Review Required" : "Normal");

@@ -380,7 +380,7 @@ export async function syncIntake(
           ? 30000
           : job.pending.length || job.page
             ? 5000
-            : 60000);
+            : 30000);
     await checkpoint().catch(() => {});
   }
   return job;

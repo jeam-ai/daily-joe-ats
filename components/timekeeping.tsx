@@ -20,6 +20,7 @@ import {
   type OdooRules,
   type OdooDay,
   type ReviewStatus,
+  type AttendanceClassification,
   type OdooReports,
 } from "@/lib/odoo";
 import type { TimekeepingJob } from "@/lib/server/timekeeping-jobs";
@@ -62,6 +63,12 @@ const json = (body: unknown) => ({
   body: JSON.stringify(body),
 });
 const key = (r: OdooDay) => r.employeeId || r.employee;
+const classificationsFor = (record: OdooDay): AttendanceClassification[] =>
+  record.results.includes("Negative Attendance")
+    ? ["Late", "Undertime", "Early Out"]
+    : record.results.includes("No Attendance")
+      ? ["Absent", "Day Off"]
+      : [];
 const clockTime = (
   value: string,
   timezone: OdooRules["timezone"],
@@ -144,7 +151,7 @@ export function AttendanceRulesEditor({
             />
           </Field>
         ))}
-        <Field label="System review above total worked hours">
+        <Field label="Excessive overtime threshold (worked hours)">
           <Input
             type="number"
             min={1}
@@ -156,8 +163,8 @@ export function AttendanceRulesEditor({
             }
           />
           <small>
-            Default: more than 14 hours. This flags HR review; it does not
-            define payroll entitlement.
+            Default: 14 hours or more. This flags an HR review and possible
+            forgotten time-out; it does not define payroll entitlement.
           </small>
         </Field>
         <Field label="Fallback expected hours (optional)">
@@ -234,7 +241,24 @@ export function Timekeeping() {
     [employee, setEmployee] = useState(""),
     [detail, setDetail] = useState(""),
     [review, setReview] = useState<ReviewStatus>("For Review"),
-    [note, setNote] = useState("");
+    [note, setNote] = useState(""),
+    [classification, setClassification] = useState<
+      AttendanceClassification | ""
+    >("");
+  const [pendingClassification, setPendingClassification] = useState<
+    AttendanceClassification | ""
+  >("");
+  const [correctedInOdoo, setCorrectedInOdoo] = useState(false),
+    [correctionNote, setCorrectionNote] = useState("");
+  function openRecord(record: OdooDay) {
+    setDetail(record.id);
+    setReview(record.review.status);
+    setNote(record.review.note);
+    setClassification(record.review.classification || "");
+    setCorrectedInOdoo(!!record.review.correctedInOdoo);
+    setCorrectionNote(record.review.correctionNote || "");
+    setPendingClassification("");
+  }
   const permitted =
     dataset !== "demo" &&
     !!state?.currentUser &&
@@ -675,6 +699,7 @@ export function Timekeeping() {
         <>
           <div className="section-heading">
             <div>
+              <span className="eyebrow">Current cutoff</span>
               <h2>
                 {date(batch.period.start)} – {date(batch.period.end)}
               </h2>
@@ -709,31 +734,42 @@ export function Timekeeping() {
             </div>
           </div>
           <div className="odoo-metrics">
-            {[
-              ["Employees", new Set(records.map(key)).size],
-              ["Employee days", records.length],
-              ["Late", batch.rules.start ? count("Late") : "—"],
-              ["Early out", batch.rules.end ? count("Early Out") : "—"],
-              ["Incomplete", count("Incomplete Attendance")],
-              ["Undertime", count("Undertime")],
-              ["Overtime", count("Overtime")],
-              ["Missing time in", count("Missing Time In")],
-              ["Missing time out", count("Missing Time Out")],
-              ["No attendance", count("No Attendance")],
-              ["Multiple entries", count("Multiple Entries")],
-              [
-                "For review",
-                records.filter((r) => r.review.status === "For Review").length,
-              ],
-              [
-                "Resolved / reviewed",
-                records.filter((r) => r.review.status !== "For Review").length,
-              ],
-            ].map(([label, value]) => (
-              <Card key={label}>
+            {([
+              { label: "Employees", value: new Set(records.map(key)).size, filter: "" },
+              { label: "Employee days", value: records.length, filter: "" },
+              { label: "Negative attendance", value: count("Negative Attendance"), filter: "Negative Attendance" },
+              { label: "Incomplete", value: count("Incomplete Attendance"), filter: "Incomplete Attendance" },
+              { label: "Overtime", value: count("Overtime"), filter: "Overtime" },
+              { label: "Excessive overtime", value: count("Excessive Overtime"), filter: "Excessive Overtime" },
+              { label: "Missing time in", value: count("Missing Time In"), filter: "Missing Time In" },
+              { label: "Missing time out", value: count("Missing Time Out"), filter: "Missing Time Out" },
+              { label: "No attendance", value: count("No Attendance"), filter: "No Attendance" },
+              { label: "Multiple entries", value: count("Multiple Entries"), filter: "Multiple Entries" },
+              { label: "For review", value: records.filter((r) => r.review.status === "For Review").length, filter: "review" },
+              { label: "Resolved / reviewed", value: records.filter((r) => r.review.status !== "For Review").length, filter: "resolved" },
+            ] as { label: string; value: number; filter: string }[]).map(({ label, value, filter }) => (
+              <button
+                className="timekeeping-metric-filter"
+                key={label}
+                type="button"
+                onClick={() => {
+                  setEmployee("");
+                  setPage(1);
+                  setResultFilter(filter === "review" || filter === "resolved" ? "" : filter);
+                  setReviewFilter(
+                    filter === "review"
+                      ? "For Review"
+                      : filter === "resolved"
+                        ? "Resolved"
+                        : "",
+                  );
+                }}
+                disabled={!filter || !value}
+                title={filter ? `Show ${label.toLowerCase()} records` : undefined}
+              >
                 <span className="muted">{label}</span>
                 <strong>{value}</strong>
-              </Card>
+              </button>
             ))}
           </div>
           <details className="card padded spaced">
@@ -900,9 +936,7 @@ export function Timekeeping() {
                                 className="issue-button"
                                 key={s}
                                 onClick={() => {
-                                  setDetail(r.id);
-                                  setReview(r.review.status);
-                                  setNote(r.review.note);
+                                  openRecord(r);
                                 }}
                               >
                                 <Badge
@@ -933,9 +967,7 @@ export function Timekeeping() {
                           <Button
                             variant="ghost"
                             onClick={() => {
-                              setDetail(r.id);
-                              setReview(r.review.status);
-                              setNote(r.review.note);
+                              openRecord(r);
                             }}
                           >
                             Review <ChevronRight size={15} />
@@ -1062,8 +1094,9 @@ export function Timekeeping() {
           onClose={() => setDetail("")}
         >
           <p className="muted">
-            Calculated result and HR review are recorded separately. Source
-            attendance is never changed.
+            Odoo remains the source attendance record. Classification,
+            resolution, and correction are recorded separately; source
+            attendance is never changed here.
           </p>
           <div className="actions">
             {selected.results.map((s) => (
@@ -1097,6 +1130,62 @@ export function Timekeeping() {
                 <li key={s}>{s}</li>
               ))}
             </ul>
+          )}
+          {classificationsFor(selected).length > 0 && (
+            <section className="attendance-classification">
+              <span className="eyebrow">Possible classification</span>
+              <p>
+                {selected.results.includes("Negative Attendance")
+                  ? "Odoo cannot determine whether this negative attendance is late, undertime, or early out. HR must confirm one."
+                  : "No attendance does not establish absence. HR must confirm the appropriate classification."}
+              </p>
+              <div className="button-row">
+                {classificationsFor(selected).map((choice) => (
+                  <Button
+                    key={choice}
+                    variant={classification === choice ? "primary" : "secondary"}
+                    onClick={() => setPendingClassification(choice)}
+                  >
+                    {choice}
+                  </Button>
+                ))}
+              </div>
+              {classification && (
+                <p className="classification-current">
+                  Confirmed classification: <strong>{classification}</strong>
+                </p>
+              )}
+              {pendingClassification && (
+                <div className="classification-confirmation" role="alert">
+                  <strong>Confirm attendance classification</strong>
+                  <span>
+                    {selected.employee} · {date(selected.date)} ·{" "}
+                    {selected.difference === null
+                      ? "No attendance"
+                      : `${hours(selected.difference)} hour variance`}
+                  </span>
+                  <p>
+                    Classify this record as <strong>{pendingClassification}</strong>?
+                  </p>
+                  <div className="button-row">
+                    <Button
+                      variant="secondary"
+                      onClick={() => setPendingClassification("")}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      onClick={() => {
+                        setClassification(pendingClassification);
+                        setPendingClassification("");
+                      }}
+                    >
+                      Confirm {pendingClassification}
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </section>
           )}
           <details open>
             <summary>Attendance source records ({selected.raw.length})</summary>
@@ -1157,6 +1246,25 @@ export function Timekeeping() {
               placeholder="Record the evidence and reason for this review."
             />
           </Field>
+          <label className="checkbox-label">
+            <input
+              type="checkbox"
+              checked={correctedInOdoo}
+              onChange={(e) => setCorrectedInOdoo(e.target.checked)}
+            />
+            Corrected in Odoo
+          </label>
+          {correctedInOdoo && (
+            <Field label="Odoo correction note">
+              <textarea
+                rows={2}
+                maxLength={4000}
+                value={correctionNote}
+                onChange={(e) => setCorrectionNote(e.target.value)}
+                placeholder="Reference the Odoo correction or verification."
+              />
+            </Field>
+          )}
           <Button
             disabled={!!busy || (!note.trim() && review !== "For Review")}
             onClick={() =>
@@ -1170,6 +1278,9 @@ export function Timekeeping() {
                     recordId: selected.id,
                     status: review,
                     note,
+                    classification: classification || undefined,
+                    correctedInOdoo,
+                    correctionNote,
                   }),
                 );
                 setBatch(r.batch);

@@ -91,6 +91,30 @@ test("explicit schedule supports late/early-out and tolerance preserves discrepa
   assert.equal(day.rawWorked, 8.5);
   assert.equal(day.pivotWorked, 7);
 });
+test("negative attendance remains unclassified until HR confirms the cause", () => {
+  const p = structuredClone(pivot);
+  // Raw time is late and early, but the negative result alone cannot establish
+  // which explanation HR should record.
+  p[5][2] = 9;
+  const analysis = analyzeOdoo(parseOdooReports(raw, p, []), {
+    ...defaultOdooRules,
+    start: "08:00",
+    end: "18:00",
+  });
+  const day = analysis.records.find(
+    (r) => r.employee === "DEMO Alex" && r.date === "2026-09-01",
+  )!;
+  assert.ok(day.results.includes("Negative Attendance"));
+  assert.ok(!day.results.includes("Late"));
+  assert.ok(!day.results.includes("Early Out"));
+  assert.ok(!day.results.includes("Undertime"));
+  assert.equal(day.review.classification, undefined);
+  const absent = analysis.records.find(
+    (r) => r.employee === "DEMO Alex" && r.date === "2026-09-02",
+  )!;
+  assert.ok(absent.results.includes("No Attendance"));
+  assert.equal(absent.review.classification, undefined);
+});
 test("Odoo floating-point rest-day residue and independently configured start times stay traceable", () => {
   const p = structuredClone(pivot);
   p[6][2] = 1e-15;

@@ -63,7 +63,10 @@ export function IntakeSyncStatus() {
                 30000
               : value.pending.length || value.page
                 ? 20000
-                : 120000;
+                // A visible HR workspace is the live intake monitor. Keep a
+                // light status pulse so newly received applications do not
+                // wait for a manual refresh or the daily server cron.
+                : 30000;
         setError("");
         if (
           !["checking", "processing", "authorization", "paused"].includes(

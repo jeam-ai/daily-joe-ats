@@ -54,6 +54,12 @@ export function formalFact(field: string, value: string): string {
       `${start}–${end.toLowerCase() === "present" ? "Present" : end}`,
   );
   if (!text) return text;
+  // These are system evidence states, not titles. Older imports may have
+  // passed them through the general title formatter, producing distracting
+  // title-case sentences such as “Applied Position Was Not Clearly…”.
+  if (/^(?:applied position|preferred work location|applicant name|residence) was not clearly stated/i.test(text))
+    return text.charAt(0).toUpperCase() + text.slice(1).toLowerCase();
+  if (/^not verified$/i.test(text)) return "Not verified";
   if (field === "name") return formalName(text);
   if (field === "residence") return formalAddress(text);
   if (
