@@ -161,9 +161,11 @@ export function ResumeViewer({ application: a }: { application: Application }) {
           <Badge tone={extraction.warnings.length ? "amber" : "green"}>
             {processingPending
               ? "Processing pending"
-              : extraction.method === "text"
-                ? "Text extracted"
-                : "OCR processed"}
+              : !document.text.trim()
+                ? "Text unavailable"
+                : extraction.method === "text"
+                  ? "Text extracted"
+                  : "OCR processed"}
             {extraction.confidence !== undefined
               ? ` · ${extraction.confidence}% OCR confidence`
               : ""}

@@ -29,6 +29,7 @@ import {
   Plus,
   FileCheck2,
   Pencil,
+  Trash2,
 } from "lucide-react";
 import type {
   Application,
@@ -405,6 +406,40 @@ export function ApplicantProfile({ id }: { id: string }) {
             <h1>{applicantDisplayName(a)}</h1>
             <StatusBadge status={a.status} />
             {a.isDemo && <Badge tone="amber">DEMO DATA</Badge>}
+            {manager && (
+              <div
+                className="profile-quick-actions"
+                aria-label="Applicant actions"
+              >
+                <Button
+                  variant="secondary"
+                  disabled={!isActive(a) || workspaceSaving}
+                  onClick={() => {
+                    setError("");
+                    setDecision("Reject");
+                  }}
+                >
+                  <X size={14} /> Reject
+                </Button>
+                <Button
+                  variant="secondary"
+                  disabled={!isActive(a) || workspaceSaving}
+                  onClick={() => {
+                    setError("");
+                    setDecision("Withdraw");
+                  }}
+                >
+                  <ArrowRight size={14} /> Withdraw
+                </Button>
+                <Button
+                  variant="secondary"
+                  disabled={workspaceSaving}
+                  onClick={() => setDeleting(true)}
+                >
+                  <Trash2 size={14} /> Delete
+                </Button>
+              </div>
+            )}
           </div>
           <p>
             {a.id} <span>·</span> {a.position} <span>·</span> {a.location}
@@ -546,7 +581,7 @@ export function ApplicantProfile({ id }: { id: string }) {
                 editable={editable}
                 onEdit={requestEdit}
               />
-              <Card>
+              <Card className="spaced">
                 <div className="card-heading">
                   <div>
                     <h2>Resume</h2>

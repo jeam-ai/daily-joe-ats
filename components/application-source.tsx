@@ -24,7 +24,7 @@ export function ApplicationSource({
       ? `https://mail.google.com/mail/?authuser=${encodeURIComponent("careers@daily-joe.com")}#all/${encodeURIComponent(message)}`
       : undefined;
   return (
-    <Card className="spaced">
+    <Card className="spaced application-source">
       <div className="card-heading">
         <h2>Application Source</h2>
         <div className="inline-actions">

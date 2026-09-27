@@ -165,3 +165,29 @@ test("deferred Gmail resume recovery persists the real extracted name and educat
     0,
   );
 });
+test("sparse PDF evidence receives one automatic local OCR upgrade, not an endless retry loop", async () => {
+  await transaction(async (tx) => {
+    const state = await getState(tx);
+    state.applications[0].extraction = {
+      method: "text",
+      warnings: [
+        "Very little readable text was extracted. Qualifications remain unclear until HR verifies the document.",
+      ],
+    };
+    await saveState(tx, state, { sync: false });
+  });
+  let calls = 0;
+  assert.equal(
+    await recoverOneDeferredDocument(async () => {
+      calls++;
+    }),
+    true,
+  );
+  assert.equal(
+    await recoverOneDeferredDocument(async () => {
+      calls++;
+    }),
+    false,
+  );
+  assert.equal(calls, 1);
+});

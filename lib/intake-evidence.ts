@@ -64,7 +64,7 @@ export function intakeEvidence(input: {
         /\b(?:application for|applying for|position applied(?: for)?\s*[:–-]?|desired position\s*[:–-]?|position\s*:)\s*(?:the\s+)?(.+)/i,
       )?.[1]
       ?.replace(/^job\s*[-:–]\s*/i, "")
-      .split(/\s+(?:at|in)\s+|\s+[—–|]\s+|[.!?\n]/i)[0]
+      .split(/\s+(?:at|in)\s+|\s+[-—–|]\s+|[.!?\n]/i)[0]
       .replace(/\s+(?:position|role)\b.*$/i, "")
       .replace(
         /\s*[-,]?\s*(?:naga(?: city)?|(?:santa|sta\.?) rosa(?:,? laguna)?)\s*$/i,
@@ -186,6 +186,14 @@ export function intakeEvidence(input: {
   const explicitResumeName = named(resume);
   const resumeName = explicitResumeName || headingName;
   const submittedName = named(body);
+  const filenameName = input.filename
+    ?.replace(/\.(?:pdf|docx|png|jpe?g|txt)$/i, "")
+    .match(
+      /^\s*([\p{L}][\p{L} .,'’-]{3,80}?)\s*[-–—]\s*(?:pdf\s*)?(?:resume|cv)\s*$/iu,
+    )?.[1]
+    ?.trim();
+  const safeFilenameName =
+    filenameName && plausiblePersonName(filenameName) ? filenameName : "";
   const normalizeName = formalName;
   const resumeLines = resume
     .split(/\n/)
@@ -249,11 +257,17 @@ export function intakeEvidence(input: {
   }
   const displayName = senderName(input.from || "");
   const name = normalizeName(
-    resumeName || submittedName || subjectName || displayName,
+    resumeName ||
+      submittedName ||
+      subjectName ||
+      safeFilenameName ||
+      displayName,
   );
   if (resumeName) evidence.name = `Resume: ${resumeName}`;
   else if (submittedName) evidence.name = `Email body: ${submittedName}`;
   else if (subjectName) evidence.name = `Email subject: ${subjectName}`;
+  else if (safeFilenameName)
+    evidence.name = `Attachment filename: ${safeFilenameName}`;
   else if (
     name !==
     "Applicant name was not clearly stated in the submitted application."

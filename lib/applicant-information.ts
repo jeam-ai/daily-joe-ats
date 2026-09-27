@@ -3,7 +3,7 @@ import type { intakeEvidence } from "./intake-evidence";
 import { formalFact } from "./formal-facts";
 export const missingInformation = (value?: string) =>
   !value?.trim() ||
-  /requires review|not verified|not clearly stated|not confirmed from submitted information|^unknown$/i.test(
+  /requires review|needs verification|not verified|not clearly stated|not confirmed from submitted information|^unknown$/i.test(
     value,
   );
 export function applicantDisplayName(application: Application) {
@@ -29,9 +29,11 @@ export function evidenceInformation(
             key === "name"
               ? evidence.startsWith("Resume:")
                 ? "Resume"
-                : evidence.startsWith("Email body:")
-                  ? "Email body"
-                  : "Gmail display name"
+                : evidence.startsWith("Attachment filename:")
+                  ? "Attachment filename"
+                  : evidence.startsWith("Email body:")
+                    ? "Email body"
+                    : "Gmail display name"
               : e.sources?.[key] || "Submitted evidence",
           evidence,
           confidence:
@@ -55,10 +57,17 @@ export function applyRecoveredResumeEvidence(
   // A resume identity is stronger than an unverified email sentence or sender
   // display name. HR-verified names always take precedence.
   if (
-    incoming.fields.name?.source === "Resume" &&
+    ["Resume", "Attachment filename"].includes(
+      incoming.fields.name?.source || "",
+    ) &&
     !fields.name?.verifiedBy &&
     evidence.name &&
-    !missingInformation(evidence.name)
+    !missingInformation(evidence.name) &&
+    (incoming.fields.name?.source === "Resume" ||
+      missingInformation(application.applicant.name) ||
+      /\b(?:applying|writing|interest|job|position|post|opportunity)\b/i.test(
+        application.applicant.name,
+      ))
   ) {
     application.applicant.name = formalFact("name", evidence.name);
     fields.name = incoming.fields.name;
@@ -82,7 +91,12 @@ export function applyRecoveredResumeEvidence(
         : key === "residence"
           ? application.applicant.location
           : application.applicant[key];
-    if (!missingInformation(current)) continue;
+    const subjectPositionIncludesName =
+      key === "position" &&
+      !!evidence.name &&
+      current?.trim().toLocaleLowerCase() ===
+        `${value} - ${evidence.name}`.toLocaleLowerCase();
+    if (!missingInformation(current) && !subjectPositionIncludesName) continue;
     if (key === "position" || key === "location")
       application[key] = formalFact(key, value);
     else if (key === "residence")

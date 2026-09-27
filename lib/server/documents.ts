@@ -1,6 +1,7 @@
 import "server-only";
 import mammoth from "mammoth";
 import { createHash } from "node:crypto";
+import { join } from "node:path";
 import type { Application } from "@/types";
 import { SafeError } from "./config";
 import { withDeadline } from "./deadline";
@@ -55,7 +56,16 @@ export async function extractResume(bytes: Buffer, filename: string) {
       if (Date.now() >= deadline) throw Error();
       if (!worker) {
         const { createWorker } = await import("tesseract.js");
+        // Bundle the small English model with the server function. A remote
+        // language-model download can time out during a short-lived intake job.
         startup ??= createWorker("eng", undefined, {
+          langPath: join(
+            process.cwd(),
+            "node_modules",
+            "@tesseract.js-data",
+            "eng",
+            "4.0.0_best_int",
+          ),
           cacheMethod: "none",
           logger: () => undefined,
           errorHandler: () => undefined,
@@ -86,41 +96,67 @@ export async function extractResume(bytes: Buffer, filename: string) {
       const { PDFParse } = await import("pdf-parse");
       const parser = new PDFParse({ data: bytes });
       try {
-        const result = await withDeadline(parser.getText({ first: 10 }), 20000);
-        extraction.pages = result.total;
-        if (result.total > 10)
+        let result: Awaited<ReturnType<typeof parser.getText>> | undefined;
+        try {
+          result = await withDeadline(parser.getText({ first: 10 }), 20000);
+        } catch (error) {
+          if (
+            /password/i.test((error as Error).name + (error as Error).message)
+          )
+            throw error;
+          extraction.warnings.push(
+            "PDF text could not be read directly. Image recognition was attempted; review uncertain fields against the original.",
+          );
+        }
+        extraction.pages = result?.total;
+        if (result && result.total > 10)
           extraction.warnings.push(
             "Only the first 10 pages were processed. Review the remaining pages in the original document.",
           );
         const parts: string[] = [];
-        for (const page of result.pages) {
+        // If PDF.js cannot return a text layer, render a bounded number of
+        // pages anyway. A scanned PDF may still be perfectly readable to HR.
+        const pages = result?.pages.length
+          ? result.pages.map((page) => ({ num: page.num, text: page.text }))
+          : [1, 2, 3].map((num) => ({ num, text: "" }));
+        for (const page of pages) {
           if (Date.now() >= deadline) {
             extraction.warnings.push(
               "Processing reached its time limit. Review the remaining pages in the original document.",
             );
             break;
           }
-          if (page.text.trim().length >= 60) parts.push(page.text);
-          else {
-            extraction.method = result.pages.some(
-              (p) => p.text.trim().length >= 60,
-            )
-              ? "mixed"
-              : "ocr";
+          if (page.text.trim().length >= 60) {
+            parts.push(page.text);
+            continue;
+          }
+          try {
             const rendered = await withDeadline(
               parser.getScreenshot({
                 partial: [page.num],
-                desiredWidth: 1600,
+                desiredWidth: 1800,
                 imageDataUrl: false,
+                imageBuffer: true,
               }),
               Math.max(1, Math.min(15000, deadline - Date.now())),
             );
-            parts.push(
-              (await ocr(Buffer.from(rendered.pages[0].data))) || page.text,
+            const image = rendered.pages[0]?.data;
+            if (!image) throw Error("No rendered page");
+            const recognized = await ocr(Buffer.from(image));
+            if (recognized.trim()) {
+              extraction.method = parts.some((part) => part.trim())
+                ? "mixed"
+                : "ocr";
+              parts.push(recognized);
+            } else if (page.text.trim()) parts.push(page.text);
+          } catch {
+            extraction.warnings.push(
+              "A PDF page could not be image-processed. Review the original document.",
             );
+            if (page.text.trim()) parts.push(page.text);
           }
-          text = parts.join("\n\n");
         }
+        text = parts.join("\n\n");
       } catch (error) {
         if (/password/i.test((error as Error).name + (error as Error).message))
           throw new SafeError(

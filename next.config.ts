@@ -5,6 +5,7 @@ const ocrRuntimeFiles = [
   // which tracing cannot discover from the route entry point.
   "./node_modules/tesseract.js/src/**/*",
   "./node_modules/tesseract.js-core/**/*",
+  "./node_modules/@tesseract.js-data/eng/4.0.0_best_int/eng.traineddata.gz",
   "./node_modules/wasm-feature-detect/**/*",
   // The separate worker is not statically traced. Keep its direct package
   // dependencies beside it, including bmp-js used by setImage.

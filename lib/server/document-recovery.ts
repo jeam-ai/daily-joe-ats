@@ -22,6 +22,11 @@ const deferred = (warnings?: string[]) =>
   !!warnings?.some((warning) =>
     /resume processing was deferred/i.test(warning),
   );
+const sparse = (warnings?: string[]) =>
+  !!warnings?.some((warning) =>
+    /very little readable text was extracted/i.test(warning),
+  );
+const OCR_UPGRADE = "bundled-english-v1";
 
 export async function recoverApplicationDocument(
   id: string,
@@ -74,7 +79,11 @@ export async function recoverApplicationDocument(
         from: snapshot.application.applicant.email,
         filename: String(snapshot.resume.filename),
       };
-  const evidence = intakeEvidence({ ...submitted, resume: document.text });
+  const evidence = intakeEvidence({
+    ...submitted,
+    filename: String(snapshot.resume.filename),
+    resume: document.text,
+  });
   await transaction(async (tx) => {
     const state = await getState(tx);
     const application = state.applications.find(
@@ -177,17 +186,31 @@ export async function recoverOneDeferredDocument(
       "document_recovery",
       "retry_at",
     );
+    const upgrades =
+      (await readRecord<Record<string, string>>(
+        tx,
+        "document_recovery",
+        "ocr_upgrade",
+      )) || {};
     const application = state.applications.find(
       (item) =>
         !item.isDemo &&
         !item.deletedAt &&
         item.resumeId &&
-        deferred(item.extraction?.warnings) &&
+        (deferred(item.extraction?.warnings) ||
+          (sparse(item.extraction?.warnings) &&
+            upgrades[item.id] !== `${item.resumeId}:${OCR_UPGRADE}`)) &&
         (attempts?.[item.id] || 0) <= Date.now(),
     );
     if (!application) return null;
     const next = { ...attempts, [application.id]: Date.now() + 10 * 60000 };
     await putRecord(tx, "document_recovery", "retry_at", next);
+    // One bounded upgrade pass for old text-layer failures. Mark before work
+    // so a failed original or unreadable PDF cannot loop every minute.
+    if (!deferred(application.extraction?.warnings)) {
+      upgrades[application.id] = `${application.resumeId}:${OCR_UPGRADE}`;
+      await putRecord(tx, "document_recovery", "ocr_upgrade", upgrades);
+    }
     return application.id;
   });
   if (!candidate) return false;

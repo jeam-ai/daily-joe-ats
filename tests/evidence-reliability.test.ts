@@ -118,6 +118,28 @@ test("built-in resume sections recover skills and job history without AI", () =>
   assert.match(result.certifications, /Food Safety Training/);
   assert.equal(result.sources.skills, "Resume");
 });
+test("resume filename can recover an uncertain name and subject role omits the sender suffix", () => {
+  const result = intakeEvidence({
+    subject: "Application for Junior Data Analyst - Fictional Person",
+    filename: "Fictional Person - PDF Resume.pdf",
+    from: "<fixture@example.invalid>",
+  });
+  assert.equal(result.name, "Fictional Person");
+  assert.equal(result.position, "Junior Data Analyst");
+  assert.equal(
+    evidenceInformation(result).fields.name.source,
+    "Attachment filename",
+  );
+  assert.equal(evidenceInformation(result).fields.name.confidence, "Uncertain");
+  const application = {
+    applicant: { name: "Name needs verification" },
+    position: "Junior Data Analyst - Fictional Person",
+    information: { fields: {}, conflicts: [] },
+  } as unknown as Application;
+  applyRecoveredResumeEvidence(application, result);
+  assert.equal(application.applicant.name, "Fictional Person");
+  assert.equal(application.position, "Junior Data Analyst");
+});
 test("equivalent role wording still requires stated duration and absent content is not assessed", () => {
   const rules = [
     {

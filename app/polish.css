@@ -799,6 +799,28 @@ summary {
 .profile-contact span {
   overflow-wrap: anywhere;
 }
+.application-source .card-heading {
+  padding-bottom: 8px;
+}
+.application-source .padded {
+  padding-top: 6px;
+  padding-bottom: 18px;
+  gap: 12px;
+}
+.application-source .padded p {
+  margin: 0;
+}
+.profile-quick-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-left: auto;
+}
+.profile-quick-actions .button {
+  min-height: 30px;
+  padding: 5px 9px;
+  font-size: 12px;
+}
 .criterion > div {
   flex-wrap: wrap;
 }

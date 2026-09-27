@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import JSZip from "jszip";
+import { createCanvas } from "@napi-rs/canvas";
 import { extractResume } from "../../lib/server/documents";
 import { withDeadline } from "../../lib/server/deadline";
 
@@ -28,6 +29,60 @@ export function textPdf(text: string) {
     .join("")}trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`;
   return Buffer.from(pdf);
 }
+function scannedPdf() {
+  const canvas = createCanvas(1200, 900);
+  const context = canvas.getContext("2d");
+  context.fillStyle = "white";
+  context.fillRect(0, 0, 1200, 900);
+  context.fillStyle = "black";
+  context.font = "bold 48px Arial";
+  context.fillText("FICTIONAL TEST PERSON", 70, 100);
+  context.font = "30px Arial";
+  context.fillText("SKILLS", 70, 210);
+  context.fillText("Customer service", 70, 270);
+  context.fillText("EDUCATION", 70, 370);
+  context.fillText("High school graduate", 70, 430);
+  const jpeg = canvas.toBuffer("image/jpeg");
+  const objects: Buffer[] = [
+    Buffer.from("<< /Type /Catalog /Pages 2 0 R >>"),
+    Buffer.from("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
+    Buffer.from(
+      "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 450] /Resources << /XObject << /Im1 4 0 R >> >> /Contents 5 0 R >>",
+    ),
+    Buffer.concat([
+      Buffer.from(
+        `<< /Type /XObject /Subtype /Image /Width 1200 /Height 900 /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${jpeg.length} >>\nstream\n`,
+      ),
+      jpeg,
+      Buffer.from("\nendstream"),
+    ]),
+    Buffer.from(
+      "<< /Length 32 >>\nstream\nq 600 0 0 450 0 0 cm /Im1 Do Q\nendstream",
+    ),
+  ];
+  const chunks: Buffer[] = [Buffer.from("%PDF-1.4\n")];
+  const offsets = [0];
+  for (const [index, object] of objects.entries()) {
+    offsets.push(Buffer.concat(chunks).length);
+    chunks.push(
+      Buffer.from(`${index + 1} 0 obj\n`),
+      object,
+      Buffer.from("\nendobj\n"),
+    );
+  }
+  const xref = Buffer.concat(chunks).length;
+  chunks.push(
+    Buffer.from(
+      `xref\n0 6\n0000000000 65535 f \n${offsets
+        .slice(1)
+        .map((offset) => `${String(offset).padStart(10, "0")} 00000 n \n`)
+        .join(
+          "",
+        )}trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`,
+    ),
+  );
+  return Buffer.concat(chunks);
+}
 test("text PDF and DOCX preserve actual evidence without OCR claims", async () => {
   const pdf = await extractResume(textPdf(content), "fictional-resume.pdf");
   assert.match(pdf.text, /Customer service/);
@@ -53,6 +108,15 @@ test("text PDF and DOCX preserve actual evidence without OCR claims", async () =
   );
   assert.match(docx.text, /2023 to 2025/);
   assert.equal(docx.extraction.method, "text");
+});
+test("scanned PDF uses built-in OCR instead of silently leaving visible fields empty", async () => {
+  const result = await extractResume(
+    scannedPdf(),
+    "fictional-scanned-resume.pdf",
+  );
+  assert.match(result.text, /FICTIONAL TEST PERSON/i);
+  assert.match(result.text, /Customer service/i);
+  assert.equal(result.extraction.method, "ocr");
 });
 test("damaged documents fail safely and deadlines settle", async () => {
   await assert.rejects(
