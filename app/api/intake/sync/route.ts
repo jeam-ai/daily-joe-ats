@@ -43,10 +43,16 @@ export async function POST(request: Request) {
       // Gmail sync is deliberately small and resumable. A later poll takes
       // the next durable slice, which is more reliable than one long task in
       // a serverless `after` lifecycle.
-      await syncIntake(user, force, 75000).catch(() =>
-        reportIssue("gmail.sync"),
-      );
+      const intake = await syncIntake(user, force, 75000).catch(async () => {
+        await reportIssue("gmail.sync");
+        return undefined;
+      });
       await activity;
+      // The deterministic parser runs for every intake. Ask Gemini only once
+      // after a real new import, never for a browser status read or an empty
+      // mailbox check; its provider quota must not compete with Gmail intake.
+      if (intake?.imported && Date.now() - started < 85000)
+        await runExtractionJobs(1).catch(() => reportIssue("ai.provider"));
       if (Date.now() - started < 100000)
         await drainEmailOutbox(1).catch(() =>
           reportIssue("notification.failed"),
@@ -57,3 +63,4 @@ export async function POST(request: Request) {
     return safeError(e);
   }
 }
+import { runExtractionJobs } from "@/lib/server/ai-extraction";

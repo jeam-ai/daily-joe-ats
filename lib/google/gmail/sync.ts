@@ -113,13 +113,13 @@ export async function syncIntake(
   requestedBy?: User,
   force = false,
   budgetMs = 210000,
-) {
+) : Promise<IntakeSync | undefined> {
   const workspace = await readTransaction(getState);
-  if (workspace.intakePaused) return;
+  if (workspace.intakePaused) return undefined;
   const actor = requestedBy
     ? workspace.users?.find((u) => u.email === requestedBy.email && u.active)
     : workspace.users?.find((u) => u.active && u.role === "Admin");
-  if (!actor || !canManage(actor)) return;
+  if (!actor || !canManage(actor)) return undefined;
   const runId = crypto.randomUUID(),
     now = Date.now();
   const claimed = await retryableTransaction(async (tx) => {
@@ -154,7 +154,7 @@ export async function syncIntake(
     await putRecord(tx, "jobs", "gmail", job);
     return job;
   });
-  if (!claimed) return;
+  if (!claimed) return undefined;
   const job = claimed;
   async function checkpoint() {
     await retryableTransaction(async (tx) => {
@@ -227,7 +227,7 @@ export async function syncIntake(
     if (!ids.length) {
       job.status = "complete";
       job.message = "Mailbox checked. No new eligible applications.";
-      return;
+      return job;
     }
     job.status = "processing";
     job.message = `Reading and validating ${ids.length} application${ids.length === 1 ? "" : "s"}…`;
@@ -383,4 +383,5 @@ export async function syncIntake(
             : 60000);
     await checkpoint().catch(() => {});
   }
+  return job;
 }
