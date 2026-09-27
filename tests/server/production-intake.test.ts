@@ -13,6 +13,7 @@ import { initialState } from "../../lib/server/initial-state";
 import { withStore } from "../../lib/server/store";
 import {
   AUTOMATIC_INTAKE_BATCH_SIZE,
+  INTAKE_COOLDOWN_MS,
   INTAKE_QUEUE_VERSION,
   restartQueuedIntake,
   syncIntake,
@@ -85,6 +86,7 @@ test("automatic intake uses safe batches, maintains latest 100 with an older que
   });
   const original = globalThis.fetch;
   let sends = 0;
+  const messageSearches: string[] = [];
   globalThis.fetch = async (input) => {
     const url = String(input);
     if (url.includes("/send")) {
@@ -94,6 +96,7 @@ test("automatic intake uses safe batches, maintains latest 100 with an older que
     if (url.endsWith("/profile"))
       return Response.json({ emailAddress: "careers@example.invalid" });
     if (url.includes("messages?")) {
+      messageSearches.push(url);
       const second = url.includes("pageToken=next");
       return Response.json({
         messages: Array.from({ length: second ? 10 : 100 }, (_, i) => ({
@@ -146,6 +149,13 @@ test("automatic intake uses safe batches, maintains latest 100 with an older que
     assert.equal(cooldown.nextPhase, "latest");
     assert.equal(cooldown.databaseState, "saved");
     assert.ok(cooldown.lastDatabaseCommitAt);
+    assert.equal(INTAKE_COOLDOWN_MS, 60 * 1000);
+    assert.ok(
+      messageSearches.some((url) =>
+        decodeURIComponent(url).includes("newer_than:3d"),
+      ),
+      "recent labelled email recovery runs before historical backfill",
+    );
     assert.equal(
       Number(
         (

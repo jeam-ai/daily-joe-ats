@@ -59,6 +59,9 @@ export type IntakeSync = {
   seenIds?: string[];
   /** IDs known to have come from Gmail's newest-first mailbox head. */
   latestPending?: string[];
+  /** Continuation token for the three-day latest/recovery sweep. */
+  recentPage?: string;
+  recentWindowQuery?: string;
   /** Historical IDs are kept separately so they can never outrank new mail. */
   backfillPending?: string[];
   queuePolicyVersion?: number;
@@ -68,6 +71,7 @@ export type IntakeSync = {
   backfillImportedThisWeek?: number;
   backfillPausedReason?: string;
   backfillStoragePercent?: number;
+  backfillComplete?: boolean;
   batchLimit?: number;
   batchChecked?: number;
   batchImported?: number;
@@ -88,11 +92,10 @@ export const AUTOMATIC_INTAKE_BATCH_SIZE = MAX_GMAIL_IMPORT_BATCH_SIZE;
 // One minute after a confirmed commit gives Aiven time to release the prior
 // write while keeping current applicants moving through the queue promptly.
 export const INTAKE_COOLDOWN_MS = 60 * 1000;
-// Version 2 intentionally rebases the old durable cursor once. Earlier
-// versions could continue an historical page before checking Gmail's newest
-// messages. The rebase discards only unimported queue pointers; applications
-// already committed to the ATS remain untouched and are still de-duplicated.
-export const INTAKE_QUEUE_VERSION = 2;
+// Version 3 introduces a separate three-day latest/recovery cursor. The
+// rebase discards only unimported queue pointers; applications already
+// committed to the ATS remain untouched and are still de-duplicated.
+export const INTAKE_QUEUE_VERSION = 3;
 export const NEW_INTAKE_QUIET_PERIOD_MS = 6 * 60 * 60 * 1000;
 export const BACKFILL_WEEKLY_LIMIT = 60;
 const BACKFILL_QUEUE_POLICY_VERSION = 1;
@@ -212,7 +215,10 @@ export async function restartQueuedIntake(requestedBy: User) {
     delete job.page;
     delete job.seenIds;
     delete job.latestPending;
+    delete job.recentPage;
+    delete job.recentWindowQuery;
     delete job.backfillPending;
+    delete job.backfillComplete;
     delete job.nextBackfillAt;
     delete job.backfillPausedReason;
     delete job.retryAt;
@@ -268,6 +274,8 @@ export async function syncIntake(
       delete job.page;
       delete job.seenIds;
       delete job.latestPending;
+      delete job.recentPage;
+      delete job.recentWindowQuery;
       delete job.retryAt;
       delete job.nextSyncAt;
       delete job.nextPhase;
@@ -360,18 +368,30 @@ export async function syncIntake(
       delete job.nextBackfillAt;
       delete job.backfillPausedReason;
       delete job.lastNewEligibleAt;
+      delete job.recentPage;
+      delete job.recentWindowQuery;
+      delete job.backfillComplete;
       job.query = query;
     }
     job.message = "Finding new eligible applications in the official mailbox…";
     await checkpoint();
-    // Always inspect Gmail's newest-first head before a saved historical
-    // cursor. Fresh IDs are prepended to the durable queue, so a cursor left
-    // at an older month can never make old mail outrank a new application.
+    // Always inspect the most recent three days before a saved historical
+    // cursor. Gmail can return more than one 100-message page during a busy
+    // day, so retain a separate recent cursor and recover every unimported
+    // labelled application in that window as *latest* work—not backfill.
     stage = "mailbox-head";
+    const recentQuery = `${query} newer_than:3d`;
+    if (job.recentWindowQuery !== recentQuery) {
+      delete job.recentPage;
+      job.recentWindowQuery = recentQuery;
+    }
     const head = await gmail<{
       messages?: { id: string }[];
       nextPageToken?: string;
-    }>(token, `messages?maxResults=100&q=${encodeURIComponent(query)}`);
+    }>(
+      token,
+      `messages?maxResults=100&q=${encodeURIComponent(recentQuery)}`,
+    );
     const queued = new Set([...job.pending, ...(job.backfillPending || [])]);
     const known = new Set([
       ...workspace.applications.map((a) => a.gmailMessageId),
@@ -381,7 +401,7 @@ export async function syncIntake(
     const fresh = (head.messages || [])
       .map((message) => message.id)
       .filter((id) => !known.has(id));
-    if (!job.page) job.page = head.nextPageToken;
+    if (!job.recentPage) job.recentPage = head.nextPageToken;
     if (fresh.length) {
       job.pending = [...new Set([...fresh, ...job.pending])];
       job.latestPending = [
@@ -392,12 +412,44 @@ export async function syncIntake(
       job.phase = "latest";
       job.message = "Prioritizing newest eligible applications from Gmail…";
     }
+    // Once the current mailbox head is known, continue through the remaining
+    // recent pages. Append them behind the newest page so freshness still
+    // wins, while no labelled email from the last three days is skipped.
+    if (!fresh.length && !job.pending.length && job.recentPage) {
+      stage = "mailbox-recent-page";
+      const page = await gmail<{
+        messages?: { id: string }[];
+        nextPageToken?: string;
+      }>(
+        token,
+        `messages?maxResults=100&q=${encodeURIComponent(recentQuery)}&pageToken=${encodeURIComponent(job.recentPage)}`,
+      );
+      const recent = (page.messages || [])
+        .map((message) => message.id)
+        .filter((id) => !known.has(id));
+      job.recentPage = page.nextPageToken;
+      if (!job.recentPage) delete job.recentPage;
+      if (recent.length) {
+        job.pending = [...new Set([...job.pending, ...recent])];
+        job.latestPending = [
+          ...new Set([...(job.latestPending || []), ...recent]),
+        ];
+        job.lastNewEligibleAt = now;
+        delete job.backfillPausedReason;
+        job.phase = "latest";
+        job.message = "Recovering recent labelled applications from Gmail…";
+      }
+    }
     job.headCheckedAt = now;
     await checkpoint();
     // Historical mail is deliberately slow, bounded work. New intake keeps
     // checking the Gmail head every cycle; a single historical batch is only
     // permitted after six quiet hours, then waits another six hours.
-    if (!job.pending.length && (job.backfillPending?.length || job.page)) {
+    if (
+      !job.pending.length &&
+      !job.recentPage &&
+      (job.backfillPending?.length || job.page || !job.backfillComplete)
+    ) {
       const weekStarted = job.backfillWeekStartedAt || now;
       if (now - weekStarted >= 7 * 86400000) {
         job.backfillWeekStartedAt = now;
@@ -427,6 +479,30 @@ export async function syncIntake(
         } else {
           delete job.backfillPausedReason;
           job.backfillStoragePercent = storage.percent;
+          // The generic mailbox cursor is only opened after the latest
+          // three-day recovery sweep is complete and its quiet window has
+          // elapsed. It is therefore always historical work.
+          if (!job.backfillPending?.length && !job.page) {
+            stage = "mailbox-history-head";
+            const historyHead = await gmail<{
+              messages?: { id: string }[];
+              nextPageToken?: string;
+            }>(
+              token,
+              `messages?maxResults=100&q=${encodeURIComponent(query)}`,
+            );
+            const historyKnown = new Set([
+              ...workspace.applications.map((a) => a.gmailMessageId),
+              ...(job.seenIds || []),
+            ]);
+            job.backfillPending = (historyHead.messages || [])
+              .map((message) => message.id)
+              .filter((id) => !historyKnown.has(id));
+            job.page = historyHead.nextPageToken;
+            if (!(job.backfillPending || []).length) delete job.backfillPending;
+            if (!job.backfillPending?.length && !job.page)
+              job.backfillComplete = true;
+          }
           if (!job.backfillPending?.length && job.page) {
             stage = "mailbox-page";
             const page = await gmail<{
@@ -444,6 +520,9 @@ export async function syncIntake(
               .map((message) => message.id)
               .filter((id) => !pageKnown.has(id));
             job.page = page.nextPageToken;
+            if (!(job.backfillPending || []).length) delete job.backfillPending;
+            if (!job.backfillPending?.length && !job.page)
+              job.backfillComplete = true;
           }
           if (job.backfillPending?.length) {
             job.pending = job.backfillPending.slice(
@@ -544,7 +623,10 @@ export async function syncIntake(
         job.backfillPending = job.backfillPending?.filter(
           (id) => !ids.includes(id),
         );
-        if (!job.backfillPending?.length) delete job.backfillPending;
+        if (!job.backfillPending?.length) {
+          delete job.backfillPending;
+          if (!job.page) job.backfillComplete = true;
+        }
         job.backfillImportedThisWeek =
           (job.backfillImportedThisWeek || 0) + job.imported;
         job.backfillWeekStartedAt ||= now;
