@@ -30,7 +30,7 @@ const sparse = (warnings?: string[]) =>
   );
 const OCR_UPGRADE = "bundled-english-v1";
 const EVIDENCE_PARSER_VERSION =
-  "structured-education-strengths-residence-branch-v5";
+  "timeline-education-address-qualification-v6";
 
 // Re-evaluate saved text after a deterministic parser improvement. This does
 // not fetch Gmail, write files, call AI, or touch HR-verified fields/stages.

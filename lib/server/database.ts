@@ -233,7 +233,11 @@ async function databaseTransaction<T>(
       await client.query("ROLLBACK");
       throw error;
     } finally {
-      client.release();
+      // Direct Aiven services have a small account-wide connection limit. A
+      // Vercel invocation cannot safely keep an idle client while several UI
+      // requests or background tasks run in parallel, so release it at the
+      // server boundary instead of letting cold instances accumulate clients.
+      client.release(aiven && !!process.env.VERCEL);
     }
   }
   if (process.env.VERCEL)
@@ -375,7 +379,9 @@ export function readTransaction<T>(fn: (tx: Transaction) => Promise<T>) {
           temporaryDatabaseRead = isDatabaseFailure(error);
         if (!revisionChanged && !temporarySheetsRead && !temporaryDatabaseRead)
           throw error;
-        if ((temporarySheetsRead || temporaryDatabaseRead) && attempt >= 2)
+        if (temporarySheetsRead && attempt >= 2)
+          throw error;
+        if (temporaryDatabaseRead && attempt >= 5)
           throw error;
         // Intake checkpoints can create a short burst of revisions. A small
         // bounded backoff lets the reader hydrate one coherent revision while

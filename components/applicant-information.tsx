@@ -105,7 +105,7 @@ export function ApplicantInformation({
       .filter(Boolean);
     return (
       <span className="education-record">
-        <strong>{title}</strong>
+        <span className="education-title">{title}</span>
         {!!details.length && (
           <span className="education-details">{details.join(" · ")}</span>
         )}

@@ -1,4 +1,3 @@
-import { runExtractionJobs } from "@/lib/server/ai-extraction";
 import { drainEmailOutbox } from "@/lib/server/email-outbox";
 import { after } from "next/server";
 import { requireUser, requireOrigin } from "@/lib/auth/session";
@@ -48,8 +47,6 @@ export async function POST(request: Request) {
         reportIssue("gmail.sync"),
       );
       await activity;
-      if (Date.now() - started < 85000)
-        await runExtractionJobs(1).catch(() => reportIssue("ai.provider"));
       if (Date.now() - started < 100000)
         await drainEmailOutbox(1).catch(() =>
           reportIssue("notification.failed"),

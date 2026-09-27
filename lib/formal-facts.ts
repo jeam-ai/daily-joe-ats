@@ -15,6 +15,17 @@ const acronyms = new Set([
   "TESDA",
 ]);
 const titleConnectors = new Set(["and", "at", "de", "for", "in", "of", "the"]);
+const addressAbbreviations: Record<string, string> = {
+  blk: "Blk.",
+  brgy: "Brgy.",
+  bgy: "Brgy.",
+  st: "St.",
+  rd: "Rd.",
+  ave: "Ave.",
+  subd: "Subd.",
+  bldg: "Bldg.",
+  ph: "Ph.",
+};
 
 function formalTitle(value: string) {
   return value.replace(/\p{L}[\p{L}'’-]*/gu, (word, offset) => {
@@ -27,6 +38,15 @@ function formalTitle(value: string) {
   });
 }
 
+function formalAddress(value: string) {
+  return formalTitle(value)
+    .replace(
+      /\b(blk|brgy|bgy|st|rd|ave|subd|bldg|ph)\.?(?=\s|,|$)/gi,
+      (word) => addressAbbreviations[word.replace(/\.$/, "").toLowerCase()],
+    )
+    .replace(/\s+([,.])/g, "$1");
+}
+
 export function formalFact(field: string, value: string): string {
   const text = tidy(value).replace(
     /\b(\d{4})\s*[-–—]\s*(\d{4}|present)\b/gi,
@@ -35,6 +55,7 @@ export function formalFact(field: string, value: string): string {
   );
   if (!text) return text;
   if (field === "name") return formalName(text);
+  if (field === "residence") return formalAddress(text);
   if (
     ["education", "position", "location", "skills", "certifications"].includes(
       field,

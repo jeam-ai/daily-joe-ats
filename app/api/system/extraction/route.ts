@@ -63,17 +63,6 @@ export async function GET(request: Request) {
     }
     if (applicant)
       data.jobs = data.jobs.filter((j) => j.applicationId === applicant);
-    if (
-      applicant &&
-      data.enabled &&
-      data.configured &&
-      data.jobs.some((job) => ["Queued", "Failed"].includes(job.status))
-    )
-      after(() =>
-        runExtractionJobs(1, extractionProvider(), applicant).catch(
-          () => undefined,
-        ),
-      );
     return Response.json(data, {
       headers: { "Cache-Control": "no-store" },
     });

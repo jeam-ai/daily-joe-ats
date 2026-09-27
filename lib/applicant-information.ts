@@ -122,10 +122,40 @@ export function applyRecoveredResumeEvidence(
       fields.education?.source === "Resume" &&
       incoming.fields.education?.source === "Resume" &&
       !!current &&
-      /\b(?:certifications?|certificates?|trainings?|tesda|nc\s*i{1,3})\b/i.test(
+      ((/\b(?:certifications?|certificates?|trainings?|tesda|nc\s*i{1,3})\b/i.test(
         current,
       ) &&
-      !/\b(?:certifications?|certificates?|trainings?|tesda|nc\s*i{1,3})\b/i.test(
+        !/\b(?:certifications?|certificates?|trainings?|tesda|nc\s*i{1,3})\b/i.test(
+          value,
+        )) ||
+        (!/\b(?:19|20)\d{2}\b/.test(current) &&
+          /\b(?:19|20)\d{2}\b/.test(value) &&
+          /\b(?:school|college|university|lyceum|polytechnic|institute)\b/i.test(
+            value,
+          )));
+    const correctedSkills =
+      key === "skills" &&
+      fields.skills?.source === "Resume" &&
+      incoming.fields.skills?.source === "Resume" &&
+      /\b(?:school|academic\s+track|sponsored\s+by|trainings?\s+attended|career\s+guidance|\b(?:19|20)\d{2}\b)\b/i.test(
+        current || "",
+      ) &&
+      !/\b(?:school|academic\s+track|sponsored\s+by)\b/i.test(value);
+    const correctedCertification =
+      key === "certifications" &&
+      fields.certifications?.source === "Resume" &&
+      incoming.fields.certifications?.source === "Resume" &&
+      /^trainings?\s+attended\.?$/i.test(current || "") &&
+      !/^trainings?\s+attended\.?$/i.test(value);
+    const correctedResidence =
+      key === "residence" &&
+      incoming.fields.residence?.source === "Resume" &&
+      fields.residence?.source === "Resume" &&
+      !!current &&
+      /(?:processed\s+(?:cash|card|digital)|customer\s+service|experience|objective|profile)/i.test(
+        current,
+      ) &&
+      /\b(?:blk\.?|block|lot|house|unit|purok|zone|sitio|brgy\.?|barangay|subd\.?|subdivision|street|st\.?|road|rd\.?|city|province)\b/i.test(
         value,
       );
     if (
@@ -133,7 +163,10 @@ export function applyRecoveredResumeEvidence(
       !subjectPositionIncludesName &&
       !subjectPositionIncludesBranch &&
       !longerResumeAddress &&
-      !correctedEducation
+      !correctedEducation &&
+      !correctedResidence &&
+      !correctedSkills &&
+      !correctedCertification
     )
       continue;
     if (key === "position" || key === "location")

@@ -110,6 +110,13 @@ test("resume contact locality and lowercase submitted facts are displayed formal
     "Work experience in the social welfare field",
   );
   assert.equal(
+    formalFact(
+      "residence",
+      "blk 14 lot 21 asturias st. maravilla subd brgy. general trias cavite",
+    ),
+    "Blk. 14 Lot 21 Asturias St. Maravilla Subd. Brgy. General Trias Cavite",
+  );
+  assert.equal(
     formalName("LUNA, VANESSA, FRANCISCO"),
     "Vanessa Francisco Luna",
   );
@@ -278,6 +285,36 @@ test("certificate/training is separate from Education and repairs unverified sav
   applyRecoveredResumeEvidence(application, result);
   assert.doesNotMatch(application.applicant.education || "", /Cookery/);
   assert.match(application.applicant.certifications || "", /NCII.*Cookery/i);
+});
+test("stored parser mistakes are replaced by richer resume evidence without touching HR fields", () => {
+  const corrected = intakeEvidence({
+    subject: "Application for Barista",
+    resume:
+      "CONTACT\nblk 14 lot 21 asturias st. maravilla subd brgy. general trias cavite\nEDUCATION\nCollege\nLyceum of the Philippines\n2016-2018\nBachelor of Arts in Multimedia Arts\nSKILLS\nCustomer service\nHandling customer inquiries\nCERTIFICATIONS\nCareer Guidance Training Session",
+  });
+  const application = {
+    applicant: {
+      name: "Fictional Applicant",
+      location: "Processed cash, card, and digital transactions accurately using POS systems.",
+      education: "Bachelor of Arts in · Bachelor of Arts in",
+      skills: "Carmona National High School · Academic Track: HUMSS",
+      certifications: "Trainings Attended",
+    },
+    information: {
+      fields: {
+        residence: { source: "Resume", confidence: "Confident" },
+        education: { source: "Resume", confidence: "Confident" },
+        skills: { source: "Resume", confidence: "Confident" },
+        certifications: { source: "Resume", confidence: "Confident" },
+      },
+      conflicts: [],
+    },
+  } as unknown as Application;
+  applyRecoveredResumeEvidence(application, corrected);
+  assert.match(application.applicant.location || "", /Blk\. 14 Lot 21/i);
+  assert.match(application.applicant.education || "", /Lyceum/i);
+  assert.match(application.applicant.skills || "", /Customer service/i);
+  assert.match(application.applicant.certifications || "", /Career Guidance/i);
 });
 test("resume filename can recover an uncertain name and subject role omits the sender suffix", () => {
   const result = intakeEvidence({

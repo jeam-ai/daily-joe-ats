@@ -1,5 +1,4 @@
 import { after } from "next/server";
-import { runExtractionJobs } from "@/lib/server/ai-extraction";
 import { requireOrigin, requireUser } from "@/lib/auth/session";
 import {
   cachedHealth,
@@ -85,7 +84,6 @@ export async function POST(request: Request) {
       body.ids.every((id: unknown) => typeof id === "string")
     ) {
       const result = await enrichApplicants(user, body.ids);
-      after(() => runExtractionJobs(1));
       return Response.json(result);
     }
     if (

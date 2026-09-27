@@ -155,6 +155,25 @@ test("structured education, key strengths, and a configured residence branch are
   assert.equal(result.sources.skills, "Resume");
   assert.equal(result.sources.assignedBranch, "Residence match");
 });
+test("timeline education, unlabeled contact addresses, and qualifications do not bleed into one another", () => {
+  const result = intakeEvidence({
+    subject: "Application for Barista - General Trias",
+    locations: ["General Trias"],
+    resume:
+      "JUANITO INSERT0 BERNARTE\nCONTACT\n(+63) 915 2257 470\nbernartejuanito24@gmail.com\nblk 14 lot 21 asturias st. maravilla subd brgy. general trias cavite\nEDUCATION\nCollege\nLYCEUM OF THE PHILIPPINES\n2016 - 2018\nBachelor Of Arts in Multimedia Arts\nDE LASALLE COLLEGE OF SAINT BENILDE\n2011 - 2015\nBachelor Of Arts in Animation\nQUALIFICATIONS\nCustomer Service\nHandling Customer Inquiries\nTrainings Attended\nCareer Guidance and Employment Coaching Training Sessions\nEXPERIENCE\nProcessed cash, card, and digital transactions accurately using POS systems.",
+  });
+  assert.match(result.residence, /Blk\. 14 Lot 21 Asturias St\./);
+  assert.doesNotMatch(result.residence, /Processed cash/i);
+  assert.match(result.education, /Lyceum of the Philippines/i);
+  assert.match(result.education, /2016–2018/);
+  assert.match(result.education, /De Lasalle College of Saint Benilde/i);
+  assert.match(result.education, /2011–2015/);
+  assert.match(result.skills, /Customer Service/i);
+  assert.match(result.skills, /Handling Customer Inquiries/i);
+  assert.doesNotMatch(result.skills, /Lyceum|Trainings Attended/i);
+  assert.match(result.certifications, /Career Guidance/i);
+  assert.match(result.experienceDetails, /Processed cash/i);
+});
 test("email-body labels fill all profile fields when no readable resume exists", () => {
   const result = intakeEvidence({
     subject: "Mia Example - Job Application",

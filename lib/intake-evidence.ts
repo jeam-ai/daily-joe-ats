@@ -33,11 +33,13 @@ const defaultBranches = [
   },
 ];
 const certificationHeading =
-  /^(?:(?:professional\s+)?certifications?|certificates?(?:\s*(?:\/|&|and)\s*trainings?)?|trainings?(?:\s*(?:\/|&|and)\s*certificates?)?|licenses?|credentials?|seminars?(?:\s*(?:\/|&|and)\s*trainings?)?)\s*(?::.*)?$/i;
+  /^(?:(?:professional\s+)?certifications?|certificates?(?:\s*(?:\/|&|and)\s*trainings?)?|trainings?(?:\s+(?:attended|completed))?(?:\s*(?:\/|&|and)\s*certificates?)?|licenses?|credentials?|seminars?(?:\s*(?:\/|&|and)\s*trainings?)?)\s*(?::.*)?$/i;
 const credentialLine =
-  /\b(?:certifications?|certificates?|trainings?|licenses?|credentials?|tesda|national\s+certificate|nc\s*(?:i|ii|iii|iv|v|2|3|4)|servsafe|food\s+safety|first\s+aid|bosh|cosh)\b/i;
+  /\b(?:certifications?|certificates?|trainings?(?:\s+sessions?)?|licenses?|credentials?|tesda|national\s+certificate|nc\s*(?:i|ii|iii|iv|v|2|3|4)|servsafe|food\s+safety|first\s+aid|bosh|cosh)\b/i;
 const skillsHeading =
-  /^(?:(?:core|key|technical|professional|personal)\s+)?(?:skills?(?:\s+(?:and|&|\/)\s+competenc(?:y|ies))?|competenc(?:y|ies)|strengths?|expertise|abilities|qualifications?|personal\s+attributes?)\s*(?::.*)?$/i;
+  /^(?:(?:core|key|technical|professional|personal)\s+)?(?:skills?(?:\s+(?:and|&|\/)\s+competenc(?:y|ies))?|competenc(?:y|ies)|strengths?|expertise|abilities|personal\s+attributes?)\s*(?::.*)?$/i;
+const qualificationsHeading =
+  /^(?:(?:key|core|minimum|preferred|professional)\s+)?qualifications?\s*(?::.*)?$/i;
 const experienceHeading =
   /^(?:experience|relevant experience|job experience|work experience|employment(?: history)?|professional experience|work history|career history|work background|career summary)\s*(?::.*)?$/i;
 const educationHeading =
@@ -273,13 +275,19 @@ export function intakeEvidence(input: {
       ? []
       : resumeLines.slice(contactIndex + 1, contactIndex + 13);
   const addressPattern = /^[\p{L}\d .'-]+,\s*[\p{L} .'-]+,\s*[\p{L} .'-]+$/u;
+  const addressCue =
+    /\b(?:blk\.?|block|lot|house|unit|purok|zone|sitio|brgy\.?|barangay|subd\.?|subdivision|street|st\.?|road|rd\.?|avenue|ave\.?)\b/i;
+  const localityCue =
+    /\b(?:city|municipality|province|cavite|laguna|camarines|masbate|philippines|[a-z][a-z .'-]+\s+(?:subd\.?|barangay|brgy\.?))\b/i;
   const joinedLine = (lines: string[], index: number) =>
     lines[index].endsWith(",")
       ? `${lines[index]} ${lines[index + 1] || ""}`
       : lines[index];
   const addressIsSafe = (line: string) =>
-    addressPattern.test(line) &&
-    !/@|(?:school|university|college|company|office)/i.test(line);
+    (addressPattern.test(line) || (addressCue.test(line) && localityCue.test(line))) &&
+    !/@|(?:school|university|college|company|office|career\s+objective|profile|experience|skills?|processed\s+(?:cash|card|digital)|customer\s+service)/i.test(
+      line,
+    );
   const contactAddress =
     contactLines
       .map((line, index) => joinedLine(contactLines, index))
@@ -459,6 +467,47 @@ export function intakeEvidence(input: {
     /^(?:tertiary|secondary|primary|elementary|college|university|senior\s+high(?:\s+school)?|junior\s+high(?:\s+school)?)\s*:?$/i;
   const educationPeriod =
     /\b(?:19|20)\d{2}\s*[-–—]\s*(?:(?:19|20)\d{2}|present)\b/i;
+  const educationTimeline = documents
+    .map((document) => {
+      const lines = document.text
+        .split(/\n/)
+        .map((line) => line.trim().replace(/^[-–•]\s*/, ""))
+        .filter(Boolean);
+      const start = lines.findIndex(
+        (line) => educationHeading.test(line) || educationLevelHeading.test(line),
+      );
+      if (start < 0) return { values: [] as string[], source: document.source };
+      const values: string[] = [];
+      let beforePeriod: string[] = [];
+      const institution =
+        /\b(?:university|college|school|academy|lyceum|polytechnic|institute|technical)\b/i;
+      const degree =
+        /\b(?:bachelor|master|doctorate|associate|high\s+school|senior\s+high|junior\s+high|secondary|elementary|diploma|academic\s+strand|stem|abm|humss|tvl|bs(?:[a-z.]|\s)|ba(?:[a-z.]|\s))\b/i;
+      for (let index = start + 1; index < lines.length; index++) {
+        const line = lines[index];
+        if (sectionBoundary.test(line)) break;
+        if (educationLevelHeading.test(line) || !line) continue;
+        if (educationPeriod.test(line)) {
+          const after: string[] = [];
+          for (const next of lines.slice(index + 1, index + 4)) {
+            if (sectionBoundary.test(next) || educationPeriod.test(next)) break;
+            if (institution.test(next) && after.length) break;
+            if (degree.test(next)) after.push(next);
+            else if (!after.length && /\b(?:major|strand|speciali[sz]ation)\b/i.test(next)) after.push(next);
+          }
+          const details = [...new Set([...beforePeriod, ...after])]
+            .filter((item) => institution.test(item) || degree.test(item) || /\b(?:major|strand|speciali[sz]ation)\b/i.test(item));
+          if (details.length)
+            values.push(`${details.join(" · ")} — ${line}`);
+          beforePeriod = [];
+          continue;
+        }
+        if (institution.test(line) || degree.test(line) || /\b(?:major|strand|speciali[sz]ation)\b/i.test(line))
+          beforePeriod.push(line);
+      }
+      return { values, source: document.source };
+    })
+    .find((result) => result.values.length);
   const structuredEducation = documents
     .map((document) => {
       const lines = document.text
@@ -491,8 +540,9 @@ export function intakeEvidence(input: {
     document.text.split(/\n/).some((line) => educationTerms.test(line)),
   );
   const educationCandidates = [
+    ...(educationTimeline?.values || []),
     ...(structuredEducation?.values || []),
-    ...(structuredEducation?.values.length
+    ...(educationTimeline?.values.length || structuredEducation?.values.length
       ? []
       : educationSection.values.filter((line) => educationTerms.test(line))),
     ...(structuredEducation?.values.length || educationSection.values.length
@@ -510,7 +560,7 @@ export function intakeEvidence(input: {
       return true;
     })
     .slice(0, 5)
-    .join(structuredEducation?.values.length ? "\n" : " · ")
+    .join(educationTimeline?.values.length || structuredEducation?.values.length ? "\n" : " · ")
     .slice(0, 600);
   const availabilityMatch = firstMatch(
     new RegExp(`(?:^|\\n)\\s*[^\\n]*${availabilityPattern.source}[^\\n]*`, "i"),
@@ -531,8 +581,33 @@ export function intakeEvidence(input: {
     )
       .trim()
       .slice(0, 600) || "";
-  const skillsSection = section(skillsHeading, 12);
-  const skills = skillsSection.values.join("\n").slice(0, 600);
+  const skillsSection = section(skillsHeading, 16);
+  const qualificationsSection = section(qualificationsHeading, 20);
+  const skillLanguage =
+    /\b(?:communication|customer|service|cash|handling|sales|pos|teamwork|team\s+work|adaptab|multitask|leadership|computer|office|excel|word|problem[ -]?solving|interpersonal|time\s+management|food|beverage|verbal|written|organis|collaborat|independent|flexib|responsib|reliab|detail)\b/i;
+  const profileNoise = (line: string) =>
+    !line ||
+    /@|(?:^|\b)(?:profile|about\s+me|career\s+objective|objective|contact|phone|email|address|residence|sponsored\s+by)(?:\b|$)/i.test(
+      line,
+    ) ||
+    addressIsSafe(line) ||
+    educationTerms.test(line) ||
+    credentialLine.test(line) ||
+    (/^(?:\p{Lu}[\p{L}'’-]*\s+){1,4}\p{Lu}[\p{L}'’-]*$/u.test(line) &&
+      !skillLanguage.test(line)) ||
+    /\b(?:january|february|march|april|may|june|july|august|september|october|november|december)\b.*\b(?:19|20)\d{2}\b/i.test(
+      line,
+    );
+  const skillCandidates = [
+    ...skillsSection.values.filter((line) => !profileNoise(line)),
+    ...qualificationsSection.values.filter(
+      (line) => !profileNoise(line) && skillLanguage.test(line),
+    ),
+  ];
+  const skills = [...new Set(skillCandidates)]
+    .slice(0, 16)
+    .join("\n")
+    .slice(0, 600);
   const certificationSection = section(certificationHeading, 8);
   const certificationDocument = documents.find((document) =>
     document.text
@@ -543,6 +618,7 @@ export function intakeEvidence(input: {
   );
   const certificationCandidates = [
     ...certificationSection.values,
+    ...qualificationsSection.values.filter((line) => credentialLine.test(line)),
     ...(certificationSection.values.length
       ? []
       : (certificationDocument?.text || "")
@@ -571,13 +647,14 @@ export function intakeEvidence(input: {
     [
       "education",
       education,
-      structuredEducation?.source ||
+      educationTimeline?.source ||
+        structuredEducation?.source ||
         educationSection.source ||
         educationDocument?.source,
     ],
     ["availability", availability, availabilityMatch?.source],
     ["experienceDetails", experienceDetails, experienceSection.source],
-    ["skills", skills, skillsSection.source],
+    ["skills", skills, skillsSection.source || qualificationsSection.source],
     [
       "certifications",
       certifications,
