@@ -776,27 +776,38 @@ main {
   gap: 13px;
   padding: 15px 23px;
   border-top: 1px solid var(--line);
+  transition: background 160ms ease, box-shadow 160ms ease;
+}
+.interview-row:hover,
+.interview-row:focus-visible {
+  background: var(--surface-subtle);
+  box-shadow: inset 3px 0 0 var(--info);
 }
 .calendar-tile {
-  width: 38px;
+  width: 44px;
   flex-shrink: 0;
   border: 1px solid var(--border);
-  border-radius: 7px;
+  border-radius: 9px;
   overflow: hidden;
   text-align: center;
+  background: var(--surface);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--text-primary) 8%, transparent);
 }
 .calendar-tile span {
   display: block;
-  font-size: 8px;
-  background: var(--surface-subtle);
-  color: var(--text-secondary);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  background: var(--info-bg);
+  color: var(--info);
   text-transform: uppercase;
-  padding: 2px;
+  padding: 3px 2px;
 }
 .calendar-tile strong {
   font-family: Manrope, sans-serif;
-  font-size: 16px;
+  font-size: 18px;
   font-weight: 600;
+  line-height: 1.45;
 }
 .interview-row > div:nth-child(2) {
   flex: 1;
