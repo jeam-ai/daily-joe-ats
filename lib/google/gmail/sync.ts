@@ -70,6 +70,8 @@ export type IntakeSync = {
     alreadyChecked: number;
     available: number;
     hasMoreRecentPages: boolean;
+    /** A bounded attachment sweep ran after the configured label was empty. */
+    recoveredFromRecentAttachments?: boolean;
   };
   /** Historical IDs are kept separately so they can never outrank new mail. */
   backfillPending?: string[];
@@ -143,6 +145,19 @@ function gmailMonthQuery(query: string, key: string) {
   const date = (value: Date) =>
     `${value.getUTCFullYear()}/${String(value.getUTCMonth() + 1).padStart(2, "0")}/${String(value.getUTCDate()).padStart(2, "0")}`;
   return `${query} after:${date(start)} before:${date(end)}`;
+}
+
+/** Keep Gmail's safety exclusions but remove only label terms for recovery. */
+function queryWithoutLabels(query: string) {
+  return query
+    .replace(/\blabel\s*:\s*(?:"[^"]+"|'[^']+'|\S+)/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export function recentAttachmentRecoveryQuery(query: string) {
+  const base = queryWithoutLabels(query) || "-in:spam -in:trash -in:sent";
+  return `${base} has:attachment newer_than:3d`;
 }
 
 /** Historical intake is optional work, so it fails closed when capacity is not safe. */
@@ -414,15 +429,28 @@ export async function syncIntake(
     // day, so retain a separate recent cursor and recover every unimported
     // labelled application in that window as *latest* work—not backfill.
     stage = "mailbox-head";
-    const recentQuery = `${query} newer_than:3d`;
+    let recentQuery = `${query} newer_than:3d`;
     if (job.recentWindowQuery !== recentQuery) {
       delete job.recentPage;
       job.recentWindowQuery = recentQuery;
     }
-    const head = await gmail<{
+    let head = await gmail<{
       messages?: { id: string }[];
       nextPageToken?: string;
     }>(token, `messages?maxResults=100&q=${encodeURIComponent(recentQuery)}`);
+    // A stale/renamed Gmail label must not produce a false empty-mailbox
+    // result. This fallback is limited to the last three days and attachment
+    // mail; previewImport applies a second application-evidence check before
+    // a record can be created.
+    const recoveredFromRecentAttachments =
+      !(head.messages || []).length && /\blabel\s*:/i.test(query);
+    if (recoveredFromRecentAttachments) {
+      recentQuery = recentAttachmentRecoveryQuery(query);
+      head = await gmail<{
+        messages?: { id: string }[];
+        nextPageToken?: string;
+      }>(token, `messages?maxResults=100&q=${encodeURIComponent(recentQuery)}`);
+    }
     const queued = new Set([...job.pending, ...(job.backfillPending || [])]);
     const imported = new Set(
       workspace.applications
@@ -446,6 +474,7 @@ export async function syncIntake(
       ).length,
       available: fresh.length,
       hasMoreRecentPages: !!head.nextPageToken,
+      recoveredFromRecentAttachments,
     };
     console.info("Gmail latest eligibility check", job.latestDiagnostics);
     if (!job.recentPage) job.recentPage = head.nextPageToken;
@@ -606,6 +635,8 @@ export async function syncIntake(
       deadline: now + Math.min(60000, Math.max(1000, budgetMs - 30000)),
       automatic: true,
       emailOnly: job.lastBatchPhase === "backfill",
+      requireApplicationEvidence:
+        !!job.latestDiagnostics?.recoveredFromRecentAttachments,
     });
     job.checked = preview.scanned;
     job.batchChecked = preview.scanned;

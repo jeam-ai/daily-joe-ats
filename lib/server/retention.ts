@@ -316,7 +316,7 @@ export async function runRetentionCleanup(options: RetentionRunOptions = {}) {
       options.purgeQueuedApplications
         ? "SELECT application_id,category,expires_at FROM application_retention WHERE expires_at<=$1 OR category IN ('outside_live_queue','terminal')"
         : "SELECT application_id,category,expires_at FROM application_retention WHERE expires_at<=$1",
-      options.purgeQueuedApplications ? [] : [now],
+      [now],
     );
     const remove = new Set<string>();
     let wouldExpireTalentPool = 0;

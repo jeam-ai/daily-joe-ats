@@ -18,6 +18,7 @@ import {
   restartQueuedIntake,
   syncIntake,
   intakeStatus,
+  recentAttachmentRecoveryQuery,
 } from "../../lib/google/gmail/sync";
 import { activeIntake } from "../../lib/data-policy";
 import { matchHiringNeed, senderName } from "../../lib/intake-matching";
@@ -53,6 +54,14 @@ test("paused intake reports its real state and never contacts Gmail even when fo
   } finally {
     globalThis.fetch = original;
   }
+});
+test("an empty configured Gmail label falls back only to recent attachment mail", () => {
+  assert.equal(
+    recentAttachmentRecoveryQuery(
+      'label:"HR - Applications" -in:spam -in:trash -in:sent',
+    ),
+    "-in:spam -in:trash -in:sent has:attachment newer_than:3d",
+  );
 });
 test("automatic intake uses safe batches, maintains latest 100 with an older queue, preserves rejected history and never sends mail", async () => {
   assert.equal(AUTOMATIC_INTAKE_BATCH_SIZE, 15);

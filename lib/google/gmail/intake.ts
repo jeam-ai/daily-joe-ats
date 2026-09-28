@@ -96,6 +96,23 @@ type Preview = {
   issues: { message: string; reason: string }[];
   used?: boolean;
 };
+
+/**
+ * Applies only to the bounded fallback used when the configured Gmail label
+ * returned no messages. It accepts normal no-subject resume submissions while
+ * keeping unrelated attachment mail out of applicant intake.
+ */
+function looksLikeApplicationSubmission(
+  subject: string,
+  body: string,
+  attachments: Part[],
+) {
+  const filename = attachments.map((part) => part.filename || "").join(" ");
+  const text = `${subject}\n${body}\n${filename}`.toLowerCase();
+  return /\b(resume|résumé|curriculum vitae|\bcv\b|application|applying|applicant|barista|job\s*(?:application|position)?|work experience|career objective|education|skills)\b/.test(
+    text,
+  );
+}
 export async function official() {
   const c = await withStore((s) => s.officialConnection, false);
   if (!c || c.email !== config().officialEmail)
@@ -153,6 +170,8 @@ export async function previewImport(
     automatic?: boolean;
     /** Historical recovery records email facts first; source files stay in Gmail. */
     emailOnly?: boolean;
+    /** Guard the recent unlabeled attachment-recovery route from non-HR mail. */
+    requireApplicationEvidence?: boolean;
   } = {},
 ) {
   if (!["Admin", "Talent Acquisition", "HR Generalist"].includes(user.role))
@@ -235,6 +254,15 @@ export async function previewImport(
         /\.(pdf|docx|txt|png|jpe?g)$/i.test(p.filename!),
       );
       const emailBody = messageBody(message.payload);
+      if (
+        options.requireApplicationEvidence &&
+        !looksLikeApplicationSubmission(subject, emailBody, attachments)
+      ) {
+        skip(
+          "Recent attachment did not contain application or resume evidence.",
+        );
+        continue;
+      }
       const pushEmailOnly = (
         reason: string,
         deferredResume?: {
