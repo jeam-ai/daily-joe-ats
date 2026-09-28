@@ -16,6 +16,7 @@ import {
   deleteApplicant,
   restoreApplicant,
   updateApplicant,
+  updateApplicantWorkflow,
 } from "../../lib/server/applicants";
 import { trackerRows } from "../../lib/tracker";
 import { detectResumeType, extractResume } from "../../lib/server/documents";
@@ -226,6 +227,74 @@ test("profile edits do not fail because an unrelated imported record is malforme
     )?.applicant.location,
     "Naga City, Camarines Sur",
   );
+});
+test("HR qualification checklist saves only the applicant being reviewed", async () => {
+  await transaction((tx) => putRecord(tx, "workspace", "main", initialState()));
+  const base = {
+    phone: "",
+    position: "Barista",
+    location: "Naga City",
+    notes: "",
+  };
+  const first = await createApplicant(
+    {
+      ...base,
+      requestId: crypto.randomUUID(),
+      name: "Checklist Applicant",
+      email: "checklist@example.invalid",
+    },
+    user,
+  );
+  const other = await createApplicant(
+    {
+      ...base,
+      requestId: crypto.randomUUID(),
+      name: "Legacy Applicant",
+      email: "legacy@example.invalid",
+    },
+    user,
+  );
+  await transaction(async (tx) => {
+    const state = await getState(tx);
+    state.applications.find(
+      (application) => application.id === other.id,
+    )!.applicant.email = "legacy-invalid-email";
+    state.applications.find(
+      (application) => application.id === first.id,
+    )!.screening.criteria = [
+      {
+        id: "barista-experience",
+        requirement: "Barista experience",
+        result: "Unclear",
+        evidence: "No direct text match was detected.",
+      },
+    ];
+    await putRecord(tx, "workspace", "main", state);
+  });
+  const application = structuredClone(
+    (await transaction(getState)).applications.find(
+      (item) => item.id === first.id,
+    )!,
+  );
+  application.screening = {
+    outcome: "Meets Criteria",
+    method: "hr",
+    completedAt: new Date().toISOString(),
+    criteria: application.screening.criteria.map((criterion) => ({
+      ...criterion,
+      result: "Met",
+      evidence: "HR reviewed the submitted resume.",
+    })),
+  };
+  const saved = await updateApplicantWorkflow(
+    first.id,
+    { application },
+    user,
+    true,
+  );
+  assert.equal(saved.screening.criteria[0].result, "Met");
+  assert.equal(saved.screening.method, "hr");
+  assert.match(saved.timeline.at(-1)!.action, /Qualification screening/);
 });
 test("resume detection rejects renamed executable content and reports unreadable input", async () => {
   assert.throws(

@@ -2,11 +2,18 @@ import "server-only";
 import { formalName } from "@/lib/names";
 import { z } from "zod";
 import type { Application, User } from "@/types";
-import { canManage } from "@/lib/data-policy";
+import { canEdit, canManage } from "@/lib/data-policy";
 import { transaction, readRecord, putRecord } from "./database";
 import { getState, saveState, audit } from "./repository";
 import { SafeError } from "./config";
 import { purgeDemoApplication } from "./demo";
+import {
+  applicationSchema,
+  assertEditor,
+  changed,
+  DomainError,
+  validateApplicationChange,
+} from "@/lib/domain";
 
 const createSchema = z.object({
   requestId: z.uuid(),
@@ -33,6 +40,172 @@ const createSchema = z.object({
 // workspace is a bounded read model, and an older imported record outside the
 // current profile must never prevent HR from correcting this applicant.
 const updateSchema = createSchema.omit({ requestId: true });
+
+/**
+ * Applicant pages receive a bounded workspace read model.  Saving an
+ * applicant through the old workspace PUT consequently made one unrelated,
+ * older imported record capable of blocking an otherwise valid HR action.
+ * Keep applicant workflow edits small and authoritative instead.
+ */
+const workflowUpdateSchema = z.object({ application: applicationSchema });
+
+export async function updateApplicantWorkflow(
+  id: string,
+  input: unknown,
+  user: User,
+  confirmed: boolean,
+) {
+  const parsed = workflowUpdateSchema.safeParse(input);
+  if (!parsed.success)
+    throw new SafeError(
+      "This applicant update has invalid fields. Refresh the applicant and try again.",
+    );
+  const submitted = parsed.data.application as Application;
+  if (submitted.id !== id)
+    throw new SafeError(
+      "The applicant update does not match this profile.",
+      409,
+    );
+
+  return transaction(async (tx) => {
+    const state = await getState(tx);
+    const index = state.applications.findIndex(
+      (application) => application.id === id && !application.deletedAt,
+    );
+    if (index < 0) throw new SafeError("Applicant not found.", 404);
+    const before = state.applications[index];
+    assertEditor(user, before);
+    if (!canEdit(user, before))
+      throw new SafeError(
+        "You do not have permission to update this applicant.",
+        403,
+      );
+    if (!!submitted.isDemo !== !!before.isDemo)
+      throw new SafeError(
+        "This applicant belongs to a different workspace.",
+        409,
+      );
+    const assignedNeed = submitted.hiringNeedId
+      ? state.hiringNeeds.find(
+          (need) =>
+            need.id === submitted.hiringNeedId &&
+            !!need.isDemo === !!before.isDemo,
+        )
+      : undefined;
+    if (submitted.hiringNeedId && !assignedNeed)
+      throw new SafeError("Choose a hiring need from the same workspace.", 409);
+    if (
+      state.applications.some(
+        (application) =>
+          application.id !== before.id &&
+          application.applicant.email.toLowerCase() ===
+            submitted.applicant.email.toLowerCase(),
+      )
+    )
+      throw new SafeError("Enter a unique applicant email.");
+    if (
+      submitted.assignedTo &&
+      !state.users?.some(
+        (member) => member.email === submitted.assignedTo && member.active,
+      )
+    )
+      throw new SafeError("Assign an active HR user.");
+    if (!before.isDemo && submitted.stage !== before.stage)
+      throw new DomainError(
+        "Use Proceed to review the stage email and save this transition safely.",
+      );
+    if (
+      user.role === "Office Assistant" &&
+      [
+        "assignedTo",
+        "hiringNeedId",
+        "position",
+        "location",
+        "stage",
+        "status",
+        "employment",
+        "screening",
+      ].some((field) =>
+        changed(
+          before[field as keyof Application],
+          submitted[field as keyof Application],
+        ),
+      )
+    )
+      throw new DomainError(
+        "A recruitment manager must make this recruitment decision.",
+      );
+    validateApplicationChange(before, submitted, confirmed);
+    if (!changed(before, submitted)) return structuredClone(before);
+
+    const now = new Date().toISOString();
+    const next = structuredClone(submitted);
+    if (next.hiringNeedId !== before.hiringNeedId) {
+      next.screening = assignedNeed
+        ? {
+            outcome: "Requires Review",
+            completedAt: "",
+            criteria: (assignedNeed.criteria || []).map((rule) => ({
+              id: rule.id,
+              requirement: rule.label,
+              result: "Unclear" as const,
+              evidence:
+                "HR review required after the hiring-need assignment changed.",
+            })),
+          }
+        : {
+            outcome: "Requires Review",
+            completedAt: "",
+            criteria: [],
+            insight:
+              "Assign a hiring need with configured qualifications before screening.",
+          };
+    }
+    // Membership and source data are calculated or retained server-side.
+    next.queueState = before.queueState;
+    next.information = structuredClone(
+      before.information || { fields: {}, conflicts: [] },
+    );
+    next.editedBy = user.email;
+    next.editedAt = now;
+    next.lastActivity = now;
+    const fields = Object.keys(next).filter(
+      (key) =>
+        !["timeline", "lastActivity", "editedAt", "editedBy"].includes(key) &&
+        changed(
+          before[key as keyof Application],
+          next[key as keyof Application],
+        ),
+    );
+    next.timeline = [
+      ...before.timeline,
+      {
+        id: crypto.randomUUID(),
+        timestamp: now,
+        user: user.email,
+        action: fields.includes("screening")
+          ? "Qualification screening reviewed"
+          : fields.includes("requirements")
+            ? "Requirement verified"
+            : "HR record updated",
+        applicationId: next.id,
+        metadata: {
+          fields: fields.join(", "),
+          communication: "No email sent",
+        },
+      },
+    ];
+    state.applications[index] = next;
+    await audit(tx, user.email, "application.workflow_updated", id, {
+      fields,
+      previous: before,
+      next,
+    });
+    await saveState(tx, state, { sync: !next.isDemo });
+    return structuredClone(next);
+  });
+}
+
 export async function createApplicant(input: unknown, user: User) {
   if (!canManage(user))
     throw new SafeError("A recruitment manager must add applicants.", 403);

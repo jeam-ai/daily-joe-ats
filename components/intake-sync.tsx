@@ -219,10 +219,22 @@ export function IntakeSyncStatus() {
             />
           </div>
         )}
-        {(job?.issues.length || job?.message) && (
+        {(job?.issues.length || job?.message || job?.latestDiagnostics) && (
           <details className="intake-details">
             <summary>View intake details</summary>
             <p>{job?.message}</p>
+            {job?.latestDiagnostics && (
+              <p className="intake-diagnostics">
+                Latest labelled scan: {job.latestDiagnostics.matching} found ·{" "}
+                {job.latestDiagnostics.available} ready ·{" "}
+                {job.latestDiagnostics.alreadyImported} already imported ·{" "}
+                {job.latestDiagnostics.alreadyQueued} already queued ·{" "}
+                {job.latestDiagnostics.alreadyChecked} previously checked
+                {job.latestDiagnostics.hasMoreRecentPages
+                  ? " · more recent pages will continue safely"
+                  : ""}
+              </p>
+            )}
             {job?.issues.length ? (
               <ul>
                 {job.issues.map((issue, i) => (

@@ -664,21 +664,53 @@ export function ApplicantProfile({ id }: { id: string }) {
                   </div>
                   <StatusBadge status={a.screening.outcome} />
                 </div>
-                {a.screening.criteria.map((c) => (
-                  <ScreeningCriterion key={c.id} criterion={c} />
-                ))}
-                <div className="info-banner">
-                  Screening is advisory. Missing evidence requires HR review;
-                  the final decision belongs to HR.
+                <div className="qualification-dashboard-summary">
+                  <strong>
+                    {
+                      a.screening.criteria.filter(
+                        (criterion) => criterion.result === "Met",
+                      ).length
+                    }
+                    /{a.screening.criteria.length} supported by evidence
+                  </strong>
+                  <span>
+                    {
+                      a.screening.criteria.filter(
+                        (criterion) =>
+                          criterion.result === "Unclear" ||
+                          criterion.result === "Not Assessed",
+                      ).length
+                    }{" "}
+                    still need HR review
+                  </span>
                 </div>
+                <details className="qualification-evidence">
+                  <summary>
+                    View requirement evidence ({a.screening.criteria.length})
+                  </summary>
+                  {a.screening.criteria.map((c) => (
+                    <ScreeningCriterion key={c.id} criterion={c} />
+                  ))}
+                </details>
+                <p className="fine-print qualification-dashboard-note">
+                  Screening is advisory. HR confirms evidence and makes the
+                  final decision.
+                </p>
               </Card>
             </>
           )}
           {tab === "Overview" && (
-            <>
-              <AiAssist id={a.id} />
-              <EmailHistory applicationId={a.id} />
-            </>
+            <Card className="spaced profile-optional-tools">
+              <details>
+                <summary>Optional AI and communication tools</summary>
+                <p className="fine-print">
+                  Use only when a second interpretation or saved workflow
+                  message is needed.
+                </p>
+                <AiAssist id={a.id} />
+                <EmailHistory applicationId={a.id} />
+              </details>
+            </Card>
           )}
           {tab === "Interviews" && (
             <Card>

@@ -704,19 +704,21 @@ tbody tr:hover {
 }
 .qualification-checklist-body {
   display: grid;
-  gap: 2px;
+  gap: 6px;
   padding: 4px 18px 18px;
 }
 .qualification-check {
   display: flex;
   align-items: flex-start;
   gap: 10px;
-  padding: 11px 8px;
-  border-bottom: 1px solid var(--border);
+  padding: 11px 12px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface-subtle);
   cursor: pointer;
 }
 .qualification-check:last-of-type {
-  border-bottom: 0;
+  border-bottom: 1px solid var(--border);
 }
 .qualification-check:hover {
   background: var(--surface-hover);
@@ -830,8 +832,48 @@ tbody tr:hover {
 .system-insight p {
   color: var(--text-secondary);
 }
+.system-insight-summary {
+  margin: 0;
+  line-height: 1.55;
+}
+.system-insight-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+.qualification-dashboard-summary {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 18px 10px;
+}
+.qualification-dashboard-summary strong {
+  color: var(--text-primary);
+  font-size: 14px;
+}
+.qualification-dashboard-summary span,
+.qualification-dashboard-note {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.qualification-evidence {
+  margin: 0 18px;
+  border-top: 1px solid var(--border);
+}
+.qualification-evidence .criterion {
+  margin: 0;
+}
+.qualification-dashboard-note {
+  margin: 0;
+  padding: 10px 18px 16px;
+}
+.profile-optional-tools details > .card {
+  margin: 12px 0 0;
+}
 .evidence-details {
-  margin: 16px 0;
+  margin: 12px 0 0;
   font-size: 13px;
 }
 summary {
@@ -1330,18 +1372,85 @@ fieldset {
 .odoo-metrics .card {
   padding: 16px;
 }
+.timekeeping-dashboard {
+  display: grid;
+  gap: 14px;
+  margin: 20px 0;
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface-subtle);
+}
+.timekeeping-dashboard-lead strong {
+  display: block;
+  margin-top: 4px;
+  color: var(--text-primary);
+  font-size: 19px;
+  font-weight: 650;
+}
+.timekeeping-dashboard-lead p {
+  margin: 5px 0 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.timekeeping-primary-metrics,
+.timekeeping-secondary-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+.timekeeping-secondary-metrics {
+  grid-template-columns: repeat(auto-fit, minmax(135px, 1fr));
+  margin-top: 6px;
+}
 .timekeeping-metric-filter {
   display: grid;
   gap: 5px;
   width: 100%;
-  min-height: 86px;
-  padding: 16px;
+  min-height: 76px;
+  padding: 13px 14px;
   text-align: left;
   color: inherit;
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 10px;
   cursor: pointer;
+}
+.timekeeping-metric-filter.attention {
+  border-color: color-mix(in srgb, var(--orange) 32%, var(--border));
+  background: var(--orange-bg);
+}
+.timekeeping-metric-filter.success {
+  background: var(--success-bg);
+}
+.timekeeping-metric-filter span,
+.timekeeping-secondary-metric span {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.timekeeping-secondary-metric {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 42px;
+  padding: 10px 12px;
+  color: inherit;
+  text-align: left;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+}
+.timekeeping-secondary-metric:disabled {
+  opacity: 0.62;
+  cursor: default;
+}
+.timekeeping-secondary-metric:not(:disabled):hover,
+.timekeeping-secondary-metric:not(:disabled):focus-visible {
+  border-color: var(--info);
+}
+.timekeeping-exception-breakdown summary {
+  padding-bottom: 0;
 }
 .timekeeping-metric-filter:not(:disabled):hover,
 .timekeeping-metric-filter:not(:disabled):focus-visible {
@@ -1357,6 +1466,11 @@ fieldset {
   font-size: 24px;
   font-weight: 550;
   margin-top: 6px;
+}
+@media (max-width: 820px) {
+  .timekeeping-primary-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 .odoo-filters {
   display: grid;
@@ -1418,6 +1532,11 @@ fieldset {
 .intake-summary {
   min-width: 0;
   flex: 1;
+}
+.intake-diagnostics {
+  margin: 8px 0 0;
+  color: var(--text-secondary);
+  line-height: 1.55;
 }
 .intake-heading {
   display: flex;

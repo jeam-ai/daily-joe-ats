@@ -4,7 +4,7 @@ import type { Application, ScreeningCriterion } from "@/types";
 import { useApp } from "./provider";
 import { formatDate } from "@/lib/dates";
 import { Sparkles } from "lucide-react";
-import { canManage, canEdit } from "@/lib/data-policy";
+import { canManage } from "@/lib/data-policy";
 import { ScreeningControls } from "./screening-controls";
 import {
   Badge,
@@ -48,7 +48,7 @@ export function ApplicantTools({
   const needsReview = a.screening.criteria.filter((criterion) =>
     ["Unclear", "Not Assessed"].includes(criterion.result),
   ).length;
-  const canReviewCriteria = canEdit(state.currentUser, a) && !saving;
+  const canReviewCriteria = canManage(state.currentUser) && !saving;
   const checklistChanged = a.screening.criteria.some(
     (criterion) =>
       criterion.id in checklistDraft &&
@@ -147,35 +147,31 @@ export function ApplicantTools({
           </Badge>
         </div>
         <div className="padded">
-          <p>
+          <p className="system-insight-summary">
             {a.screening.insight ||
               "Review the resume against the qualifications configured for this hiring need. Unstated information remains unclear."}
           </p>
-          <div className="inline-actions spaced">
+          <div className="system-insight-metrics">
             <Badge tone={directMatches ? "green" : "orange"}>
-              Qualification match:{" "}
+              Match{" "}
               {a.screening.criteria.length
                 ? Math.round(
                     (directMatches / a.screening.criteria.length) * 100,
                   ) + "%"
                 : "Not assessed"}
             </Badge>
-            <span className="fine-print">
-              {directMatches} of {a.screening.criteria.length} configured
-              qualifications met. MET ÷ all configured criteria; unclear and
-              unassessed criteria do not count as met. Informational only.
-            </span>
             <Badge tone={needsReview ? "orange" : "green"}>
               {needsReview}{" "}
               {needsReview === 1 ? "criterion needs" : "criteria need"} review
             </Badge>
           </div>
-          <p className="fine-print">
-            OCR and text matching are advisory. They do not approve, reject, or
-            advance an applicant.
-          </p>
           <details className="evidence-details">
-            <summary>Evidence used</summary>
+            <summary>Review system evidence and tools</summary>
+            <p className="fine-print">
+              {directMatches} of {a.screening.criteria.length} configured
+              qualifications are met. OCR and text matching are advisory; HR
+              makes every final decision.
+            </p>
             <ul>
               {a.screening.criteria.map((c) => (
                 <li key={c.id}>
@@ -184,17 +180,17 @@ export function ApplicantTools({
                 </li>
               ))}
             </ul>
+            <ScreeningControls application={a} />
+            <Button
+              variant="secondary"
+              disabled={
+                !canManage(state.currentUser) || !a.screening.criteria.length
+              }
+              onClick={() => setReview(true)}
+            >
+              Review criteria and evidence
+            </Button>
           </details>
-          <ScreeningControls application={a} />
-          <Button
-            variant="secondary"
-            disabled={
-              !canManage(state.currentUser) || !a.screening.criteria.length
-            }
-            onClick={() => setReview(true)}
-          >
-            Review criteria and evidence
-          </Button>
           {need?.questions && (
             <>
               <h3>Interview reference questions</h3>
@@ -212,7 +208,7 @@ export function ApplicantTools({
               <p>Tick only what is supported by the submitted resume.</p>
             </div>
             <Badge tone="blue">
-              {directMatches}/{a.screening.criteria.length} met
+              {draftMetCount}/{a.screening.criteria.length} met
             </Badge>
           </div>
           <div className="qualification-checklist-body">
@@ -245,12 +241,12 @@ export function ApplicantTools({
                 </span>
               </label>
             ))}
-            {!canEdit(state.currentUser, a) && (
+            {!canManage(state.currentUser) && (
               <p className="fine-print">
                 A recruitment manager can update this checklist.
               </p>
             )}
-            {canEdit(state.currentUser, a) && (
+            {canManage(state.currentUser) && (
               <Button
                 variant="secondary"
                 disabled={!checklistChanged || saving}

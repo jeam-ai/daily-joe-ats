@@ -181,6 +181,19 @@ export async function POST(request: Request) {
     const body = await request.json();
     if (body?.action === "preview-scan")
       return Response.json(await runRetentionCleanup({ dryRun: true }));
+    if (body?.action === "run-cleanup") {
+      if (body?.confirmed !== true)
+        throw new SafeError(
+          "Confirm cleanup. Only records past their configured retention deadline are removed.",
+          409,
+        );
+      if (retentionDryRunEnabled())
+        throw new SafeError(
+          "Retention cleanup is still in dry-run mode. No data was deleted.",
+          409,
+        );
+      return Response.json(await runRetentionCleanup());
+    }
     const input = body?.policies;
     const names = Object.keys(retentionPolicyDefaults) as RetentionPolicyName[];
     if (

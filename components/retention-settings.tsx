@@ -96,10 +96,10 @@ export function RetentionSettings() {
         <>
           <p className="fine-print">
             Queue size stays at 500 and the active HR view stays at
-            approximately 100. These periods do not limit Gmail intake.
-            Before permanent applicant deletion, the system writes an
-            anonymous report snapshot (date, stage, role, location, source,
-            and count only) for the configured report period.
+            approximately 100. These periods do not limit Gmail intake. Before
+            permanent applicant deletion, the system writes an anonymous report
+            snapshot (date, stage, role, location, source, and count only) for
+            the configured report period.
           </p>
           {snapshot?.dryRun && (
             <p className="info-banner">
@@ -145,6 +145,52 @@ export function RetentionSettings() {
               }}
             >
               {saving ? "Scanning…" : "Run dry-run retention scan"}
+            </Button>
+          )}
+          {!snapshot?.dryRun && (
+            <Button
+              variant="secondary"
+              disabled={saving || loading || dataset === "demo"}
+              onClick={async () => {
+                if (
+                  !window.confirm(
+                    "Run eligible retention cleanup now? Only records past their configured deadline will be permanently deleted. Anonymous report counts are retained for the configured report period.",
+                  )
+                )
+                  return;
+                setSaving(true);
+                setError("");
+                try {
+                  const result = await requestJson<{
+                    deletedApplications: number;
+                    deletedTalentPoolMemberships: number;
+                    deletedHiringNeeds: number;
+                    wouldCleanActivityLogs: number;
+                    archivedAnonymousReportSnapshots: number;
+                  }>("/api/system/retention", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      action: "run-cleanup",
+                      confirmed: true,
+                    }),
+                  });
+                  const latest = await requestJson<Snapshot>(
+                    "/api/system/retention",
+                  );
+                  setSnapshot(latest);
+                  await refresh({ clearDetails: true });
+                  notify(
+                    `Cleanup complete: ${result.deletedApplications} applicant records, ${result.deletedTalentPoolMemberships} Talent Pool memberships, and ${result.deletedHiringNeeds} hiring needs removed. ${result.archivedAnonymousReportSnapshots} anonymous report snapshots retained.`,
+                  );
+                } catch (reason) {
+                  setError((reason as Error).message);
+                } finally {
+                  setSaving(false);
+                }
+              }}
+            >
+              {saving ? "Cleaning…" : "Run eligible cleanup now"}
             </Button>
           )}
           {error && (

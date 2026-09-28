@@ -62,6 +62,15 @@ export type IntakeSync = {
   /** Continuation token for the three-day latest/recovery sweep. */
   recentPage?: string;
   recentWindowQuery?: string;
+  /** Safe, count-only explanation of the most recent Gmail eligibility check. */
+  latestDiagnostics?: {
+    matching: number;
+    alreadyImported: number;
+    alreadyQueued: number;
+    alreadyChecked: number;
+    available: number;
+    hasMoreRecentPages: boolean;
+  };
   /** Historical IDs are kept separately so they can never outrank new mail. */
   backfillPending?: string[];
   queuePolicyVersion?: number;
@@ -415,14 +424,30 @@ export async function syncIntake(
       nextPageToken?: string;
     }>(token, `messages?maxResults=100&q=${encodeURIComponent(recentQuery)}`);
     const queued = new Set([...job.pending, ...(job.backfillPending || [])]);
-    const known = new Set([
-      ...workspace.applications.map((a) => a.gmailMessageId),
-      ...(job.seenIds || []),
-      ...queued,
-    ]);
-    const fresh = (head.messages || [])
-      .map((message) => message.id)
-      .filter((id) => !known.has(id));
+    const imported = new Set(
+      workspace.applications
+        .map((application) => application.gmailMessageId)
+        .filter((id): id is string => !!id),
+    );
+    const previouslyChecked = new Set(job.seenIds || []);
+    const headIds = (head.messages || []).map((message) => message.id);
+    const fresh = headIds.filter(
+      (id) =>
+        !imported.has(id) && !previouslyChecked.has(id) && !queued.has(id),
+    );
+    const known = new Set([...imported, ...previouslyChecked, ...queued]);
+    job.latestDiagnostics = {
+      matching: headIds.length,
+      alreadyImported: headIds.filter((id) => imported.has(id)).length,
+      alreadyQueued: headIds.filter((id) => queued.has(id)).length,
+      alreadyChecked: headIds.filter(
+        (id) =>
+          previouslyChecked.has(id) && !imported.has(id) && !queued.has(id),
+      ).length,
+      available: fresh.length,
+      hasMoreRecentPages: !!head.nextPageToken,
+    };
+    console.info("Gmail latest eligibility check", job.latestDiagnostics);
     if (!job.recentPage) job.recentPage = head.nextPageToken;
     if (fresh.length) {
       job.pending = [...new Set([...fresh, ...job.pending])];

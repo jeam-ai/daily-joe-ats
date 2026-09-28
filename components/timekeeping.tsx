@@ -374,6 +374,22 @@ export function Timekeeping() {
     employeeRows = filtered.filter((r) => key(r) === employee);
   const count = (result: string) =>
     records.filter((r) => r.results.includes(result)).length;
+  const reviewCount = records.filter(
+    (record) => record.review.status === "For Review",
+  ).length;
+  const resolvedCount = records.length - reviewCount;
+  function filterMetric(filter: string) {
+    setEmployee("");
+    setPage(1);
+    setResultFilter(filter === "review" || filter === "resolved" ? "" : filter);
+    setReviewFilter(
+      filter === "review"
+        ? "For Review"
+        : filter === "resolved"
+          ? "Resolved"
+          : "",
+    );
+  }
   if (dataset === "demo")
     return (
       <EmptyState
@@ -566,8 +582,8 @@ export function Timekeeping() {
                 </Field>
               </div>
               <p className="muted">
-                Analyzing the same cutoff again replaces its saved analysis and
-                previous HR reviews.
+                Reprocessing this cutoff replaces the calculated analysis while
+                preserving matching HR classifications and review history.
               </p>
               {preview.aliases.length > 0 && (
                 <details>
@@ -733,45 +749,125 @@ export function Timekeeping() {
               ))}
             </div>
           </div>
-          <div className="odoo-metrics">
-            {([
-              { label: "Employees", value: new Set(records.map(key)).size, filter: "" },
-              { label: "Employee days", value: records.length, filter: "" },
-              { label: "Negative attendance", value: count("Negative Attendance"), filter: "Negative Attendance" },
-              { label: "Incomplete", value: count("Incomplete Attendance"), filter: "Incomplete Attendance" },
-              { label: "Overtime", value: count("Overtime"), filter: "Overtime" },
-              { label: "Excessive overtime", value: count("Excessive Overtime"), filter: "Excessive Overtime" },
-              { label: "Missing time in", value: count("Missing Time In"), filter: "Missing Time In" },
-              { label: "Missing time out", value: count("Missing Time Out"), filter: "Missing Time Out" },
-              { label: "No attendance", value: count("No Attendance"), filter: "No Attendance" },
-              { label: "Multiple entries", value: count("Multiple Entries"), filter: "Multiple Entries" },
-              { label: "For review", value: records.filter((r) => r.review.status === "For Review").length, filter: "review" },
-              { label: "Resolved / reviewed", value: records.filter((r) => r.review.status !== "For Review").length, filter: "resolved" },
-            ] as { label: string; value: number; filter: string }[]).map(({ label, value, filter }) => (
-              <button
-                className="timekeeping-metric-filter"
-                key={label}
-                type="button"
-                onClick={() => {
-                  setEmployee("");
-                  setPage(1);
-                  setResultFilter(filter === "review" || filter === "resolved" ? "" : filter);
-                  setReviewFilter(
-                    filter === "review"
-                      ? "For Review"
-                      : filter === "resolved"
-                        ? "Resolved"
-                        : "",
-                  );
-                }}
-                disabled={!filter || !value}
-                title={filter ? `Show ${label.toLowerCase()} records` : undefined}
-              >
-                <span className="muted">{label}</span>
-                <strong>{value}</strong>
-              </button>
-            ))}
-          </div>
+          <section
+            className="timekeeping-dashboard"
+            aria-label="Cutoff overview"
+          >
+            <div className="timekeeping-dashboard-lead">
+              <span className="eyebrow">HR REVIEW QUEUE</span>
+              <strong>
+                {reviewCount
+                  ? `${reviewCount} record${reviewCount === 1 ? "" : "s"} need HR review`
+                  : "All records have been reviewed"}
+              </strong>
+              <p>
+                {new Set(records.map(key)).size} employees · {records.length}{" "}
+                employee-days · Odoo remains the source record.
+              </p>
+            </div>
+            <div className="timekeeping-primary-metrics">
+              {(
+                [
+                  {
+                    label: "Needs review",
+                    value: reviewCount,
+                    filter: "review",
+                    tone: "attention",
+                  },
+                  {
+                    label: "Negative attendance",
+                    value: count("Negative Attendance"),
+                    filter: "Negative Attendance",
+                    tone: "attention",
+                  },
+                  {
+                    label: "Excessive overtime",
+                    value: count("Excessive Overtime"),
+                    filter: "Excessive Overtime",
+                    tone: "attention",
+                  },
+                  {
+                    label: "Reviewed",
+                    value: resolvedCount,
+                    filter: "resolved",
+                    tone: "success",
+                  },
+                ] as {
+                  label: string;
+                  value: number;
+                  filter: string;
+                  tone: string;
+                }[]
+              ).map(({ label, value, filter, tone }) => (
+                <button
+                  className={`timekeeping-metric-filter ${tone}`}
+                  key={label}
+                  type="button"
+                  onClick={() => filterMetric(filter)}
+                  disabled={!value}
+                  title={`Show ${label.toLowerCase()} records`}
+                >
+                  <span>{label}</span>
+                  <strong>{value}</strong>
+                </button>
+              ))}
+            </div>
+            <details className="timekeeping-exception-breakdown">
+              <summary>View exception breakdown</summary>
+              <div className="timekeeping-secondary-metrics">
+                {(
+                  [
+                    {
+                      label: "Incomplete attendance",
+                      value: count("Incomplete Attendance"),
+                      filter: "Incomplete Attendance",
+                    },
+                    {
+                      label: "Missing time in",
+                      value: count("Missing Time In"),
+                      filter: "Missing Time In",
+                    },
+                    {
+                      label: "Missing time out",
+                      value: count("Missing Time Out"),
+                      filter: "Missing Time Out",
+                    },
+                    {
+                      label: "No attendance",
+                      value: count("No Attendance"),
+                      filter: "No Attendance",
+                    },
+                    {
+                      label: "Overtime",
+                      value: count("Overtime"),
+                      filter: "Overtime",
+                    },
+                    {
+                      label: "Multiple entries",
+                      value: count("Multiple Entries"),
+                      filter: "Multiple Entries",
+                    },
+                    {
+                      label: "Data discrepancy",
+                      value: count("Data Discrepancy"),
+                      filter: "Data Discrepancy",
+                    },
+                  ] as { label: string; value: number; filter: string }[]
+                ).map(({ label, value, filter }) => (
+                  <button
+                    className="timekeeping-secondary-metric"
+                    key={label}
+                    type="button"
+                    onClick={() => filterMetric(filter)}
+                    disabled={!value}
+                  >
+                    <span>{label}</span>
+                    <strong>{value}</strong>
+                  </button>
+                ))}
+              </div>
+            </details>
+          </section>
           <details className="card padded spaced">
             <summary>Source reports and rules used</summary>
             <p>
@@ -1143,7 +1239,9 @@ export function Timekeeping() {
                 {classificationsFor(selected).map((choice) => (
                   <Button
                     key={choice}
-                    variant={classification === choice ? "primary" : "secondary"}
+                    variant={
+                      classification === choice ? "primary" : "secondary"
+                    }
                     onClick={() => setPendingClassification(choice)}
                   >
                     {choice}
@@ -1165,7 +1263,8 @@ export function Timekeeping() {
                       : `${hours(selected.difference)} hour variance`}
                   </span>
                   <p>
-                    Classify this record as <strong>{pendingClassification}</strong>?
+                    Classify this record as{" "}
+                    <strong>{pendingClassification}</strong>?
                   </p>
                   <div className="button-row">
                     <Button

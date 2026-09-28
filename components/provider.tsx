@@ -243,32 +243,53 @@ export function AppProvider({
         return false;
       }
       const changed = fn(current);
-      const saved = await update(
-        (s) => ({
-          ...s,
-          applications: [
-            ...s.applications.filter((item) => item.id !== id),
-            changed,
-          ],
-        }),
-        confirmed,
-      );
-      if (saved) {
-        detailCache.current.set(id, changed);
+      try {
+        if (busy.current) {
+          notify("Wait for the current save to finish.", "info");
+          return false;
+        }
+        busy.current = true;
+        setSaving(true);
+        const response = await clientFetch(
+          `/api/applicants/${encodeURIComponent(id)}/workflow`,
+          {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ application: changed, confirmed }),
+          },
+        );
+        const data = await response.json();
+        if (!response.ok)
+          throw Error(data.error || "Unable to save applicant.");
+        const savedApplication = data.application as Application;
+        detailCache.current.set(id, savedApplication);
         if (ref.current) {
           const merged = {
             ...ref.current,
             applications: ref.current.applications.map((item) =>
-              item.id === id ? changed : item,
+              item.id === id ? savedApplication : item,
             ),
           };
           ref.current = merged;
           setState(merged);
         }
+        notify(
+          data.syncStatus?.startsWith("Failed")
+            ? `Saved. ${data.syncStatus}`
+            : "Changes saved.",
+          data.syncStatus?.startsWith("Failed") ? "error" : "success",
+        );
+        return true;
+      } catch (error) {
+        notify((error as Error).message, "error");
+        await refresh();
+        return false;
+      } finally {
+        busy.current = false;
+        setSaving(false);
       }
-      return saved;
     },
-    [update, notify],
+    [notify, refresh],
   );
   const ensureApplication = useCallback(async (id: string) => {
     if (ref.current?.applications.some((item) => item.id === id)) return;
