@@ -346,11 +346,11 @@ export function MetricCard({
   value: number;
   note: string;
   icon: React.ReactNode;
-  href: string;
+  href?: string;
   tone?: string;
 }) {
-  return (
-    <a className={`metric ${tone}`} href={href}>
+  const content = (
+    <>
       <div className="metric-top">
         <span>{label}</span>
         {icon}
@@ -358,8 +358,14 @@ export function MetricCard({
       <strong>{value}</strong>
       <div className="metric-note">
         {note}
-        <ChevronRight size={14} />
+        {href && <ChevronRight size={14} />}
       </div>
+    </>
+  );
+  if (!href) return <div className={`metric ${tone}`}>{content}</div>;
+  return (
+    <a className={`metric ${tone}`} href={href}>
+      {content}
     </a>
   );
 }

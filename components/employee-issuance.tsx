@@ -335,7 +335,6 @@ export function EmployeeIssuance() {
           value={uniforms.length}
           note={`${employeeCount(uniforms)} employees with uniform history`}
           icon={<Shirt size={20} />}
-          href="/issuance"
           tone="featured"
         />
         <MetricCard
@@ -345,7 +344,6 @@ export function EmployeeIssuance() {
           }
           note="Items still awaiting issue or receipt"
           icon={<Clock3 size={20} />}
-          href="/issuance"
           tone="metric-review"
         />
         <MetricCard
@@ -353,7 +351,6 @@ export function EmployeeIssuance() {
           value={welcomeKits.length}
           note={`${employeeCount(welcomeKits)} employees with kit history`}
           icon={<Gift size={20} />}
-          href="/issuance"
           tone="hired"
         />
         <MetricCard
@@ -364,7 +361,6 @@ export function EmployeeIssuance() {
           }
           note="Items HR marked for replacement"
           icon={<PackageCheck size={20} />}
-          href="/issuance"
           tone="metric-interviews"
         />
       </div>
