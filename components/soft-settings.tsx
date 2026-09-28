@@ -442,16 +442,33 @@ export function QualificationsSettings() {
 export function IssuanceSettings() {
   const { state, update, saving } = useApp();
   const [adding, setAdding] = useState(false);
+  const [drafts, setDrafts] = useState<
+    Record<string, Partial<IssuanceCatalogItem>>
+  >({});
   if (!state) return null;
   const admin = state.currentUser?.role === "Admin";
   const items = state.issuanceItems || [];
-  const save = (item: IssuanceCatalogItem) =>
-    update((workspace) => ({
+  const setDraft = (id: string, patch: Partial<IssuanceCatalogItem>) =>
+    setDrafts((current) => ({
+      ...current,
+      [id]: { ...current[id], ...patch },
+    }));
+  const save = async (item: IssuanceCatalogItem) => {
+    const draft = { ...item, ...drafts[item.id] };
+    if (!draft.name?.trim()) return;
+    const saved = await update((workspace) => ({
       ...workspace,
       issuanceItems: (workspace.issuanceItems || []).map((current) =>
-        current.id === item.id ? item : current,
+        current.id === item.id ? { ...draft, name: draft.name!.trim() } : current,
       ),
     }));
+    if (saved)
+      setDrafts((current) => {
+        const next = { ...current };
+        delete next[item.id];
+        return next;
+      });
+  };
   return (
     <Card>
       <div className="card-heading">
@@ -467,15 +484,17 @@ export function IssuanceSettings() {
         </Button>
       </div>
       <div className="padded form-stack issuance-item-settings">
-        {items.map((item) => (
+        {items.map((item) => {
+          const draft = { ...item, ...drafts[item.id] };
+          const changed = !!drafts[item.id];
+          return (
           <div className="issuance-item-setting" key={item.id}>
             <Select
               aria-label={`${item.name} category`}
               disabled={!admin || saving}
-              value={item.category}
+              value={draft.category}
               onChange={(event) =>
-                void save({
-                  ...item,
+                setDraft(item.id, {
                   category: event.target.value as IssuanceCategory,
                 })
               }
@@ -487,26 +506,31 @@ export function IssuanceSettings() {
             <Input
               aria-label="Issuance item name"
               disabled={!admin || saving}
-              defaultValue={item.name}
-              key={`${item.id}-${item.name}`}
-              onBlur={(event) => {
-                const name = event.target.value.trim();
-                if (name && name !== item.name) void save({ ...item, name });
-              }}
+              value={draft.name}
+              onChange={(event) => setDraft(item.id, { name: event.target.value })}
             />
             <label className="checkbox-row">
               <input
                 type="checkbox"
                 disabled={!admin || saving}
-                checked={item.active}
+                checked={draft.active}
                 onChange={(event) =>
-                  void save({ ...item, active: event.target.checked })
+                  setDraft(item.id, { active: event.target.checked })
                 }
               />
               Active
             </label>
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={!admin || saving || !changed || !draft.name?.trim()}
+              onClick={() => void save(item)}
+            >
+              {saving ? "Saving…" : "Save"}
+            </Button>
           </div>
-        ))}
+          );
+        })}
         {!items.length && (
           <p className="muted">No issuance items configured yet.</p>
         )}

@@ -56,6 +56,9 @@ export function EmployeeIssuance() {
   const [view, setView] = useState("All issuance");
   const [query, setQuery] = useState("");
   const [newCategory, setNewCategory] = useState<IssuanceCategory>("Uniform");
+  const [stockCategory, setStockCategory] =
+    useState<IssuanceCategory>("Uniform");
+  const [stockItem, setStockItem] = useState("");
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<IssuanceRecord | null>(null);
   const [editingStock, setEditingStock] = useState<
@@ -191,7 +194,7 @@ export function EmployeeIssuance() {
         throw Error(result.error || "The issuance record could not be saved.");
       await refresh();
       setAdding(false);
-      notify("Issuance record saved.");
+      notify("Issuance record saved and the employee issuance list was refreshed.");
     } catch (error) {
       notify((error as Error).message, "error");
     } finally {
@@ -225,7 +228,7 @@ export function EmployeeIssuance() {
         );
       await refresh();
       setEditing(null);
-      notify("Issuance status saved.");
+      notify("Issuance update saved and the employee issuance list was refreshed.");
     } catch (error) {
       notify((error as Error).message, "error");
     } finally {
@@ -260,7 +263,7 @@ export function EmployeeIssuance() {
         throw Error(result.error || "The stock item could not be saved.");
       await refresh();
       setEditingStock(null);
-      notify("On-hand inventory saved.");
+      notify("Stock saved and the on-hand totals were refreshed.");
     } catch (error) {
       notify((error as Error).message, "error");
     } finally {
@@ -394,10 +397,11 @@ export function EmployeeIssuance() {
       <Card className="issuance-inventory-card">
         <div className="section-heading">
           <div>
-            <h2>On-hand inventory</h2>
+            <span className="section-kicker">Stock control</span>
+            <h2>Stock register</h2>
             <p className="muted">
-              Current stock from the workbook’s ON-HAND sheet. It is separate
-              from employee issuance history.
+              Edit the physical count from the workbook’s ON-HAND sheet. This
+              is inventory control, not a log of employee releases.
             </p>
           </div>
           <div className="button-row">
@@ -405,7 +409,11 @@ export function EmployeeIssuance() {
             <Button
               variant="secondary"
               disabled={!editable || !!busy}
-              onClick={() => setEditingStock("new")}
+              onClick={() => {
+                setStockCategory("Uniform");
+                setStockItem("");
+                setEditingStock("new");
+              }}
             >
               <Plus size={15} />
               Add stock item
@@ -420,9 +428,9 @@ export function EmployeeIssuance() {
                 <th>Item</th>
                 <th>Size</th>
                 <th>Beginning</th>
-                <th>Out</th>
-                <th>On hand</th>
-                <th>Updated</th>
+                <th>Released / out</th>
+                <th>Current on hand</th>
+                <th>Last stock count</th>
                 <th />
               </tr>
             </thead>
@@ -460,7 +468,11 @@ export function EmployeeIssuance() {
                       <Button
                         variant="secondary"
                         disabled={!editable || !!busy}
-                        onClick={() => setEditingStock(stock)}
+                        onClick={() => {
+                          setStockCategory(stock.category);
+                          setStockItem(stock.item);
+                          setEditingStock(stock);
+                        }}
                       >
                         Edit
                       </Button>
@@ -476,6 +488,16 @@ export function EmployeeIssuance() {
         )}
       </Card>
       <Card className="issuance-workspace">
+        <div className="issuance-history-heading">
+          <div>
+            <span className="section-kicker">Employee records</span>
+            <h2>Employee issuance history</h2>
+            <p className="muted">
+              One row per employee release, receipt, and acknowledgment.
+            </p>
+          </div>
+          <Badge>{filtered.length} release records</Badge>
+        </div>
         <div className="issuance-toolbar">
           <Tabs
             items={["All issuance", "Uniforms", "Welcome kits"]}
@@ -757,9 +779,11 @@ export function EmployeeIssuance() {
               <Field label="Category">
                 <Select
                   name="category"
-                  defaultValue={
-                    editingStock === "new" ? "Uniform" : editingStock.category
-                  }
+                  value={stockCategory}
+                  onChange={(event) => {
+                    setStockCategory(event.target.value as IssuanceCategory);
+                    setStockItem("");
+                  }}
                 >
                   {categories.map((category) => (
                     <option key={category}>{category}</option>
@@ -776,11 +800,26 @@ export function EmployeeIssuance() {
                 />
               </Field>
               <Field label="Item">
-                <Input
+                <Select
                   name="item"
                   required
-                  defaultValue={editingStock === "new" ? "" : editingStock.item}
-                />
+                  value={stockItem}
+                  onChange={(event) => setStockItem(event.target.value)}
+                >
+                  <option value="" disabled>
+                    Select configured stock item
+                  </option>
+                  {catalog
+                    .filter((item) => item.category === stockCategory)
+                    .map((item) => (
+                      <option key={item.id} value={item.name}>
+                        {item.name}
+                      </option>
+                    ))}
+                </Select>
+                <small className="field-note">
+                  Maintain this list in Settings → Employee Issuance.
+                </small>
               </Field>
               <Field label="Size">
                 <Input

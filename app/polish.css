@@ -2631,7 +2631,13 @@ progress {
 }
 .issuance-inventory-card {
   padding: 20px;
-  box-shadow: none;
+  border-color: color-mix(in srgb, var(--info) 30%, var(--border));
+  box-shadow: inset 4px 0 0 color-mix(in srgb, var(--info) 72%, transparent);
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--info-bg) 42%, var(--surface)) 0%,
+    var(--surface) 38%
+  );
 }
 .issuance-inventory-card .section-heading {
   align-items: flex-start;
@@ -2645,10 +2651,31 @@ progress {
 .issuance-inventory-card .table-scroll {
   margin: 0 -20px -20px;
 }
+.issuance-inventory-card .table-scroll th {
+  background: color-mix(in srgb, var(--info-bg) 72%, var(--surface));
+}
 .issuance-workspace {
   overflow: hidden;
   border-color: color-mix(in srgb, var(--accent) 18%, var(--border));
   box-shadow: none;
+}
+.issuance-history-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 20px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+.issuance-history-heading h2 {
+  margin: 2px 0 0;
+  color: var(--ink);
+  font-size: 17px;
+}
+.issuance-history-heading p {
+  margin: 4px 0 0;
+  font-size: 12px;
 }
 .issuance-toolbar {
   display: flex;
@@ -2861,6 +2888,10 @@ progress {
   .issuance-search {
     width: 100%;
     flex-basis: auto;
+  }
+  .issuance-history-heading {
+    align-items: flex-start;
+    flex-direction: column;
   }
   .issuance-summary.metrics-grid,
   .issuance-stock-summary {

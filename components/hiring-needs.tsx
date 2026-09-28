@@ -118,6 +118,7 @@ export function HiringNeeds() {
     if (saved) {
       setEditing(null);
       setRules(null);
+      notify("Hiring need saved and the staffing plan was refreshed.", "success");
     }
   }
   async function importReport() {
