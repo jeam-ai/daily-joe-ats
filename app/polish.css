@@ -2439,6 +2439,18 @@ progress {
   font-size: 12px;
   line-height: 1.55;
 }
+/* Applications and Talent Pool intentionally keep their dialogs outside the
+   working surface. Keep their heading, note, and card on the same measured
+   rhythm as the other workspace pages without letting the note overlap the
+   descriptive line. */
+.page-heading + .workspace-heading-note {
+  margin-top: 8px;
+  margin-bottom: 18px;
+}
+.workspace-page > .page-heading + .workspace-heading-note {
+  margin-top: -10px;
+  margin-bottom: 1px;
+}
 .workspace-section-toolbar {
   min-height: 42px;
   margin: 2px 0 0;
