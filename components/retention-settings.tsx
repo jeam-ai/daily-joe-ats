@@ -148,50 +148,97 @@ export function RetentionSettings() {
             </Button>
           )}
           {!snapshot?.dryRun && (
-            <Button
-              variant="secondary"
-              disabled={saving || loading || dataset === "demo"}
-              onClick={async () => {
-                if (
-                  !window.confirm(
-                    "Run eligible retention cleanup now? Only records past their configured deadline will be permanently deleted. Anonymous report counts are retained for the configured report period.",
+            <div className="retention-actions">
+              <Button
+                variant="secondary"
+                disabled={saving || loading || dataset === "demo"}
+                onClick={async () => {
+                  if (
+                    !window.confirm(
+                      "Run eligible retention cleanup now? Only records past their configured deadline will be permanently deleted. Anonymous report counts are retained for the configured report period.",
+                    )
                   )
-                )
-                  return;
-                setSaving(true);
-                setError("");
-                try {
-                  const result = await requestJson<{
-                    deletedApplications: number;
-                    deletedTalentPoolMemberships: number;
-                    deletedHiringNeeds: number;
-                    wouldCleanActivityLogs: number;
-                    archivedAnonymousReportSnapshots: number;
-                  }>("/api/system/retention", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                      action: "run-cleanup",
-                      confirmed: true,
-                    }),
-                  });
-                  const latest = await requestJson<Snapshot>(
-                    "/api/system/retention",
-                  );
-                  setSnapshot(latest);
-                  await refresh({ clearDetails: true });
-                  notify(
-                    `Cleanup complete: ${result.deletedApplications} applicant records, ${result.deletedTalentPoolMemberships} Talent Pool memberships, and ${result.deletedHiringNeeds} hiring needs removed. ${result.archivedAnonymousReportSnapshots} anonymous report snapshots retained.`,
-                  );
-                } catch (reason) {
-                  setError((reason as Error).message);
-                } finally {
-                  setSaving(false);
+                    return;
+                  setSaving(true);
+                  setError("");
+                  try {
+                    const result = await requestJson<{
+                      deletedApplications: number;
+                      deletedTalentPoolMemberships: number;
+                      deletedHiringNeeds: number;
+                      archivedAnonymousReportSnapshots: number;
+                    }>("/api/system/retention", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        action: "run-cleanup",
+                        confirmed: true,
+                      }),
+                    });
+                    const latest = await requestJson<Snapshot>(
+                      "/api/system/retention",
+                    );
+                    setSnapshot(latest);
+                    await refresh({ clearDetails: true });
+                    notify(
+                      `Cleanup complete: ${result.deletedApplications} applicant records, ${result.deletedTalentPoolMemberships} Talent Pool memberships, and ${result.deletedHiringNeeds} hiring needs removed. ${result.archivedAnonymousReportSnapshots} anonymous report snapshots retained.`,
+                    );
+                  } catch (reason) {
+                    setError((reason as Error).message);
+                  } finally {
+                    setSaving(false);
+                  }
+                }}
+              >
+                {saving ? "Cleaning…" : "Run eligible cleanup now"}
+              </Button>
+              <Button
+                variant="danger"
+                disabled={
+                  saving ||
+                  loading ||
+                  dataset === "demo" ||
+                  !snapshot?.queue?.retentionPending
                 }
-              }}
-            >
-              {saving ? "Cleaning…" : "Run eligible cleanup now"}
-            </Button>
+                onClick={async () => {
+                  if (
+                    !window.confirm(
+                      "Permanently delete every unprotected applicant already in the retention queue now? This bypasses the remaining grace period. Applicant profiles, resumes and contact details will be deleted; anonymous reporting counts will be saved for 365 days.",
+                    )
+                  )
+                    return;
+                  setSaving(true);
+                  setError("");
+                  try {
+                    const result = await requestJson<{
+                      deletedApplications: number;
+                      archivedAnonymousReportSnapshots: number;
+                    }>("/api/system/retention", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        action: "purge-queued-applications",
+                        confirmed: true,
+                      }),
+                    });
+                    const latest = await requestJson<Snapshot>(
+                      "/api/system/retention",
+                    );
+                    setSnapshot(latest);
+                    await refresh({ clearDetails: true });
+                    notify(
+                      `${result.deletedApplications} queued applicant records permanently deleted. ${result.archivedAnonymousReportSnapshots} anonymous report snapshots retained.`,
+                    );
+                  } catch (reason) {
+                    setError((reason as Error).message);
+                  } finally {
+                    setSaving(false);
+                  }
+                }}
+              >
+                Permanently delete queued applicants
+              </Button>
+            </div>
           )}
           {error && (
             <p className="error-banner" role="alert">

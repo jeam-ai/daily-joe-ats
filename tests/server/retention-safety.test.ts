@@ -217,8 +217,53 @@ test("permanent cleanup writes a counts-only report snapshot before deleting app
   assert.equal(snapshots[0].position, "Test Position");
   assert.equal(snapshots[0].location, "Test Location");
   assert.ok(Date.parse(String(snapshots[0].expires_at)) > Date.now());
-  assert.deepEqual(
-    Object.keys(snapshots[0]).sort(),
-    ["count", "expires_at", "location", "position", "snapshot_date", "source", "stage"],
+  assert.deepEqual(Object.keys(snapshots[0]).sort(), [
+    "count",
+    "expires_at",
+    "location",
+    "position",
+    "snapshot_date",
+    "source",
+    "stage",
+  ]);
+});
+
+test("confirmed queue cleanup bypasses grace only for queued unprotected applicants", async () => {
+  const state = initialState();
+  const queued = application("queue-now", "2025-01-01T00:00:00.000Z");
+  const protectedApplicant = application(
+    "protected-now",
+    "2025-01-02T00:00:00.000Z",
+  );
+  protectedApplicant.stage = "Requirements";
+  protectedApplicant.status = "In Progress";
+  state.applications.push(queued, protectedApplicant);
+  for (let index = 0; index < 500; index++)
+    state.applications.push(
+      application(
+        `live-${index}`,
+        `2026-09-${String((index % 28) + 1).padStart(2, "0")}T00:00:00.000Z`,
+      ),
+    );
+  await transaction((tx) => saveState(tx, state, { sync: false }));
+  await runRetentionCleanup();
+  const previousDryRun = process.env.DRY_RUN_RETENTION_CLEANUP;
+  const previousVerified = process.env.RETENTION_CLEANUP_VERIFIED;
+  process.env.DRY_RUN_RETENTION_CLEANUP = "false";
+  process.env.RETENTION_CLEANUP_VERIFIED = "true";
+  try {
+    const result = await runRetentionCleanup({
+      purgeQueuedApplications: true,
+    });
+    assert.equal(result.deletedApplications, 1);
+    assert.equal(result.archivedAnonymousReportSnapshots, 1);
+  } finally {
+    process.env.DRY_RUN_RETENTION_CLEANUP = previousDryRun;
+    process.env.RETENTION_CLEANUP_VERIFIED = previousVerified;
+  }
+  const saved = await readTransaction((tx) => getState(tx));
+  assert.ok(!saved.applications.some((item) => item.id === queued.id));
+  assert.ok(
+    saved.applications.some((item) => item.id === protectedApplicant.id),
   );
 });

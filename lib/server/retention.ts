@@ -128,7 +128,15 @@ async function archiveAnonymousReportSnapshot(
 }
 
 /** Re-evaluates retention from current queue membership; safe to run repeatedly. */
-export type RetentionRunOptions = { dryRun?: boolean };
+export type RetentionRunOptions = {
+  dryRun?: boolean;
+  /**
+   * Administrator-confirmed disposal of applicants already placed in the
+   * durable retention queue. This bypasses only their grace date; it never
+   * includes a live/protected applicant or a Talent Pool membership.
+   */
+  purgeQueuedApplications?: boolean;
+};
 export function retentionDryRunEnabled() {
   return (
     process.env.DRY_RUN_RETENTION_CLEANUP?.trim() !== "false" ||
@@ -305,8 +313,10 @@ export async function runRetentionCleanup(options: RetentionRunOptions = {}) {
     }
 
     const refreshed = await tx.query(
-      "SELECT application_id,category,expires_at FROM application_retention WHERE expires_at<=$1",
-      [now],
+      options.purgeQueuedApplications
+        ? "SELECT application_id,category,expires_at FROM application_retention WHERE expires_at<=$1 OR category IN ('outside_live_queue','terminal')"
+        : "SELECT application_id,category,expires_at FROM application_retention WHERE expires_at<=$1",
+      options.purgeQueuedApplications ? [] : [now],
     );
     const remove = new Set<string>();
     let wouldExpireTalentPool = 0;
@@ -352,6 +362,14 @@ export async function runRetentionCleanup(options: RetentionRunOptions = {}) {
         }
         continue;
       }
+      // A forced queue cleanup only bypasses the grace date for applicant
+      // deletion categories. Talent Pool expiry keeps its separate workflow.
+      if (
+        options.purgeQueuedApplications &&
+        !["outside_live_queue", "terminal"].includes(category) &&
+        String(row.expires_at) > now
+      )
+        continue;
       remove.add(application.id);
     }
     const deletedApplications = originalApplications.filter((a) =>

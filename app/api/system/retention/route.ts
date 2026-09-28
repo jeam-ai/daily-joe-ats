@@ -194,6 +194,21 @@ export async function POST(request: Request) {
         );
       return Response.json(await runRetentionCleanup());
     }
+    if (body?.action === "purge-queued-applications") {
+      if (body?.confirmed !== true)
+        throw new SafeError(
+          "Confirm queued-record deletion. This permanently removes only applicants already in the retention queue.",
+          409,
+        );
+      if (retentionDryRunEnabled())
+        throw new SafeError(
+          "Retention cleanup is still in dry-run mode. No data was deleted.",
+          409,
+        );
+      return Response.json(
+        await runRetentionCleanup({ purgeQueuedApplications: true }),
+      );
+    }
     const input = body?.policies;
     const names = Object.keys(retentionPolicyDefaults) as RetentionPolicyName[];
     if (
