@@ -96,7 +96,14 @@ export function Settings({ section = "integrations" }: { section?: string }) {
           <h1>Settings</h1>
           <p>A well-organized workspace for thoughtful hiring.</p>
         </div>
+        <span className="workspace-heading-context">
+          Workspace configuration
+        </span>
       </div>
+      <p className="workspace-heading-note">
+        Set the shared rules, integrations, templates, and controls that keep
+        every HR workflow consistent.
+      </p>
       <div className="settings-layout settings-workspace-layout">
         <nav className="settings-nav" aria-label="Settings sections">
           {sections.map(([slug, label, Icon]) => (

@@ -83,31 +83,40 @@ export function Reports() {
             500-item live queue is a separate working view.
           </p>
         </div>
-        <div className="inline-actions">
-          <Select
-            aria-label="Report period"
-            value={range}
-            onChange={(e) => setRange(e.target.value)}
-          >
-            <option value="all">All time</option>
-            <option value="30">Last 30 days</option>
-            <option value="7">Last 7 days</option>
-          </Select>
-          <Button
-            variant="secondary"
-            disabled={dataset === "demo" || !data?.total}
-            title={
-              dataset === "demo"
-                ? "Exit Demo to export production reports"
-                : undefined
-            }
-            onClick={exportReport}
-          >
-            <Download size={16} />
-            Export report
-          </Button>
+        <div className="workspace-heading-side">
+          <span className="workspace-heading-context">
+            Counts-only recruitment history
+          </span>
+          <div className="inline-actions">
+            <Select
+              aria-label="Report period"
+              value={range}
+              onChange={(e) => setRange(e.target.value)}
+            >
+              <option value="all">All time</option>
+              <option value="30">Last 30 days</option>
+              <option value="7">Last 7 days</option>
+            </Select>
+            <Button
+              variant="secondary"
+              disabled={dataset === "demo" || !data?.total}
+              title={
+                dataset === "demo"
+                  ? "Exit Demo to export production reports"
+                  : undefined
+              }
+              onClick={exportReport}
+            >
+              <Download size={16} />
+              Export report
+            </Button>
+          </div>
         </div>
       </div>
+      <p className="workspace-heading-note">
+        Review recruitment trends without exposing applicant data beyond the
+        workspace where HR needs it.
+      </p>
       {reportError ? (
         <EmptyState title="Report unavailable" description={reportError} />
       ) : !data ? (

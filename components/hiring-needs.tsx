@@ -133,35 +133,44 @@ export function HiringNeeds() {
           <h1>Hiring Needs</h1>
           <p>The right people. The right place. The right time.</p>
         </div>
-        <div className="button-row">
-          {canImportReport && (
+        <div className="workspace-heading-side">
+          <span className="workspace-heading-context">
+            Staffing plan &amp; role requirements
+          </span>
+          <div className="button-row">
+            {canImportReport && (
+              <Button
+                variant="secondary"
+                disabled={saving || importing}
+                onClick={() => setImportOpen(true)}
+              >
+                Add Sep 21 vacancies
+              </Button>
+            )}
             <Button
-              variant="secondary"
-              disabled={saving || importing}
-              onClick={() => setImportOpen(true)}
+              disabled={
+                !canManage(state.currentUser) || saving || dataset === "demo"
+              }
+              title={
+                dataset === "demo"
+                  ? "Use the generated demo hiring needs, or exit demo to create a real request."
+                  : undefined
+              }
+              onClick={() => {
+                setRules([]);
+                setEditing("new");
+              }}
             >
-              Add Sep 21 vacancies
+              <Plus size={17} />
+              New Hiring Need
             </Button>
-          )}
-          <Button
-            disabled={
-              !canManage(state.currentUser) || saving || dataset === "demo"
-            }
-            title={
-              dataset === "demo"
-                ? "Use the generated demo hiring needs, or exit demo to create a real request."
-                : undefined
-            }
-            onClick={() => {
-              setRules([]);
-              setEditing("new");
-            }}
-          >
-            <Plus size={17} />
-            New Hiring Need
-          </Button>
+          </div>
         </div>
       </div>
+      <p className="workspace-heading-note">
+        Define each opening once, then use the same requirements to guide
+        applicant screening and HR decisions.
+      </p>
       <div
         className="metrics-grid vacancy-metrics hiring-needs-summary"
         aria-label="Vacancy report"

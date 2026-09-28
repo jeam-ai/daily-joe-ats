@@ -438,7 +438,10 @@ export function Timekeeping() {
             Reconcile Odoo attendance and expected hours, then record HR review.
           </p>
         </div>
-        <div className="timekeeping-page-status" aria-label="Timekeeping scope">
+        <div
+          className="workspace-heading-context timekeeping-page-status"
+          aria-label="Timekeeping scope"
+        >
           <Badge>Odoo source data</Badge>
           <span>Review &amp; resolution workspace</span>
         </div>

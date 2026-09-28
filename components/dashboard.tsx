@@ -231,8 +231,8 @@ export function Dashboard() {
     },
   ];
   return (
-    <>
-      <div className="page-heading">
+    <div className="workspace-page dashboard-page">
+      <div className="page-heading workspace-page-heading">
         <div>
           <div className="eyebrow">RECRUITMENT WORKSPACE</div>
           <h1>
@@ -242,11 +242,15 @@ export function Dashboard() {
           </h1>
           <p>Here&apos;s what&apos;s happening with recruitment today.</p>
         </div>
-        <div className="date-label">
+        <div className="workspace-heading-context date-label">
           <CalendarDays size={17} />
           {formatDate(now, state.preferences)}
         </div>
       </div>
+      <p className="workspace-heading-note">
+        Your live recruitment overview — start with the work that needs HR
+        attention today.
+      </p>
       <div className="section-heading">
         <h2>Recruitment at a glance</h2>
         <span className="muted">
@@ -646,6 +650,6 @@ export function Dashboard() {
           </div>
         </div>
       </div>
-    </>
+    </div>
   );
 }

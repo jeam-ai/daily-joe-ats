@@ -2414,6 +2414,31 @@ progress {
 .workspace-page-heading > div:first-child {
   min-width: 0;
 }
+.workspace-heading-side {
+  display: grid;
+  justify-items: end;
+  gap: 7px;
+  min-width: 0;
+}
+.workspace-heading-context {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 7px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.35;
+  text-align: right;
+}
+.workspace-heading-note {
+  max-width: 800px;
+  margin: -10px 0 1px;
+  padding-left: 12px;
+  border-left: 3px solid var(--accent);
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.55;
+}
 .workspace-section-toolbar {
   min-height: 42px;
   margin: 2px 0 0;
@@ -2612,6 +2637,21 @@ progress {
 @media (max-width: 700px) {
   .workspace-page {
     gap: 14px;
+  }
+  .workspace-heading-side {
+    width: 100%;
+    justify-items: start;
+  }
+  .workspace-heading-context {
+    justify-content: flex-start;
+    text-align: left;
+  }
+  .workspace-heading-side .button-row,
+  .workspace-heading-side .inline-actions {
+    width: 100%;
+  }
+  .workspace-heading-note {
+    margin-top: -5px;
   }
   .workspace-section-toolbar {
     align-items: center;

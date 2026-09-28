@@ -168,7 +168,9 @@ export function Applications({ talent = false }: { talent?: boolean }) {
 
   return (
     <>
-      <div className={`page-heading ${talent ? "talent-pool-heading" : ""}`}>
+      <div
+        className={`page-heading workspace-page-heading ${talent ? "talent-pool-heading" : ""}`}
+      >
         <div>
           <div className="eyebrow">
             {talent ? "KEEP THE CONNECTION" : "PEOPLE & POSSIBILITIES"}
@@ -180,45 +182,55 @@ export function Applications({ talent = false }: { talent?: boolean }) {
               : "A thoughtful next step for every applicant."}
           </p>
         </div>
-        <div className="button-row">
-          {!talent && dataset === "real" && (
-            <>
-              <a
-                className="button secondary"
-                href="/settings/integrations#intake"
-              >
-                Import Applications
-              </a>
-              <Button
-                disabled={!canManage(state.currentUser)}
-                title={
-                  !canManage(state.currentUser)
-                    ? "Recruitment manager access required"
-                    : undefined
-                }
-                onClick={() => setEditing("new")}
-              >
-                + Add Applicant
-              </Button>
-            </>
-          )}
-          <Button
-            variant="secondary"
-            onClick={() => void exportCsv()}
-            disabled={exporting || dataset === "demo"}
-            title={
-              dataset === "demo"
-                ? "Exit Demo to export real applications"
-                : undefined
-            }
-          >
-            <Download size={16} />
-            {exporting
-              ? "Preparing tracker…"
-              : `Export ${talent ? "talent pool" : "applications"}`}
-          </Button>
+        <div className="workspace-heading-side">
+          <span className="workspace-heading-context">
+            {talent ? "Candidate relationship workspace" : "Applicant workflow"}
+          </span>
+          <div className="button-row">
+            {!talent && dataset === "real" && (
+              <>
+                <a
+                  className="button secondary"
+                  href="/settings/integrations#intake"
+                >
+                  Import Applications
+                </a>
+                <Button
+                  disabled={!canManage(state.currentUser)}
+                  title={
+                    !canManage(state.currentUser)
+                      ? "Recruitment manager access required"
+                      : undefined
+                  }
+                  onClick={() => setEditing("new")}
+                >
+                  + Add Applicant
+                </Button>
+              </>
+            )}
+            <Button
+              variant="secondary"
+              onClick={() => void exportCsv()}
+              disabled={exporting || dataset === "demo"}
+              title={
+                dataset === "demo"
+                  ? "Exit Demo to export real applications"
+                  : undefined
+              }
+            >
+              <Download size={16} />
+              {exporting
+                ? "Preparing tracker…"
+                : `Export ${talent ? "talent pool" : "applications"}`}
+            </Button>
+          </div>
         </div>
       </div>
+      <p className="workspace-heading-note">
+        {talent
+          ? "Keep promising candidates organized and ready for the right future opening."
+          : "Review each application with clear evidence, a consistent stage, and an auditable next step."}
+      </p>
       <Card
         className={`workspace-card ${talent ? "talent-pool-workspace" : ""}`}
       >
