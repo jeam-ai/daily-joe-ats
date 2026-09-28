@@ -2159,6 +2159,7 @@ th,
   margin-top: 18px;
 }
 .mail-activity-icon {
+  position: relative;
   width: 34px;
   height: 34px;
   border-radius: 50%;
@@ -2171,8 +2172,12 @@ th,
   flex: 0 0 auto;
 }
 .mail-activity-icon > svg {
+  position: absolute;
+  top: 50%;
+  left: 50%;
   display: block;
   margin: 0;
+  transform: translate(-50%, -50%);
 }
 .recent-row small {
   display: block;
