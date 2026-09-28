@@ -436,6 +436,38 @@ input[type="radio"] {
 .sidebar-collapsed:hover .sidebar-profile {
   justify-content: flex-start;
 }
+/* At tablet widths globals.css turns the sidebar into an icon rail without
+   adding .sidebar-collapsed. Give that rail the exact same icon geometry as
+   the manual compact state so every glyph shares one visual centerline. */
+@media (min-width: 701px) and (max-width: 950px) {
+  .sidebar:not(.sidebar-collapsed) nav {
+    align-items: center;
+  }
+  .sidebar:not(.sidebar-collapsed) .sidebar-nav-group {
+    width: 100%;
+  }
+  .sidebar:not(.sidebar-collapsed) .sidebar-nav-group-label,
+  .sidebar:not(.sidebar-collapsed) .sidebar-nav-link > span {
+    display: none;
+  }
+  .sidebar:not(.sidebar-collapsed) .sidebar-nav-link {
+    box-sizing: border-box;
+    display: flex;
+    flex: 0 0 44px;
+    width: 44px;
+    height: 44px;
+    min-height: 44px;
+    margin-inline: auto;
+    justify-content: center;
+    gap: 0;
+    padding: 0;
+  }
+  .sidebar:not(.sidebar-collapsed) .sidebar-nav-link > svg {
+    flex: 0 0 19px;
+    width: 19px;
+    height: 19px;
+  }
+}
 .topbar {
   background: var(--surface);
 }
