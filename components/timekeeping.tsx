@@ -488,228 +488,245 @@ export function Timekeeping() {
           {busy}…
         </p>
       )}
-      <Card className="padded spaced">
-        <details open={!batch}>
-          <summary className="odoo-upload-heading">
-            Combined Odoo reports
-          </summary>
-          <p className="muted">
-            Upload both original exports for the same cutoff. Source files
-            remain unchanged.
-          </p>
-          <div className="form-grid">
-            <Field label="1. Attendance (hr.attendance).xlsx">
-              <Input
-                type="file"
-                accept=".xlsx"
-                disabled={!!busy}
-                onChange={(e) => {
-                  setAttendance(e.target.files?.[0] || null);
-                  setPreview(null);
-                }}
-              />
-            </Field>
-            <Field label="2. Pivot Worked Hours (hr.attendance).xlsx">
-              <Input
-                type="file"
-                accept=".xlsx"
-                disabled={!!busy}
-                onChange={(e) => {
-                  setPivot(e.target.files?.[0] || null);
-                  setPreview(null);
-                }}
-              />
-            </Field>
-          </div>
-          <Button
-            disabled={!attendance || !pivot || !!busy}
-            onClick={() =>
-              void run("Reading both reports", async () => {
-                const form = new FormData();
-                form.set("attendance", attendance!);
-                form.set("pivot", pivot!);
-                const accepted = await requestJson<{ job: TimekeepingJob }>(
-                  "/api/timekeeping",
-                  { method: "POST", body: form },
-                );
-                const completed = await watch(accepted.job);
-                showPreview(completed.result as Preview);
-                setAliases({});
-              })
-            }
-          >
-            <Upload size={16} />
-            Read reports
-          </Button>
-          {preview && (
-            <div className="odoo-preview">
-              <h3>
-                {date(preview.period.start)} – {date(preview.period.end)}
-              </h3>
-              <p>
-                {preview.attendanceRows} attendance entries ·{" "}
-                {preview.pivotRows} daily Pivot rows · {preview.employees}{" "}
-                source employee names
-              </p>
-              {preview.warnings.map((w) => (
-                <p className="muted" key={w}>
-                  {w}
+      <div className="timekeeping-setup-grid">
+        <Card className="padded spaced timekeeping-import-card">
+          <details open={!batch}>
+            <summary className="odoo-upload-heading">
+              Combined Odoo reports
+            </summary>
+            <p className="muted">
+              Upload both original exports for the same cutoff. Source files
+              remain unchanged.
+            </p>
+            <div className="form-grid">
+              <Field label="1. Attendance (hr.attendance).xlsx">
+                <Input
+                  type="file"
+                  accept=".xlsx"
+                  disabled={!!busy}
+                  onChange={(e) => {
+                    setAttendance(e.target.files?.[0] || null);
+                    setPreview(null);
+                  }}
+                />
+              </Field>
+              <Field label="2. Pivot Worked Hours (hr.attendance).xlsx">
+                <Input
+                  type="file"
+                  accept=".xlsx"
+                  disabled={!!busy}
+                  onChange={(e) => {
+                    setPivot(e.target.files?.[0] || null);
+                    setPreview(null);
+                  }}
+                />
+              </Field>
+            </div>
+            <Button
+              disabled={!attendance || !pivot || !!busy}
+              onClick={() =>
+                void run("Reading both reports", async () => {
+                  const form = new FormData();
+                  form.set("attendance", attendance!);
+                  form.set("pivot", pivot!);
+                  const accepted = await requestJson<{ job: TimekeepingJob }>(
+                    "/api/timekeeping",
+                    { method: "POST", body: form },
+                  );
+                  const completed = await watch(accepted.job);
+                  showPreview(completed.result as Preview);
+                  setAliases({});
+                })
+              }
+            >
+              <Upload size={16} />
+              Read reports
+            </Button>
+            {preview && (
+              <div className="odoo-preview">
+                <h3>
+                  {date(preview.period.start)} – {date(preview.period.end)}
+                </h3>
+                <p>
+                  {preview.attendanceRows} attendance entries ·{" "}
+                  {preview.pivotRows} daily Pivot rows · {preview.employees}{" "}
+                  source employee names
                 </p>
-              ))}
-              <p className="muted">
-                Confirm the payroll cutoff dates. The report dates shown above
-                are inferred from entries and may omit days with no records.
-              </p>
-              <div className="form-grid">
-                <Field label="Cutoff start">
-                  <Input
-                    type="date"
-                    value={cutoff.start}
-                    onChange={(e) =>
-                      setCutoff((current) => ({
-                        ...current,
-                        start: e.target.value,
-                      }))
-                    }
-                  />
-                </Field>
-                <Field label="Cutoff end">
-                  <Input
-                    type="date"
-                    value={cutoff.end}
-                    onChange={(e) =>
-                      setCutoff((current) => ({
-                        ...current,
-                        end: e.target.value,
-                      }))
-                    }
-                  />
-                </Field>
-              </div>
-              <p className="muted">
-                Reprocessing this cutoff replaces the calculated analysis while
-                preserving matching HR classifications and review history.
-              </p>
-              {preview.aliases.length > 0 && (
+                {preview.warnings.map((w) => (
+                  <p className="muted" key={w}>
+                    {w}
+                  </p>
+                ))}
+                <p className="muted">
+                  Confirm the payroll cutoff dates. The report dates shown above
+                  are inferred from entries and may omit days with no records.
+                </p>
+                <div className="form-grid">
+                  <Field label="Cutoff start">
+                    <Input
+                      type="date"
+                      value={cutoff.start}
+                      onChange={(e) =>
+                        setCutoff((current) => ({
+                          ...current,
+                          start: e.target.value,
+                        }))
+                      }
+                    />
+                  </Field>
+                  <Field label="Cutoff end">
+                    <Input
+                      type="date"
+                      value={cutoff.end}
+                      onChange={(e) =>
+                        setCutoff((current) => ({
+                          ...current,
+                          end: e.target.value,
+                        }))
+                      }
+                    />
+                  </Field>
+                </div>
+                <p className="muted">
+                  Reprocessing this cutoff replaces the calculated analysis
+                  while preserving matching HR classifications and review
+                  history.
+                </p>
+                {preview.aliases.length > 0 && (
+                  <details>
+                    <summary>
+                      Confirm employee identities ({preview.aliases.length}{" "}
+                      possible matches)
+                    </summary>
+                    <p>
+                      Numbered names stay separate unless you confirm they refer
+                      to the same employee. Original names are retained.
+                    </p>
+                    {preview.aliases.map((a) => (
+                      <label className="checkbox-label" key={a.source}>
+                        <input
+                          type="checkbox"
+                          checked={aliases[a.source] === a.candidate}
+                          onChange={(e) =>
+                            setAliases((prev) => {
+                              const next = { ...prev };
+                              if (e.target.checked)
+                                next[a.source] = a.candidate;
+                              else delete next[a.source];
+                              return next;
+                            })
+                          }
+                        />
+                        Merge {a.source} into {a.candidate}
+                      </label>
+                    ))}
+                  </details>
+                )}
                 <details>
                   <summary>
-                    Confirm employee identities ({preview.aliases.length}{" "}
-                    possible matches)
+                    Attendance rules and reconciliation tolerance
                   </summary>
-                  <p>
-                    Numbered names stay separate unless you confirm they refer
-                    to the same employee. Original names are retained.
-                  </p>
-                  {preview.aliases.map((a) => (
-                    <label className="checkbox-label" key={a.source}>
-                      <input
-                        type="checkbox"
-                        checked={aliases[a.source] === a.candidate}
-                        onChange={(e) =>
-                          setAliases((prev) => {
-                            const next = { ...prev };
-                            if (e.target.checked) next[a.source] = a.candidate;
-                            else delete next[a.source];
-                            return next;
-                          })
-                        }
-                      />
-                      Merge {a.source} into {a.candidate}
-                    </label>
-                  ))}
+                  <AttendanceRulesEditor rules={rules} onChange={setRules} />
+                  <Button
+                    variant="secondary"
+                    disabled={!!busy}
+                    onClick={() =>
+                      void run("Saving attendance rules", async () => {
+                        await requestJson(
+                          "/api/timekeeping",
+                          json({ action: "rules", rules }),
+                        );
+                        notify("Attendance rules saved.");
+                      })
+                    }
+                  >
+                    <Save size={16} />
+                    Save rules
+                  </Button>
                 </details>
-              )}
-              <details>
-                <summary>Attendance rules and reconciliation tolerance</summary>
-                <AttendanceRulesEditor rules={rules} onChange={setRules} />
                 <Button
-                  variant="secondary"
                   disabled={!!busy}
                   onClick={() =>
-                    void run("Saving attendance rules", async () => {
-                      await requestJson(
+                    void run("Analyzing attendance", async () => {
+                      const accepted = await requestJson<{
+                        job: TimekeepingJob;
+                      }>(
                         "/api/timekeeping",
-                        json({ action: "rules", rules }),
+                        json({
+                          action: "analyze",
+                          id: preview.id,
+                          rules,
+                          aliases,
+                          cutoff,
+                        }),
                       );
-                      notify("Attendance rules saved.");
+                      const completed = await watch(accepted.job);
+                      const r = await requestJson<{
+                        batch: OdooBatch & { reused?: boolean };
+                      }>(
+                        `/api/timekeeping?batch=${(completed.result as { batchId: string }).batchId}`,
+                      );
+                      setBatch(r.batch);
+                      setEmployee("");
+                      setDetail("");
+                      setPage(1);
+                      setBatches(
+                        (
+                          await requestJson<{ batches: BatchIndex[] }>(
+                            "/api/timekeeping",
+                          )
+                        ).batches,
+                      );
+                      notify(
+                        r.batch.reused
+                          ? "Existing analysis restored. Previous reviews preserved."
+                          : "Timekeeping analysis complete.",
+                      );
+                      await refresh();
                     })
                   }
                 >
-                  <Save size={16} />
-                  Save rules
+                  Analyze combined reports
                 </Button>
-              </details>
-              <Button
-                disabled={!!busy}
-                onClick={() =>
-                  void run("Analyzing attendance", async () => {
-                    const accepted = await requestJson<{ job: TimekeepingJob }>(
-                      "/api/timekeeping",
-                      json({
-                        action: "analyze",
-                        id: preview.id,
-                        rules,
-                        aliases,
-                        cutoff,
-                      }),
-                    );
-                    const completed = await watch(accepted.job);
-                    const r = await requestJson<{
-                      batch: OdooBatch & { reused?: boolean };
-                    }>(
-                      `/api/timekeeping?batch=${(completed.result as { batchId: string }).batchId}`,
-                    );
-                    setBatch(r.batch);
-                    setEmployee("");
-                    setDetail("");
-                    setPage(1);
-                    setBatches(
-                      (
-                        await requestJson<{ batches: BatchIndex[] }>(
-                          "/api/timekeeping",
-                        )
-                      ).batches,
-                    );
-                    notify(
-                      r.batch.reused
-                        ? "Existing analysis restored. Previous reviews preserved."
-                        : "Timekeeping analysis complete.",
-                    );
-                    await refresh();
-                  })
-                }
-              >
-                Analyze combined reports
-              </Button>
-            </div>
-          )}
-        </details>
-      </Card>
-      <Card className="padded spaced">
-        <Field label="Saved cutoff analysis">
-          <Select
-            disabled={!!busy}
-            value={batch?.id || ""}
-            onChange={(e) => {
-              if (e.target.value)
-                void run("Loading analysis", () => load(e.target.value));
-            }}
-          >
-            <option value="">Choose a saved analysis</option>
-            {batches.map((b) => (
-              <option key={b.id} value={b.id}>
-                {date(b.period.start)} – {date(b.period.end)} ·{" "}
-                {new Date(b.analyzedAt).toLocaleString("en", {
-                  month: "long",
-                  day: "numeric",
-                  hour: "numeric",
-                  minute: "2-digit",
-                })}
-              </option>
-            ))}
-          </Select>
-        </Field>
-      </Card>
+              </div>
+            )}
+          </details>
+        </Card>
+        <Card className="padded spaced timekeeping-cutoff-card">
+          <span className="eyebrow">CUTOFF HISTORY</span>
+          <h2>Open a saved analysis</h2>
+          <p className="muted">
+            Reopen a completed cutoff without uploading the Odoo exports again.
+          </p>
+          <Field label="Saved cutoff analysis">
+            <Select
+              disabled={!!busy}
+              value={batch?.id || ""}
+              onChange={(e) => {
+                if (e.target.value)
+                  void run("Loading analysis", () => load(e.target.value));
+              }}
+            >
+              <option value="">Choose a saved analysis</option>
+              {batches.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {date(b.period.start)} – {date(b.period.end)} ·{" "}
+                  {new Date(b.analyzedAt).toLocaleString("en", {
+                    month: "long",
+                    day: "numeric",
+                    hour: "numeric",
+                    minute: "2-digit",
+                  })}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <small>
+            Existing HR classifications and correction history stay attached to
+            the cutoff.
+          </small>
+        </Card>
+      </div>
       {!batch && !busy && (
         <EmptyState
           title="Review a complete cutoff"
@@ -886,7 +903,7 @@ export function Timekeeping() {
               </div>
             </details>
           </section>
-          <details className="card padded spaced">
+          <details className="card padded spaced timekeeping-source-details">
             <summary>Source reports and rules used</summary>
             <p>
               Uploaded by {batch.uploadedBy} ·{" "}
@@ -916,7 +933,17 @@ export function Timekeeping() {
               </p>
             ))}
           </details>
-          <Card className="padded spaced">
+          <Card className="padded spaced timekeeping-review-card">
+            <div className="timekeeping-review-heading">
+              <div>
+                <span className="eyebrow">ATTENDANCE REVIEW</span>
+                <h3>Review records</h3>
+                <p>Use a queue card above or refine the list below.</p>
+              </div>
+              <Badge tone={reviewCount ? "orange" : "green"}>
+                {filtered.length} shown
+              </Badge>
+            </div>
             <div className="odoo-filters">
               <Field label="Employee">
                 <Input
