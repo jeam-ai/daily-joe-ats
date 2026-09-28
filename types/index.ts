@@ -237,6 +237,14 @@ export interface IssuanceCatalogItem {
   name: string;
   active: boolean;
 }
+/** A reusable, non-sensitive HR report view. It stores filters only, never report rows. */
+export interface SavedReport {
+  id: string;
+  name: string;
+  scope: "Recruitment" | "Timekeeping" | "Employee requirements" | "Employee issuance";
+  href: string;
+  createdAt: string;
+}
 export interface QualificationTemplate {
   rules?: QualificationRule[];
   id: string;
@@ -319,6 +327,7 @@ export interface AppState {
   issuance?: IssuanceRecord[];
   issuanceInventory?: IssuanceInventory[];
   issuanceItems?: IssuanceCatalogItem[];
+  savedReports?: SavedReport[];
   preferences: {
     compact: boolean;
     weekStartsMonday: boolean;

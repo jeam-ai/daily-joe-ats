@@ -48,12 +48,24 @@ export async function getState(tx: Transaction): Promise<AppState> {
     if (a.source === "Demo") a.isDemo = true;
   if (stored) {
     balanceIntakeWindow(stored.applications);
+    // Older imports predate the onboarding field. Normalize those persisted
+    // records before they reach a full-workspace save, so an unrelated HR edit
+    // can never fail schema validation because of legacy application data.
+    for (const application of stored.applications) {
+      if (!application.onboardingStatus)
+        application.onboardingStatus = "Pending Orientation";
+      if (!application.interviews) application.interviews = [];
+      if (!application.requirements) application.requirements = [];
+      if (!application.timeline) application.timeline = [];
+      if (!application.notes) application.notes = [];
+    }
     if (!stored.issuance) stored.issuance = [];
     if (!stored.issuanceInventory) stored.issuanceInventory = [];
     if (!stored.issuanceItems)
       stored.issuanceItems = defaultIssuanceItems.map(
         ([id, category, name]) => ({ id, category, name, active: true }),
       );
+    if (!stored.savedReports) stored.savedReports = [];
     // The imported source workbook is an issued-items register. Its historic
     // released rows have signed acknowledgments, as confirmed by HR.
     for (const record of stored.issuance)
@@ -620,6 +632,7 @@ export async function updateState(
       next.issuance || [],
       next.issuanceInventory || [],
       next.issuanceItems || [],
+      next.savedReports || [],
     ]) {
       if (new Set(records.map((record) => record.id)).size !== records.length)
         throw new SafeError("Each workspace record must have a unique ID.");
@@ -689,6 +702,7 @@ export async function updateState(
         "intakeQuery",
         "intakePaused",
         "issuanceItems",
+        "savedReports",
       ] as const;
       const changesRealRecords = (
         ["applications", "hiringNeeds", "notifications"] as const
@@ -744,7 +758,8 @@ export async function updateState(
         throw new DomainError("Each position must have a unique name.");
       if (
         changed(before.emailTemplates, next.emailTemplates) ||
-        changed(before.hiringNeeds, next.hiringNeeds)
+        changed(before.hiringNeeds, next.hiringNeeds) ||
+        changed(before.savedReports || [], next.savedReports || [])
       )
         assertEditor(user);
       if (changed(before.issuance || [], next.issuance || []))

@@ -166,4 +166,14 @@ test("state schema enforces the active-window setting and valid users", () => {
     }).success,
     false,
   );
+  const legacy = createSeed();
+  delete (legacy.applications[0] as Partial<typeof legacy.applications[0]>)
+    .onboardingStatus;
+  const parsed = stateSchema.safeParse(legacy);
+  assert.equal(parsed.success, true);
+  if (parsed.success)
+    assert.equal(
+      parsed.data.applications[0].onboardingStatus,
+      "Pending Orientation",
+    );
 });

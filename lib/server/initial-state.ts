@@ -46,6 +46,7 @@ export function initialState(): AppState {
       name,
       active: true,
     })),
+    savedReports: [],
     notifications: [],
     importLimit: 100,
     importValidated: false,

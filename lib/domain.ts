@@ -55,6 +55,18 @@ export const issuanceCatalogItemSchema = z.object({
   name: text.min(1),
   active: z.boolean(),
 });
+export const savedReportSchema = z.object({
+  id,
+  name: text.min(1),
+  scope: z.enum([
+    "Recruitment",
+    "Timekeeping",
+    "Employee requirements",
+    "Employee issuance",
+  ]),
+  href: text.min(1),
+  createdAt: z.iso.datetime(),
+});
 export const userSchema = z.object({
   id,
   email: z.email(),
@@ -204,7 +216,9 @@ export const applicationSchema = z.object({
   talentPoolExpiredAt: text.optional(),
   orientationDate: text.optional(),
   commitmentDate: text.optional(),
-  onboardingStatus: z.enum(["Pending Orientation", "Scheduled", "Completed"]),
+  onboardingStatus: z
+    .enum(["Pending Orientation", "Scheduled", "Completed"])
+    .default("Pending Orientation"),
   hiringNeedId: text.optional(),
   resumeId: text.optional(),
   resumeHash: text.optional(),
@@ -309,6 +323,7 @@ export const stateSchema = z.object({
   issuance: z.array(issuanceSchema).max(20000).optional(),
   issuanceInventory: z.array(issuanceInventorySchema).max(10000).optional(),
   issuanceItems: z.array(issuanceCatalogItemSchema).max(1000).optional(),
+  savedReports: z.array(savedReportSchema).max(100).optional(),
   preferences: z.object({
     compact: z.boolean(),
     weekStartsMonday: z.boolean(),

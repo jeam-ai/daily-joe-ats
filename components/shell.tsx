@@ -21,23 +21,42 @@ import {
   LogOut,
   Clock3,
   PackageCheck,
+  ContactRound,
+  PanelsTopLeft,
   X,
   Mail,
+  type LucideIcon,
 } from "lucide-react";
 import { AppProvider, useApp } from "./provider";
 import { Avatar, Badge, Button } from "./ui";
 import Image from "next/image";
 import { RouteFeedback } from "./route-feedback";
-const navigation = [
-  ["Home", "/", House],
-  ["Applications", "/applications", UsersRound],
-  ["Hiring Needs", "/hiring-needs", BriefcaseBusiness],
-  ["Talent Pool", "/talent-pool", Bookmark],
-  ["Timekeeping", "/timekeeping", Clock3],
-  ["Employee Issuance", "/issuance", PackageCheck],
-  ["Reports", "/reports", ChartNoAxesCombined],
-  ["Settings", "/settings", Settings],
+type NavigationItem = readonly [string, string, LucideIcon];
+const navigationGroups: ReadonlyArray<{
+  label: string;
+  items: ReadonlyArray<NavigationItem>;
+}> = [
+  { label: "Dashboard", items: [["Home", "/", House]] },
+  {
+    label: "Recruitment",
+    items: [
+      ["Applications", "/applications", UsersRound],
+      ["Hiring Needs", "/hiring-needs", BriefcaseBusiness],
+      ["Talent Pool", "/talent-pool", Bookmark],
+    ],
+  },
+  {
+    label: "HR operations",
+    items: [
+      ["Timekeeping", "/timekeeping", Clock3],
+      ["Employee Records", "/people", ContactRound],
+      ["Employee Issuance", "/issuance", PackageCheck],
+    ],
+  },
+  { label: "Insights", items: [["Reports", "/reports", ChartNoAxesCombined]] },
+  { label: "System", items: [["Settings", "/settings", Settings]] },
 ] as const;
+const navigation = navigationGroups.flatMap((group) => group.items);
 function Frame({
   children,
   email,
@@ -53,6 +72,7 @@ function Frame({
   const { state, dataset } = useApp();
   const [open, setOpen] = useState(false);
   const [mobile, setMobile] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
   useEffect(() => {
     const media = matchMedia("(max-width: 700px)");
     const apply = () => {
@@ -63,6 +83,20 @@ function Frame({
     media.addEventListener("change", apply);
     return () => media.removeEventListener("change", apply);
   }, []);
+  useEffect(() => {
+    try {
+      setCollapsed(localStorage.getItem("djc-sidebar-collapsed") === "true");
+    } catch {}
+  }, []);
+  const toggleCollapsed = () => {
+    setCollapsed((current) => {
+      const next = !current;
+      try {
+        localStorage.setItem("djc-sidebar-collapsed", String(next));
+      } catch {}
+      return next;
+    });
+  };
   const sidebar = useRef<HTMLElement>(null);
   const menuButton = useRef<HTMLButtonElement>(null);
   useEffect(() => {
@@ -120,7 +154,7 @@ function Frame({
         aria-hidden={mobile && !open ? true : undefined}
         aria-label="Workspace navigation"
         id="workspace-navigation"
-        className={`sidebar ${open ? "mobile-open" : ""}`}
+        className={`sidebar ${open ? "mobile-open" : ""} ${collapsed ? "sidebar-collapsed" : ""}`}
       >
         <button
           className="icon-button sidebar-close"
@@ -143,31 +177,46 @@ function Frame({
           />
           <span className="brand-careers">CAREERS</span>
         </Link>
+        <button
+          className="sidebar-collapse-toggle"
+          type="button"
+          onClick={toggleCollapsed}
+          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+        >
+          <PanelsTopLeft size={16} />
+          <span>{collapsed ? "Expand" : "Collapse"}</span>
+        </button>
         <div className="workspace-label">YOUR WORKSPACE</div>
         <nav>
-          {navigation.map(([label, href, Icon]) => (
-            <Link
-              href={href}
-              prefetch={false}
-              key={href}
-              onClick={() => setOpen(false)}
-              title={label}
-              aria-current={active?.[1] === href ? "page" : undefined}
-              className={active?.[1] === href ? "active" : ""}
-            >
-              <Icon size={19} />
-              <span>{label}</span>
-              {label === "Applications" && (
-                <span
-                  className="nav-count"
-                  title="Applications in the newest 500-item live queue"
+          {navigationGroups.map((group) => (
+            <div className="sidebar-nav-group" key={group.label}>
+              <span className="sidebar-nav-group-label">{group.label}</span>
+              {group.items.map(([label, href, Icon]) => (
+                <Link
+                  href={href}
+                  prefetch={false}
+                  key={href}
+                  onClick={() => setOpen(false)}
+                  title={label}
+                  aria-current={active?.[1] === href ? "page" : undefined}
+                  className={`sidebar-nav-link ${active?.[1] === href ? "active" : ""}`}
                 >
-                  {state
-                    ? (state.applicationSummary?.[dataset].liveQueue ?? 0)
-                    : "…"}
-                </span>
-              )}
-            </Link>
+                  <Icon size={19} />
+                  <span>{label}</span>
+                  {label === "Applications" && (
+                    <span
+                      className="nav-count"
+                      title="Applications in the newest 500-item live queue"
+                    >
+                      {state
+                        ? (state.applicationSummary?.[dataset].liveQueue ?? 0)
+                        : "…"}
+                    </span>
+                  )}
+                </Link>
+              ))}
+            </div>
           ))}
         </nav>
         <div className="sidebar-bottom">
@@ -208,12 +257,12 @@ function Frame({
             <strong>{active?.[0] || "Notifications"}</strong>
           </div>
           <div className="topbar-actions">
-            <form action="/applications" className="global-search">
+            <form action="/search" className="global-search" title="Search applicants, employees, hiring needs, locations, and issued items">
               <Search size={16} />
               <input
-                aria-label="Search applicants"
+                aria-label="Search HR hub"
                 name="q"
-                placeholder="Search applicants…"
+                placeholder="Search HR hub…"
               />
               <kbd>↵</kbd>
             </form>

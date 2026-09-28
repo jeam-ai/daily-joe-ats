@@ -1,5 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
+import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import {
   Download,
   ChartNoAxesCombined,
@@ -8,13 +10,15 @@ import {
   Bookmark,
 } from "lucide-react";
 import { useApp } from "./provider";
-import { Button, Card, Select, Badge, EmptyState, LoadingSkeleton } from "./ui";
+import { Button, Card, Select, Badge, EmptyState, Field, HelpTip, Input, LoadingSkeleton, Modal } from "./ui";
 import { ReportDetails } from "./report-details";
 import { requestJson } from "@/lib/client-request";
 import type { RecruitmentReport, ReportBucket } from "@/types/reports";
 export function Reports() {
-  const { state, dataset, notify } = useApp();
-  const [range, setRange] = useState("all");
+  const { state, dataset, notify, saving, update } = useApp();
+  const params = useSearchParams();
+  const [range, setRange] = useState(params.get("range") || "all");
+  const [savingView, setSavingView] = useState(false);
   const [report, setReport] = useState<RecruitmentReport | null>(null);
   const [reportError, setReportError] = useState("");
   const [expandedGroups, setExpandedGroups] = useState({
@@ -38,6 +42,25 @@ export function Reports() {
   const data = report;
   const group = (key: "position" | "location" | "stage" | "status") =>
     data?.groups[key] || [];
+  async function saveView(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const name = String(new FormData(event.currentTarget).get("name") || "").trim();
+    if (!name) return;
+    const saved = await update((workspace) => ({
+      ...workspace,
+      savedReports: [
+        ...(workspace.savedReports || []),
+        {
+          id: crypto.randomUUID(),
+          name,
+          scope: "Recruitment" as const,
+          href: `/reports?range=${encodeURIComponent(range)}`,
+          createdAt: new Date().toISOString(),
+        },
+      ],
+    }));
+    if (saved) setSavingView(false);
+  }
   function exportReport() {
     const rows = [
       ["Dimension", "Category", "Count"],
@@ -110,13 +133,34 @@ export function Reports() {
               <Download size={16} />
               Export report
             </Button>
+            <Button
+              variant="secondary"
+              disabled={dataset === "demo" || saving}
+              onClick={() => setSavingView(true)}
+            >
+              <Bookmark size={16} />
+              Save view
+            </Button>
           </div>
         </div>
       </div>
       <p className="workspace-heading-note">
         Review recruitment trends without exposing applicant data beyond the
         workspace where HR needs it.
+        <HelpTip>
+          A saved view stores its name and filters only. It never saves applicant rows or personal information into the report.
+        </HelpTip>
       </p>
+      {(state.savedReports || []).length > 0 && (
+        <Card className="saved-reports-card">
+          <div className="section-heading"><div><span className="section-kicker">Reusable filters</span><h2>Saved reports</h2></div><Badge>{state.savedReports!.length}</Badge></div>
+          <div className="saved-report-list">
+            {state.savedReports!.slice().sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map((saved) => (
+              <Link className="saved-report-link" href={saved.href} key={saved.id}><Bookmark size={15}/><span><strong>{saved.name}</strong><small>{saved.scope}</small></span><span>Run</span></Link>
+            ))}
+          </div>
+        </Card>
+      )}
       {reportError ? (
         <EmptyState title="Report unavailable" description={reportError} />
       ) : !data ? (
@@ -263,6 +307,15 @@ export function Reports() {
         </>
       )}
       {data && data.total > 0 && <ReportDetails data={data} />}
+      {savingView && (
+        <Modal title="Save report view" busy={saving} onClose={() => setSavingView(false)}>
+          <form className="form-stack" onSubmit={saveView}>
+            <Field label="Report name"><Input name="name" required autoFocus placeholder="Example: September recruitment summary" /></Field>
+            <p className="fine-print">This saves the current report filter ({range === "all" ? "all time" : `last ${range} days`}) for quick reuse.</p>
+            <div className="modal-actions"><Button type="button" variant="secondary" onClick={() => setSavingView(false)}>Cancel</Button><Button type="submit" disabled={saving}>{saving ? "Saving…" : "Save report"}</Button></div>
+          </form>
+        </Modal>
+      )}
     </div>
   );
 }

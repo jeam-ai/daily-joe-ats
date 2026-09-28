@@ -274,16 +274,36 @@ input[type="radio"] {
 .sidebar nav {
   gap: 4px;
 }
-.sidebar nav > a {
+.sidebar-nav-group {
+  display: grid;
+  gap: 3px;
+}
+.sidebar-nav-group + .sidebar-nav-group {
+  margin-top: 12px;
+}
+.sidebar-nav-group-label {
+  margin: 0 10px 4px;
+  color: var(--text-muted);
+  font-size: 9px;
+  font-weight: 750;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.sidebar nav .sidebar-nav-link {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 40px;
+  padding: 9px 11px;
   color: var(--text-secondary);
   border-radius: var(--radius-control);
 }
-.sidebar nav > a:hover,
+.sidebar nav .sidebar-nav-link:hover,
 .sidebar-profile:hover {
   background: var(--surface-hover);
   color: var(--text-primary);
 }
-.sidebar nav > a.active {
+.sidebar nav .sidebar-nav-link.active {
   background: var(--info-bg);
   color: var(--info);
   box-shadow: inset 3px 0 var(--accent);
@@ -305,6 +325,95 @@ input[type="radio"] {
 .workspace-label {
   margin-top: 30px;
   color: var(--text-muted);
+}
+.sidebar-collapse-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  width: fit-content;
+  margin: 18px 10px -10px;
+  padding: 5px 0;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 650;
+}
+.sidebar-collapse-toggle:hover {
+  color: var(--info);
+}
+.sidebar-collapsed {
+  width: 76px;
+  overflow: visible;
+  transition: width 0.18s ease, box-shadow 0.18s ease;
+}
+.sidebar-collapsed ~ .main-shell {
+  margin-left: 76px;
+  width: calc(100% - 76px);
+}
+.sidebar-collapsed .sidebar-collapse-toggle,
+.sidebar-collapsed .brand-careers,
+.sidebar-collapsed .workspace-label,
+.sidebar-collapsed .sidebar-nav-group-label,
+.sidebar-collapsed .sidebar-nav-link > span,
+.sidebar-collapsed .sidebar-note,
+.sidebar-collapsed .sidebar-profile > span:not(.avatar),
+.sidebar-collapsed .sidebar-profile > svg {
+  opacity: 0;
+  pointer-events: none;
+  width: 0;
+  overflow: hidden;
+}
+.sidebar-collapsed .brand-logo {
+  width: 42px;
+  object-fit: cover;
+  object-position: left;
+}
+.sidebar-collapsed .brand {
+  padding: 0 5px;
+}
+.sidebar-collapsed nav {
+  margin-top: 44px;
+}
+.sidebar-collapsed .sidebar-nav-group {
+  margin: 0;
+}
+.sidebar-collapsed .sidebar-nav-link {
+  justify-content: center;
+  padding: 10px;
+}
+.sidebar-collapsed .sidebar-profile {
+  justify-content: center;
+}
+.sidebar-collapsed:hover {
+  width: 250px;
+  box-shadow: 8px 0 26px #19375418;
+}
+.sidebar-collapsed:hover .sidebar-collapse-toggle,
+.sidebar-collapsed:hover .brand-careers,
+.sidebar-collapsed:hover .workspace-label,
+.sidebar-collapsed:hover .sidebar-nav-group-label,
+.sidebar-collapsed:hover .sidebar-nav-link > span,
+.sidebar-collapsed:hover .sidebar-note,
+.sidebar-collapsed:hover .sidebar-profile > span:not(.avatar),
+.sidebar-collapsed:hover .sidebar-profile > svg {
+  opacity: 1;
+  pointer-events: auto;
+  width: auto;
+}
+.sidebar-collapsed:hover .brand-logo {
+  width: 165px;
+}
+.sidebar-collapsed:hover .brand {
+  padding: 0 10px;
+}
+.sidebar-collapsed:hover nav {
+  margin-top: 0;
+}
+.sidebar-collapsed:hover .sidebar-nav-link {
+  justify-content: flex-start;
+  padding: 9px 11px;
+}
+.sidebar-collapsed:hover .sidebar-profile {
+  justify-content: flex-start;
 }
 .topbar {
   background: var(--surface);
@@ -2512,6 +2621,100 @@ progress {
   width: fit-content;
   margin-top: 6px;
 }
+.help-tip {
+  vertical-align: middle;
+}
+
+/* HR hub: employee records, onboarding, global search, and saved report views. */
+.people-help-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 360px;
+  line-height: 1.4;
+}
+.people-summary {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.people-workspace {
+  overflow: hidden;
+  border-color: color-mix(in srgb, var(--accent) 18%, var(--border));
+  box-shadow: none;
+}
+.people-workspace-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border);
+}
+.onboarding-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  padding: 20px;
+}
+.onboarding-card {
+  padding: 16px;
+  box-shadow: none;
+}
+.onboarding-card .section-heading { margin-bottom: 12px; }
+.onboarding-card h2 { margin: 0; font-size: 16px; }
+.onboarding-card .section-heading p { margin: 3px 0 0; font-size: 12px; }
+.onboarding-checks {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin: 14px 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.onboarding-checks span { padding: 7px 8px; border-radius: 8px; background: var(--surface-subtle); }
+.hub-search-form {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 760px;
+  margin: 0 0 22px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+  color: var(--text-secondary);
+  box-shadow: var(--shadow-card);
+}
+.hub-search-form .input { flex: 1; min-width: 0; border: 0; background: transparent; }
+.hub-search-form .input:focus { outline: none; box-shadow: none; }
+.hub-search-form button { padding: 8px 12px; border-radius: 9px; background: var(--accent); color: white; font-weight: 650; }
+.search-results-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 15px; }
+.search-result-group { padding: 16px; box-shadow: none; }
+.search-result-group .section-heading { margin-bottom: 8px; }
+.search-result-title { display: flex; align-items: center; gap: 8px; }
+.search-result-title h2 { margin: 0; font-size: 16px; }
+.search-result-row, .saved-report-link {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 0;
+  border-top: 1px solid var(--border);
+  color: var(--text-primary);
+  font-size: 12px;
+}
+.search-result-row:hover, .saved-report-link:hover { color: var(--info); }
+.search-result-row strong, .search-result-row small, .saved-report-link strong, .saved-report-link small { display: block; }
+.search-result-row small, .saved-report-link small { margin-top: 2px; color: var(--text-secondary); }
+.saved-reports-card { margin-bottom: 18px; padding: 16px 20px; box-shadow: none; }
+.saved-reports-card h2 { margin: 2px 0 0; font-size: 16px; }
+.saved-report-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 12px; }
+.saved-report-link { min-width: 0; padding: 11px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-subtle); }
+.saved-report-link svg { flex: 0 0 auto; color: var(--accent); }
+.saved-report-link > span:last-child { margin-left: auto; color: var(--info); font-weight: 650; }
+@media (max-width: 900px) {
+  .people-summary, .search-results-grid, .onboarding-grid, .saved-report-list { grid-template-columns: 1fr; }
+  .people-workspace-toolbar { align-items: flex-start; flex-direction: column; }
+}
 .hiring-need-card .need-numbers {
   justify-content: space-between;
   gap: 10px;
@@ -2641,13 +2844,9 @@ progress {
 }
 .issuance-inventory-card {
   padding: 20px;
-  border-color: color-mix(in srgb, var(--info) 30%, var(--border));
-  box-shadow: inset 4px 0 0 color-mix(in srgb, var(--info) 72%, transparent);
-  background: linear-gradient(
-    135deg,
-    color-mix(in srgb, var(--info-bg) 42%, var(--surface)) 0%,
-    var(--surface) 38%
-  );
+  border-color: color-mix(in srgb, var(--accent) 20%, var(--border));
+  box-shadow: none;
+  background: var(--surface);
 }
 .issuance-inventory-card .section-heading {
   align-items: flex-start;
@@ -2662,7 +2861,25 @@ progress {
   margin: 0 -20px -20px;
 }
 .issuance-inventory-card .table-scroll th {
-  background: color-mix(in srgb, var(--info-bg) 72%, var(--surface));
+  background: color-mix(in srgb, var(--info-bg) 54%, var(--surface));
+}
+.stock-register-identity {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+}
+.stock-register-icon {
+  display: grid;
+  width: 35px;
+  height: 35px;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border));
+  border-radius: 10px;
+  background: var(--info-bg);
+  color: var(--info);
+}
+.stock-register-identity h2 {
+  margin-top: 1px;
 }
 .issuance-workspace {
   overflow: hidden;

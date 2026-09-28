@@ -396,13 +396,16 @@ export function EmployeeIssuance() {
       </Card>
       <Card className="issuance-inventory-card">
         <div className="section-heading">
-          <div>
-            <span className="section-kicker">Stock control</span>
-            <h2>Stock register</h2>
-            <p className="muted">
-              Edit the physical count from the workbook’s ON-HAND sheet. This
-              is inventory control, not a log of employee releases.
-            </p>
+          <div className="stock-register-identity">
+            <span className="stock-register-icon"><PackageCheck size={19} /></span>
+            <div>
+              <span className="section-kicker">Stock control</span>
+              <h2>Stock register</h2>
+              <p className="muted">
+                Physical count from the ON-HAND sheet. This is inventory
+                control, not employee release history.
+              </p>
+            </div>
           </div>
           <div className="button-row">
             <Badge>{inventory.length} tracked items</Badge>

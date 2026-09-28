@@ -9,6 +9,16 @@ import {
   Info,
   ArrowRight,
 } from "lucide-react";
+
+/** Small, keyboard-accessible help for a term or calculation that needs context. */
+export function HelpTip({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="info-tooltip help-tip" tabIndex={0} aria-label="More information">
+      <Info size={15} aria-hidden />
+      <span role="tooltip">{children}</span>
+    </span>
+  );
+}
 export function Button({
   children,
   variant = "primary",
