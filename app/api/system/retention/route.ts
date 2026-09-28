@@ -8,6 +8,7 @@ import {
 import { audit, getState } from "@/lib/server/repository";
 import { safeError } from "@/lib/server/response";
 import { SafeError } from "@/lib/server/config";
+import { syncOutsideQueueGraceDates } from "@/lib/server/retention-markers";
 import {
   readRetentionPolicies,
   retentionDryRunEnabled,
@@ -174,6 +175,13 @@ export async function POST(request: Request) {
     if (user.role !== "Admin")
       throw new SafeError("Administrator access required.", 403);
     const body = await request.json();
+    if (body?.action === "sync-queue-grace") {
+      const result = await transaction(async (tx) => {
+        const state = await getState(tx);
+        return syncOutsideQueueGraceDates(tx, state.applications);
+      });
+      return Response.json(result);
+    }
     if (body?.action === "preview-scan")
       return Response.json(await runRetentionCleanup({ dryRun: true }));
     if (body?.action === "run-cleanup") {

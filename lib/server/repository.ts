@@ -5,6 +5,7 @@ import { recordIssue, resolveIssue, unresolved } from "./diagnostics";
 import { extractionReasons } from "@/lib/applicant-information";
 import type { DiagnosticIssue } from "@/types/operations";
 import { writeAudit } from "./audit";
+import { syncOutsideQueueGraceDates } from "./retention-markers";
 import { buildTracker } from "./tracker";
 import "server-only";
 import type {
@@ -224,6 +225,10 @@ export async function saveState(
       );
     }
   }
+  // The 500-item queue is balanced above, so create or cancel its retention
+  // grace dates in this same save transaction. Cleanup remains a separate,
+  // explicitly controlled process; this only records the clock immediately.
+  await syncOutsideQueueGraceDates(tx, state.applications);
   // Talent Pool membership is a person-level lifecycle, separate from any
   // individual application. Keep its normalized row in sync with active pool
   // applications without resetting an HR-retained expiry on ordinary edits.

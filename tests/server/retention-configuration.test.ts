@@ -221,3 +221,22 @@ test("configured retention dates drive Talent Pool, terminal, Hiring Need, activ
   assert.equal(cancelled.needs.length, 0);
   assert.equal(cancelled.terminal.length, 0);
 });
+
+test("leaving the newest 500 immediately starts queue retention grace", async () => {
+  const now = Date.now();
+  const state = initialState();
+  for (let index = 0; index < 501; index++)
+    state.applications.push(
+      application(`queue-${index}`, iso(now - index * 1000)),
+    );
+  await transaction((tx) => saveState(tx, state, { sync: false }));
+  const markers = await readTransaction((tx) =>
+    tx.query(
+      "SELECT application_id,category,started_at,expires_at FROM application_retention WHERE category='outside_live_queue'",
+    ),
+  );
+  assert.equal(markers.length, 1);
+  assert.equal(markers[0].application_id, "queue-500");
+  assert.equal(markers[0].category, "outside_live_queue");
+  assert.ok(Date.parse(String(markers[0].expires_at)) > Date.now());
+});

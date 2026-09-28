@@ -110,11 +110,29 @@ export function Dashboard() {
   useEffect(() => {
     if (state?.currentUser?.role !== "Admin") return;
     const abort = new AbortController();
-    requestJson<RetentionSnapshot>("/api/system/retention", {
-      signal: abort.signal,
-    })
-      .then(setRetention)
-      .catch(() => undefined);
+    const load = async () => {
+      let snapshot = await requestJson<RetentionSnapshot>(
+        "/api/system/retention",
+        { signal: abort.signal },
+      );
+      // Catch up once for records queued before immediate grace markers were
+      // introduced. This action only creates/cancels grace dates; it cannot
+      // delete applicant data.
+      if (snapshot.queue.retentionAwaitingMarker > 0) {
+        await requestJson("/api/system/retention", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "sync-queue-grace" }),
+          signal: abort.signal,
+        });
+        snapshot = await requestJson<RetentionSnapshot>(
+          "/api/system/retention",
+          { signal: abort.signal },
+        );
+      }
+      setRetention(snapshot);
+    };
+    void load().catch(() => undefined);
     return () => abort.abort();
   }, [state?.currentUser?.role, state?.revision]);
   if (!state) return <LoadingSkeleton />;
