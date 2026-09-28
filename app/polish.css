@@ -2634,3 +2634,256 @@ progress {
     padding: 15px;
   }
 }
+
+/* Timekeeping is an operations workspace: orient HR first, then keep each
+   review action in a deliberately quiet, scannable surface. */
+.timekeeping-page {
+  gap: 16px;
+}
+.timekeeping-page-heading {
+  align-items: flex-end;
+}
+.timekeeping-page-status {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.timekeeping-page-note {
+  max-width: 760px;
+  margin: -8px 0 2px;
+  padding-left: 12px;
+  border-left: 3px solid var(--accent);
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.55;
+}
+.timekeeping-job-card {
+  display: grid;
+  gap: 12px;
+  border-color: color-mix(in srgb, var(--info) 28%, var(--border));
+  background: var(--info-bg);
+}
+.timekeeping-job-card p {
+  margin: 4px 0 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.timekeeping-job-card progress {
+  margin-top: 7px;
+}
+.timekeeping-setup-grid {
+  gap: 18px;
+}
+.timekeeping-import-card,
+.timekeeping-cutoff-card {
+  border-color: var(--border);
+  box-shadow: none;
+}
+.timekeeping-import-card {
+  background: var(--surface);
+}
+.timekeeping-import-card details > summary {
+  display: flex;
+  align-items: center;
+  min-height: 30px;
+  color: var(--text-primary);
+  font-weight: 650;
+}
+.timekeeping-cutoff-card {
+  padding: 20px;
+  border-color: color-mix(in srgb, var(--accent) 20%, var(--border));
+  background: linear-gradient(145deg, var(--surface), var(--surface-subtle));
+}
+.timekeeping-cutoff-card .eyebrow {
+  margin-bottom: 1px;
+}
+.timekeeping-cutoff-card h2 {
+  font-size: 17px;
+}
+.timekeeping-cutoff-card .field {
+  margin-top: 6px;
+}
+.timekeeping-cutoff-heading {
+  align-items: flex-end;
+  gap: 16px;
+  padding: 2px 2px 0;
+}
+.timekeeping-cutoff-heading h2 {
+  margin-bottom: 3px;
+  font-size: 19px;
+}
+.timekeeping-cutoff-heading .muted {
+  max-width: 680px;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.timekeeping-cutoff-heading .actions {
+  justify-content: flex-end;
+}
+.timekeeping-dashboard {
+  grid-template-columns: minmax(235px, 0.78fr) minmax(0, 1.5fr);
+  gap: 16px 20px;
+  margin: 4px 0 0;
+  padding: 20px;
+  border-radius: 16px;
+  border-color: color-mix(in srgb, var(--accent) 20%, var(--border));
+  background: linear-gradient(145deg, var(--surface-subtle), var(--surface));
+  box-shadow: none;
+}
+.timekeeping-dashboard-lead {
+  align-self: center;
+  min-width: 0;
+}
+.timekeeping-dashboard-lead strong {
+  margin-top: 6px;
+  font-size: 20px;
+  line-height: 1.2;
+}
+.timekeeping-dashboard-context {
+  margin-top: 12px;
+}
+.timekeeping-primary-metrics {
+  align-self: stretch;
+  gap: 8px;
+}
+.timekeeping-metric-filter {
+  min-height: 82px;
+  padding: 12px;
+  border-radius: 12px;
+  transition:
+    border-color 150ms ease,
+    box-shadow 150ms ease,
+    transform 150ms ease;
+}
+.timekeeping-metric-filter strong {
+  font-size: 1.55rem;
+}
+.timekeeping-metric-filter:not(:disabled):hover {
+  transform: translateY(-1px);
+}
+.timekeeping-exception-breakdown {
+  grid-column: 1 / -1;
+  padding-top: 13px;
+  border-top: 1px solid var(--border);
+}
+.timekeeping-exception-breakdown summary {
+  width: fit-content;
+  padding: 4px 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.timekeeping-secondary-metrics {
+  gap: 8px;
+  margin-top: 10px;
+}
+.timekeeping-secondary-metric {
+  min-height: 46px;
+  border-radius: 10px;
+}
+.timekeeping-source-details {
+  padding: 15px 18px;
+  border-color: var(--border);
+  border-radius: 12px;
+  background: var(--surface-subtle);
+}
+.timekeeping-source-details summary {
+  padding: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.timekeeping-review-card {
+  border-color: var(--border);
+  box-shadow: none;
+}
+.timekeeping-review-heading {
+  align-items: center;
+  margin: -20px -20px 18px;
+  padding: 17px 20px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-subtle);
+}
+.timekeeping-review-heading h3 {
+  font-size: 17px;
+}
+.timekeeping-review-card .odoo-filters {
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-subtle);
+}
+.timekeeping-review-card .odoo-filters .field {
+  margin: 0;
+}
+.timekeeping-filter-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: -8px 0 18px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.timekeeping-filter-actions .button {
+  min-height: 30px;
+  padding: 5px 8px;
+  font-size: 12px;
+}
+.timekeeping-review-card table th {
+  background: var(--surface-subtle);
+}
+.timekeeping-review-card table td {
+  vertical-align: middle;
+}
+
+@media (max-width: 1040px) {
+  .timekeeping-dashboard {
+    grid-template-columns: 1fr;
+  }
+  .timekeeping-exception-breakdown {
+    grid-column: auto;
+  }
+}
+@media (max-width: 700px) {
+  .timekeeping-page-heading {
+    align-items: flex-start;
+  }
+  .timekeeping-page-status {
+    justify-content: flex-start;
+  }
+  .timekeeping-page-note {
+    margin-top: -3px;
+  }
+  .timekeeping-dashboard {
+    padding: 16px;
+    border-radius: 14px;
+  }
+  .timekeeping-primary-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .timekeeping-metric-filter {
+    min-height: 76px;
+  }
+  .timekeeping-cutoff-heading {
+    align-items: flex-start;
+  }
+  .timekeeping-cutoff-heading .actions {
+    justify-content: flex-start;
+  }
+  .timekeeping-review-heading {
+    align-items: flex-start;
+    margin: -18px -18px 16px;
+    padding: 15px 18px;
+  }
+  .timekeeping-review-card .odoo-filters {
+    padding: 12px;
+  }
+  .timekeeping-filter-actions {
+    align-items: flex-start;
+    flex-direction: column;
+    margin-top: -4px;
+  }
+}

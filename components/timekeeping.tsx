@@ -395,6 +395,25 @@ export function Timekeeping() {
     setReviewedOnly(filter === "resolved");
     setReviewFilter(filter === "review" ? "For Review" : "");
   }
+  const hasReviewFilters = Boolean(
+    query ||
+    reviewFilter ||
+    reviewedOnly ||
+    resultFilter ||
+    dayFilter ||
+    department ||
+    location,
+  );
+  function clearReviewFilters() {
+    setQuery("");
+    setReviewFilter("");
+    setReviewedOnly(false);
+    setResultFilter("");
+    setDayFilter("");
+    setDepartment("");
+    setLocation("");
+    setPage(1);
+  }
   if (dataset === "demo")
     return (
       <EmptyState
@@ -410,8 +429,8 @@ export function Timekeeping() {
       />
     );
   return (
-    <>
-      <div className="page-heading">
+    <div className="workspace-page timekeeping-page">
+      <div className="page-heading workspace-page-heading timekeeping-page-heading">
         <div>
           <span className="eyebrow">HR OPERATIONS</span>
           <h1>Timekeeping</h1>
@@ -419,10 +438,14 @@ export function Timekeeping() {
             Reconcile Odoo attendance and expected hours, then record HR review.
           </p>
         </div>
+        <div className="timekeeping-page-status" aria-label="Timekeeping scope">
+          <Badge>Odoo source data</Badge>
+          <span>Review &amp; resolution workspace</span>
+        </div>
       </div>
-      <p className="fine-print">
-        Classifications use uploaded Odoo reports and configured HR rules.
-        Review results before payroll or employee action.
+      <p className="timekeeping-page-note">
+        The hub analyzes imported Odoo reports; HR confirms classifications and
+        records any correction separately before payroll action.
       </p>
       {attendance && !pivot && (
         <p className="notice" role="status">
@@ -440,7 +463,7 @@ export function Timekeeping() {
         </div>
       )}
       {job && (
-        <Card className="padded">
+        <Card className="padded timekeeping-job-card">
           <div role="status">
             <strong>{job.detail}</strong>
             <p>
@@ -735,7 +758,7 @@ export function Timekeeping() {
       )}
       {batch && (
         <>
-          <div className="section-heading">
+          <div className="section-heading timekeeping-cutoff-heading">
             <div>
               <span className="eyebrow">Current cutoff</span>
               <h2>
@@ -749,6 +772,9 @@ export function Timekeeping() {
               </p>
             </div>
             <div className="actions">
+              <Badge tone={reviewCount ? "orange" : "green"}>
+                {reviewCount ? `${reviewCount} for review` : "Review complete"}
+              </Badge>
               {["xlsx", "csv"].map((format) => (
                 <Button
                   key={format}
@@ -1019,6 +1045,17 @@ export function Timekeeping() {
                   </Select>
                 </Field>
               ))}
+            </div>
+            <div className="timekeeping-filter-actions">
+              <span>
+                {filtered.length} employee-day
+                {filtered.length === 1 ? "" : "s"} match this view
+              </span>
+              {hasReviewFilters && (
+                <Button variant="ghost" onClick={clearReviewFilters}>
+                  Clear all filters
+                </Button>
+              )}
             </div>
             {employee ? (
               <>
@@ -1461,6 +1498,6 @@ export function Timekeeping() {
           </details>
         </Modal>
       )}
-    </>
+    </div>
   );
 }
