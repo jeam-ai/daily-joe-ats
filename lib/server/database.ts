@@ -124,6 +124,7 @@ const schema = [
     "notifications",
     "employee_issuance",
     "issuance_inventory",
+    "issuance_catalog",
   ].map(
     (name) =>
       `CREATE TABLE IF NOT EXISTS ${name} (id TEXT PRIMARY KEY, payload TEXT NOT NULL)`,

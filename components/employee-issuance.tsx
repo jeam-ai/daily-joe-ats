@@ -55,6 +55,7 @@ export function EmployeeIssuance() {
   const { state, notify, refresh, dataset } = useApp();
   const [view, setView] = useState("All issuance");
   const [query, setQuery] = useState("");
+  const [newCategory, setNewCategory] = useState<IssuanceCategory>("Uniform");
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<IssuanceRecord | null>(null);
   const [editingStock, setEditingStock] = useState<
@@ -65,6 +66,42 @@ export function EmployeeIssuance() {
   if (!state) return <LoadingSkeleton />;
   const records = state.issuance || [];
   const inventory = state.issuanceInventory || [];
+  const catalog = useMemo(() => {
+    const configured = (state.issuanceItems || []).filter(
+      (item) => item.active,
+    );
+    const seen = new Set(
+      configured.map((item) => `${item.category}|${item.name}`.toLowerCase()),
+    );
+    for (const source of [...inventory, ...records]) {
+      const key = `${source.category}|${source.item}`.toLowerCase();
+      if (seen.has(key)) continue;
+      configured.push({
+        id: `derived-${key.replaceAll(/[^a-z0-9]+/g, "-")}`,
+        category: source.category,
+        name: source.item,
+        active: true,
+      });
+      seen.add(key);
+    }
+    return configured.sort((a, b) =>
+      a.category === b.category
+        ? a.name.localeCompare(b.name)
+        : a.category.localeCompare(b.category),
+    );
+  }, [inventory, records, state.issuanceItems]);
+  const stockSummary = categories
+    .map((category) => {
+      const rows = inventory.filter((item) => item.category === category);
+      return {
+        category,
+        tracked: rows.length,
+        beginning: rows.reduce((sum, item) => sum + item.beginning, 0),
+        issued: rows.reduce((sum, item) => sum + item.issued, 0),
+        onHand: rows.reduce((sum, item) => sum + item.onHand, 0),
+      };
+    })
+    .filter((summary) => summary.tracked > 0);
   const uniforms = records.filter((record) => record.category === "Uniform");
   const welcomeKits = records.filter(
     (record) => record.category === "Welcome Kit",
@@ -112,7 +149,7 @@ export function EmployeeIssuance() {
         throw Error(result.error || "The workbook could not be imported.");
       await refresh();
       notify(
-        `${result.created} issuance record${result.created === 1 ? "" : "s"} imported${result.inventoryUpdated ? `; ${result.inventoryUpdated} on-hand stock item${result.inventoryUpdated === 1 ? "" : "s"} refreshed` : ""}${result.skipped ? `; ${result.skipped} duplicate${result.skipped === 1 ? "" : "s"} skipped` : ""}.`,
+        `${result.created} issuance record${result.created === 1 ? "" : "s"} imported${result.inventoryUpdated ? `; ${result.inventoryUpdated} on-hand stock item${result.inventoryUpdated === 1 ? "" : "s"} refreshed` : ""}${result.acknowledgmentsMarked ? `; ${result.acknowledgmentsMarked} historic acknowledgment${result.acknowledgmentsMarked === 1 ? "" : "s"} recorded` : ""}${result.skipped ? `; ${result.skipped} duplicate${result.skipped === 1 ? "" : "s"} skipped` : ""}.`,
       );
     } catch (error) {
       notify((error as Error).message, "error");
@@ -289,7 +326,10 @@ export function EmployeeIssuance() {
           {busy}…
         </p>
       )}
-      <div className="issuance-summary" aria-label="Employee issuance summary">
+      <div
+        className="metrics-grid issuance-summary"
+        aria-label="Employee issuance summary"
+      >
         <MetricCard
           label="Uniform records"
           value={uniforms.length}
@@ -328,6 +368,33 @@ export function EmployeeIssuance() {
           tone="metric-interviews"
         />
       </div>
+      <Card className="issuance-stock-dashboard">
+        <div className="section-heading">
+          <div>
+            <h2>Stock dashboard</h2>
+            <p className="muted">
+              Beginning, Out, and On hand follow the editable ON-HAND register.
+            </p>
+          </div>
+          <Badge>{inventory.length} stock lines</Badge>
+        </div>
+        <div className="issuance-stock-summary">
+          {stockSummary.map((summary) => (
+            <div className="issuance-stock-summary-card" key={summary.category}>
+              <Badge tone={summary.category === "Uniform" ? "blue" : "green"}>
+                {summary.category}
+              </Badge>
+              <strong>{summary.onHand}</strong>
+              <span>On hand</span>
+              <small>
+                Beginning {summary.beginning} · Out {summary.issued} ·{" "}
+                {summary.tracked} item
+                {summary.tracked === 1 ? "" : "s"}
+              </small>
+            </div>
+          ))}
+        </div>
+      </Card>
       <Card className="issuance-inventory-card">
         <div className="section-heading">
           <div>
@@ -526,7 +593,13 @@ export function EmployeeIssuance() {
           <form className="form-stack" onSubmit={saveRecord}>
             <div className="form-grid">
               <Field label="Category">
-                <Select name="category" defaultValue="Uniform">
+                <Select
+                  name="category"
+                  value={newCategory}
+                  onChange={(event) =>
+                    setNewCategory(event.target.value as IssuanceCategory)
+                  }
+                >
                   {categories.map((category) => (
                     <option key={category}>{category}</option>
                   ))}
@@ -545,11 +618,21 @@ export function EmployeeIssuance() {
                 <Input name="branch" />
               </Field>
               <Field label="Item">
-                <Input
-                  name="item"
-                  required
-                  placeholder="Polo shirt, tote bag, access card"
-                />
+                <Select name="item" required defaultValue="">
+                  <option value="" disabled>
+                    Select configured item
+                  </option>
+                  {catalog
+                    .filter((item) => item.category === newCategory)
+                    .map((item) => (
+                      <option key={item.id} value={item.name}>
+                        {item.name}
+                      </option>
+                    ))}
+                </Select>
+                <small className="field-note">
+                  Configure items in Settings → Employee Issuance.
+                </small>
               </Field>
               <Field label="Size">
                 <Input name="size" placeholder="Optional for non-sized items" />
@@ -581,8 +664,8 @@ export function EmployeeIssuance() {
               </Field>
             </div>
             <label className="check-row">
-              <input name="signed" type="checkbox" /> Issuance acknowledgment
-              signed
+              <input name="signed" type="checkbox" defaultChecked /> Issuance
+              acknowledgment signed
             </label>
             <Field label="Remarks">
               <textarea name="remarks" />

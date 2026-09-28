@@ -49,6 +49,12 @@ export const issuanceInventorySchema = z.object({
   updatedAt: z.iso.datetime(),
   source: text.optional(),
 });
+export const issuanceCatalogItemSchema = z.object({
+  id,
+  category: z.enum(["Uniform", "Welcome Kit", "Other"]),
+  name: text.min(1),
+  active: z.boolean(),
+});
 export const userSchema = z.object({
   id,
   email: z.email(),
@@ -302,6 +308,7 @@ export const stateSchema = z.object({
     .max(1000),
   issuance: z.array(issuanceSchema).max(20000).optional(),
   issuanceInventory: z.array(issuanceInventorySchema).max(10000).optional(),
+  issuanceItems: z.array(issuanceCatalogItemSchema).max(1000).optional(),
   preferences: z.object({
     compact: z.boolean(),
     weekStartsMonday: z.boolean(),

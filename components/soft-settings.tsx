@@ -1,7 +1,13 @@
 "use client";
 import { clientFetch, requestJson } from "@/lib/client-request";
 import { useEffect, useRef, useState } from "react";
-import type { User, Location, QualificationRule } from "@/types";
+import type {
+  IssuanceCatalogItem,
+  IssuanceCategory,
+  Location,
+  QualificationRule,
+  User,
+} from "@/types";
 import { useApp } from "./provider";
 import { Button, Card, Field, Input, Select, Modal, Badge } from "./ui";
 import { QualificationEditor } from "./qualification-editor";
@@ -427,6 +433,137 @@ export function QualificationsSettings() {
             <Button type="submit" disabled={saving}>
               Save template
             </Button>
+          </form>
+        </Modal>
+      )}
+    </Card>
+  );
+}
+export function IssuanceSettings() {
+  const { state, update, saving } = useApp();
+  const [adding, setAdding] = useState(false);
+  if (!state) return null;
+  const admin = state.currentUser?.role === "Admin";
+  const items = state.issuanceItems || [];
+  const save = (item: IssuanceCatalogItem) =>
+    update((workspace) => ({
+      ...workspace,
+      issuanceItems: (workspace.issuanceItems || []).map((current) =>
+        current.id === item.id ? item : current,
+      ),
+    }));
+  return (
+    <Card>
+      <div className="card-heading">
+        <div>
+          <h2>Employee Issuance Items</h2>
+          <p>
+            Maintain the dropdown list HR uses for uniforms, kits, and
+            equipment.
+          </p>
+        </div>
+        <Button disabled={!admin || saving} onClick={() => setAdding(true)}>
+          + Add item
+        </Button>
+      </div>
+      <div className="padded form-stack issuance-item-settings">
+        {items.map((item) => (
+          <div className="issuance-item-setting" key={item.id}>
+            <Select
+              aria-label={`${item.name} category`}
+              disabled={!admin || saving}
+              value={item.category}
+              onChange={(event) =>
+                void save({
+                  ...item,
+                  category: event.target.value as IssuanceCategory,
+                })
+              }
+            >
+              <option>Uniform</option>
+              <option>Welcome Kit</option>
+              <option>Other</option>
+            </Select>
+            <Input
+              aria-label="Issuance item name"
+              disabled={!admin || saving}
+              defaultValue={item.name}
+              key={`${item.id}-${item.name}`}
+              onBlur={(event) => {
+                const name = event.target.value.trim();
+                if (name && name !== item.name) void save({ ...item, name });
+              }}
+            />
+            <label className="checkbox-row">
+              <input
+                type="checkbox"
+                disabled={!admin || saving}
+                checked={item.active}
+                onChange={(event) =>
+                  void save({ ...item, active: event.target.checked })
+                }
+              />
+              Active
+            </label>
+          </div>
+        ))}
+        {!items.length && (
+          <p className="muted">No issuance items configured yet.</p>
+        )}
+        <p className="fine-print">
+          Inactive items remain in history but no longer appear when HR records
+          a new issue.
+        </p>
+      </div>
+      {adding && (
+        <Modal
+          title="Add issuance item"
+          busy={saving}
+          onClose={() => setAdding(false)}
+        >
+          <form
+            className="form-stack"
+            onSubmit={async (event) => {
+              event.preventDefault();
+              const form = new FormData(event.currentTarget);
+              const item: IssuanceCatalogItem = {
+                id: crypto.randomUUID(),
+                category: form.get("category") as IssuanceCategory,
+                name: String(form.get("name") || "").trim(),
+                active: true,
+              };
+              if (!item.name) return;
+              if (
+                await update((workspace) => ({
+                  ...workspace,
+                  issuanceItems: [...(workspace.issuanceItems || []), item],
+                }))
+              )
+                setAdding(false);
+            }}
+          >
+            <Field label="Category">
+              <Select name="category" defaultValue="Uniform">
+                <option>Uniform</option>
+                <option>Welcome Kit</option>
+                <option>Other</option>
+              </Select>
+            </Field>
+            <Field label="Item name">
+              <Input name="name" required placeholder="Example: Polo Shirt" />
+            </Field>
+            <div className="modal-actions">
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => setAdding(false)}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" disabled={!admin || saving}>
+                Save item
+              </Button>
+            </div>
           </form>
         </Modal>
       )}

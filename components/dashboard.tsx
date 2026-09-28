@@ -20,6 +20,7 @@ import {
   TriangleAlert,
   Sun,
   Database,
+  PackageCheck,
 } from "lucide-react";
 import { useApp } from "./provider";
 import {
@@ -200,6 +201,20 @@ export function Dashboard() {
   ] as const;
   const upcoming = summary?.upcomingInterviews || [];
   const openNeeds = state.hiringNeeds.filter((need) => need.status === "Open");
+  const stockSummary = ["Uniform", "Welcome Kit", "Other"] as const;
+  const issuanceStock = stockSummary
+    .map((category) => {
+      const items = (state.issuanceInventory || []).filter(
+        (item) => item.category === category,
+      );
+      return {
+        category,
+        beginning: items.reduce((sum, item) => sum + item.beginning, 0),
+        issued: items.reduce((sum, item) => sum + item.issued, 0),
+        onHand: items.reduce((sum, item) => sum + item.onHand, 0),
+      };
+    })
+    .filter((summary) => summary.beginning || summary.issued || summary.onHand);
   const attention = [
     {
       title: "Applications awaiting review",
@@ -439,6 +454,31 @@ export function Dashboard() {
           )}
         </div>
         <div>
+          {issuanceStock.length > 0 && (
+            <Card className="home-stock-card">
+              <div className="card-heading">
+                <div>
+                  <h2>
+                    <PackageCheck size={18} /> Employee issuance stock
+                  </h2>
+                  <p>Current counts from the editable ON-HAND register.</p>
+                </div>
+                <Link className="text-link" href="/issuance">
+                  Open stock <ArrowUpRight size={16} />
+                </Link>
+              </div>
+              <div className="home-stock-list">
+                {issuanceStock.map((stock) => (
+                  <div key={stock.category}>
+                    <strong>{stock.category}</strong>
+                    <span>Beginning {stock.beginning}</span>
+                    <span>Out {stock.issued}</span>
+                    <b>{stock.onHand} on hand</b>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          )}
           {state.currentUser?.role === "Admin" && (
             <Card className="retention-card">
               {retention ? (

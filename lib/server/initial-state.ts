@@ -1,5 +1,17 @@
 import { defaultEmailTemplate } from "@/lib/email-templates";
 import type { AppState, User } from "@/types";
+
+export const defaultIssuanceItems = [
+  ["uniform-apron", "Uniform", "Apron"],
+  ["uniform-name-plate", "Uniform", "Name Plate"],
+  ["uniform-cap", "Uniform", "Cap"],
+  ["uniform-polo-shirt", "Uniform", "Polo Shirt"],
+  ["kit-tote-bag", "Welcome Kit", "Tote Bag"],
+  ["kit-notebook", "Welcome Kit", "Notebook"],
+  ["kit-ballpen", "Welcome Kit", "Ballpen"],
+  ["kit-uniform", "Welcome Kit", "Uniform"],
+  ["equipment-other", "Other", "Other equipment"],
+] as const;
 export function initialState(): AppState {
   const owner = process.env.GOOGLE_ALLOWED_EMAIL?.toLowerCase();
   const official =
@@ -28,6 +40,12 @@ export function initialState(): AppState {
     hiringNeeds: [],
     issuance: [],
     issuanceInventory: [],
+    issuanceItems: defaultIssuanceItems.map(([id, category, name]) => ({
+      id,
+      category,
+      name,
+      active: true,
+    })),
     notifications: [],
     importLimit: 100,
     importValidated: false,

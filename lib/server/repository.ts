@@ -21,7 +21,7 @@ import {
   putRecord,
   type Transaction,
 } from "./database";
-import { initialState } from "./initial-state";
+import { defaultIssuanceItems, initialState } from "./initial-state";
 import {
   DomainError,
   assertEditor,
@@ -50,6 +50,15 @@ export async function getState(tx: Transaction): Promise<AppState> {
     balanceIntakeWindow(stored.applications);
     if (!stored.issuance) stored.issuance = [];
     if (!stored.issuanceInventory) stored.issuanceInventory = [];
+    if (!stored.issuanceItems)
+      stored.issuanceItems = defaultIssuanceItems.map(
+        ([id, category, name]) => ({ id, category, name, active: true }),
+      );
+    // The imported source workbook is an issued-items register. Its historic
+    // released rows have signed acknowledgments, as confirmed by HR.
+    for (const record of stored.issuance)
+      if (record.source?.startsWith("Workbook upload:") && record.issuedAt)
+        record.signed = true;
     for (const name of ["Application Received", "Withdrawal"])
       if (!stored.emailTemplates.some((t) => t.name === name))
         stored.emailTemplates.push(defaultEmailTemplate(name));
@@ -125,6 +134,7 @@ export async function saveState(
     notifications: state.notifications,
     employee_issuance: state.issuance || [],
     issuance_inventory: state.issuanceInventory || [],
+    issuance_catalog: state.issuanceItems || [],
   })) {
     for (const record of records)
       await queue.query(
@@ -609,6 +619,7 @@ export async function updateState(
       next.locations || [],
       next.issuance || [],
       next.issuanceInventory || [],
+      next.issuanceItems || [],
     ]) {
       if (new Set(records.map((record) => record.id)).size !== records.length)
         throw new SafeError("Each workspace record must have a unique ID.");
@@ -677,6 +688,7 @@ export async function updateState(
         "importValidated",
         "intakeQuery",
         "intakePaused",
+        "issuanceItems",
       ] as const;
       const changesRealRecords = (
         ["applications", "hiringNeeds", "notifications"] as const

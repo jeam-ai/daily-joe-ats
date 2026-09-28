@@ -231,6 +231,12 @@ export interface IssuanceInventory {
   updatedAt: string;
   source?: string;
 }
+export interface IssuanceCatalogItem {
+  id: string;
+  category: IssuanceCategory;
+  name: string;
+  active: boolean;
+}
 export interface QualificationTemplate {
   rules?: QualificationRule[];
   id: string;
@@ -312,6 +318,7 @@ export interface AppState {
   notifications: Notification[];
   issuance?: IssuanceRecord[];
   issuanceInventory?: IssuanceInventory[];
+  issuanceItems?: IssuanceCatalogItem[];
   preferences: {
     compact: boolean;
     weekStartsMonday: boolean;

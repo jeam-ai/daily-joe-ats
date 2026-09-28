@@ -44,6 +44,7 @@ import {
   UsersSettings,
   LocationsSettings,
   QualificationsSettings,
+  IssuanceSettings,
   PreferencesSettings,
 } from "./soft-settings";
 const sections = [
@@ -54,6 +55,7 @@ const sections = [
   ["requirements", "Pre-employment Requirements", FileCheck2],
   ["email-templates", "Email Templates", Mail],
   ["locations", "Locations", ClipboardList],
+  ["issuance", "Employee Issuance", ClipboardList],
 
   ["integrations", "Gmail & Spreadsheet", Plug],
   ["ai", "AI Assist", Plug],
@@ -83,6 +85,7 @@ export function Settings({ section = "integrations" }: { section?: string }) {
       "requirements",
       "email-templates",
       "locations",
+      "issuance",
       "retention",
     ].includes(section);
   const template =
@@ -195,6 +198,7 @@ export function Settings({ section = "integrations" }: { section?: string }) {
               </Card>
             )}
             {section === "qualifications" && <QualificationsSettings />}
+            {section === "issuance" && <IssuanceSettings />}
             {section === "requirements" && (
               <Card>
                 <div className="card-heading">

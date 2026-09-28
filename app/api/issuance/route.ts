@@ -180,7 +180,9 @@ export async function importIssuanceWorkbook(file: File, actor: string) {
         status: receivedAt ? "Issued" : "Pending",
         issuedAt: issuedAt || undefined,
         receivedAt: receivedAt || undefined,
-        signed: false,
+        // The supplied issuance sheets represent items already released to
+        // employees. HR confirmed those releases have signed acknowledgments.
+        signed: !!issuedAt,
         source: `Workbook upload: ${file.name} / ${sheet.name}`,
         createdAt: now,
         updatedAt: now,
@@ -243,10 +245,23 @@ export async function importIssuanceWorkbook(file: File, actor: string) {
     );
   return transaction(async (tx) => {
     const state = await getState(tx);
-    const existing = new Set((state.issuance || []).map(sourceSignature));
+    const existing = new Map(
+      (state.issuance || []).map((record) => [sourceSignature(record), record]),
+    );
     const unique = records.filter(
       (record) => !existing.has(sourceSignature(record)),
     );
+    let acknowledgmentsMarked = 0;
+    const issuance = (state.issuance || []).map((record) => {
+      const imported = records.find(
+        (candidate) => sourceSignature(candidate) === sourceSignature(record),
+      );
+      if (imported?.signed && !record.signed) {
+        acknowledgmentsMarked++;
+        return { ...record, signed: true, updatedAt: now };
+      }
+      return record;
+    });
     const currentInventory = new Map(
       (state.issuanceInventory || []).map((record) => [
         stockKey(record),
@@ -268,9 +283,32 @@ export async function importIssuanceWorkbook(file: File, actor: string) {
         inventoryUpdated++;
       }
     }
-    if (unique.length || inventoryUpdated) {
-      state.issuance = [...(state.issuance || []), ...unique];
+    const catalog = [...(state.issuanceItems || [])];
+    const catalogKeys = new Set(
+      catalog.map((entry) => `${entry.category}|${entry.name}`.toLowerCase()),
+    );
+    let catalogAdded = 0;
+    for (const entry of [...records, ...inventory]) {
+      const key = `${entry.category}|${entry.item}`.toLowerCase();
+      if (catalogKeys.has(key)) continue;
+      catalog.push({
+        id: `issuance-item-${key.replaceAll(/[^a-z0-9]+/g, "-").replaceAll(/(^-|-$)/g, "")}`,
+        category: entry.category,
+        name: entry.item,
+        active: true,
+      });
+      catalogKeys.add(key);
+      catalogAdded++;
+    }
+    if (
+      unique.length ||
+      inventoryUpdated ||
+      acknowledgmentsMarked ||
+      catalogAdded
+    ) {
+      state.issuance = [...issuance, ...unique];
       state.issuanceInventory = [...currentInventory.values()];
+      state.issuanceItems = catalog;
       await saveState(tx, state, { sync: false });
     }
     await audit(tx, actor, "issuance.workbook_imported", undefined, {
@@ -278,6 +316,8 @@ export async function importIssuanceWorkbook(file: File, actor: string) {
       rowsImported: unique.length,
       duplicatesSkipped: records.length - unique.length,
       inventoryUpdated,
+      acknowledgmentsMarked,
+      catalogAdded,
       sheets: [...issuanceSheets, ...(onHandSheet ? [onHandSheet] : [])].map(
         (sheet) => sheet.name,
       ),
@@ -289,6 +329,8 @@ export async function importIssuanceWorkbook(file: File, actor: string) {
       created: unique.length,
       skipped: records.length - unique.length,
       inventoryUpdated,
+      acknowledgmentsMarked,
+      catalogAdded,
     };
   });
 }
