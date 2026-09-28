@@ -12,7 +12,6 @@ import { RetentionSettings } from "./retention-settings";
 import Link from "next/link";
 import { canManage } from "@/lib/data-policy";
 import { SystemSettings } from "./system-settings";
-import { SectionBoundary } from "./section-boundary";
 import { useState } from "react";
 import {
   UserRound,
@@ -166,9 +165,7 @@ export function Settings({ section = "integrations" }: { section?: string }) {
               </>
             )}
             {section === "integrations" && (
-              <SectionBoundary name="Integrations">
-                <GmailSettings />
-              </SectionBoundary>
+              <GmailSettings />
             )}
             {section === "account" && (
               <Card>

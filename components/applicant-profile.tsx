@@ -14,7 +14,6 @@ import { useRouter } from "next/navigation";
 import { canManage, canEdit } from "@/lib/data-policy";
 import { ApplicantEditor, DeleteApplicantDialog } from "./applicant-management";
 import { ActionMenu } from "./action-menu";
-import { SectionBoundary } from "./section-boundary";
 import {
   ArrowLeft,
   Mail,
@@ -652,9 +651,7 @@ export function ApplicantProfile({ id }: { id: string }) {
                         : "No resume yet"}
                   </Badge>
                 </div>
-                <SectionBoundary name="Resume">
-                  <ResumeViewer application={a} />
-                </SectionBoundary>
+                <ResumeViewer application={a} />
               </Card>
               <Card className="spaced">
                 <div className="card-heading">
@@ -928,9 +925,7 @@ export function ApplicantProfile({ id }: { id: string }) {
         </div>
         <aside>
           <ApplicantTools application={a} />
-          <SectionBoundary name="Communication">
-            <Communication application={a} />
-          </SectionBoundary>
+          <Communication application={a} />
           <Card className="decision-card">
             <div className="card-heading">
               <div>

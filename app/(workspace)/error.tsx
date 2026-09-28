@@ -3,14 +3,14 @@ import Link from "next/link";
 export default function Error({ reset }: { reset: () => void }) {
   return (
     <div className="empty" role="alert">
-      <h1>This section could not be loaded yet.</h1>
+      <h1>Workspace temporarily unavailable.</h1>
       <p>
-        Daily Joe Careers could not retrieve this section&apos;s latest saved
-        records. No records were changed.
+        Daily Joe Careers could not retrieve the latest saved workspace data.
+        No records were changed.
       </p>
       <div className="empty-actions">
         <button className="button primary" onClick={reset}>
-          Load section again
+          Retry workspace
         </button>
         <Link className="button secondary" href="/applications">
           Go to Applications

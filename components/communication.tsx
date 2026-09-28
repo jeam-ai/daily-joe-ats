@@ -39,12 +39,19 @@ export function Communication({
   const templates = state.emailTemplates;
   function choose(id: string) {
     setTemplate(id);
-    const t = templates.find((t) => t.id === id)!;
+    const t = templates.find((t) => t.id === id);
+    if (!t) {
+      setError(
+        "No email template is configured for this action. Add one in Settings before composing an applicant email.",
+      );
+      return false;
+    }
     if (!state?.currentUser) return;
     const rendered = renderEmail(t, emailContext(a, state, state.currentUser));
     setSubject(rendered.subject);
     setBody(rendered.body);
     setDraft(null);
+    return true;
   }
   async function act(action: string) {
     setBusy(true);
@@ -97,14 +104,19 @@ export function Communication({
             state.currentUser?.role === "Office Assistant"
           }
           onClick={() => {
-            choose(
+            setError("");
+            const selected =
               templates.find(
                 (t) =>
                   t.name === (a.status === "Rejected" ? "Rejection" : a.stage),
-              )?.id || templates[0].id,
-            );
-            setError("");
-            setOpen(true);
+              ) || templates[0];
+            if (!selected) {
+              setError(
+                "No email template is configured. Add one in Settings before composing an applicant email.",
+              );
+              return;
+            }
+            if (choose(selected.id)) setOpen(true);
           }}
         >
           Compose email

@@ -11,22 +11,22 @@ import {
 } from "../lib/locations";
 import type { Application } from "../types";
 
-test("report keeps 18 itemized operations and 2 office slots without inventing the printed missing slot", () => {
-  assert.equal(vacancyReport20260921.length, 17);
+test("report keeps 18 itemized operations and 3 office slots without inventing the printed missing slot", () => {
+  assert.equal(vacancyReport20260921.length, 18);
   assert.equal(
     vacancyReport20260921.slice(0, 15).reduce((sum, row) => sum + row[3], 0),
     18,
   );
   assert.equal(
     vacancyReport20260921.slice(15).reduce((sum, row) => sum + row[3], 0),
-    2,
+    3,
   );
   const state = initialState();
   const plan = planVacancyReportImport(state);
-  assert.equal(plan.needs.length, 17);
+  assert.equal(plan.needs.length, 18);
   assert.equal(
     plan.needs.reduce((sum, need) => sum + need.slots, 0),
-    20,
+    21,
   );
   assert.ok(plan.needs.every((need) => need.targetDate === "2026-10-15"));
   assert.ok(
