@@ -1,6 +1,5 @@
 import { requireOrigin, requireUser } from "@/lib/auth/session";
 import {
-  aivenConfigured,
   postgresConfigured,
   readTransaction,
   transaction,
@@ -58,13 +57,6 @@ export async function GET() {
         "SELECT COUNT(*) AS count FROM audit_logs WHERE occurred_at<$1",
         [activityCutoff],
       );
-      const connectionLimit = aivenConfigured()
-        ? String(
-            (
-              await tx.query("SELECT current_setting('max_connections') AS n")
-            )[0]?.n || "",
-          )
-        : "";
       const storage = postgresConfigured()
         ? Number(
             (
@@ -75,10 +67,12 @@ export async function GET() {
           )
         : null;
       const configuredLimit = Number(process.env.DB_STORAGE_LIMIT_BYTES || 0);
-      // Aiven's observed 20-connection default identifies its Free tier;
-      // use its documented 1 GiB allocation as a conservative fallback.
-      const limit =
-        configuredLimit || (connectionLimit === "20" ? 1024 ** 3 : null);
+      // PostgreSQL can measure this database's data size, but it cannot read
+      // the Aiven plan's total disk allocation. Do not infer a provider limit
+      // from connection settings: that created a misleading storage percent.
+      // A percentage is displayed only when the actual allocation is supplied
+      // through DB_STORAGE_LIMIT_BYTES.
+      const limit = configuredLimit > 0 ? configuredLimit : null;
       const percentage = storage !== null && limit ? storage / limit : null;
       const metrics = await tx.query(
         "SELECT month,metric,count FROM retention_cleanup_metrics WHERE month >= $1 ORDER BY month DESC,metric",
@@ -149,6 +143,7 @@ export async function GET() {
         timekeepingCutoffCount: timekeepingCount,
         storageBytes: storage,
         storageLimitBytes: limit,
+        storageCapacityConfigured: limit !== null,
         storagePercent:
           percentage === null ? null : Math.round(percentage * 100),
         storageLevel:

@@ -2103,12 +2103,17 @@ th,
   width: 34px;
   height: 34px;
   border-radius: 50%;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+  display: inline-grid;
+  place-items: center;
+  line-height: 0;
+  padding: 0;
   color: var(--accent);
   background: var(--info-bg);
   flex: 0 0 auto;
+}
+.mail-activity-icon > svg {
+  display: block;
+  margin: 0;
 }
 .recent-row small {
   display: block;
@@ -2273,6 +2278,24 @@ progress {
   padding: 0 22px;
   overflow-wrap: break-word;
 }
+.retention-storage-note {
+  color: var(--text-secondary);
+}
+.retention-loading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 260px;
+  padding: 22px;
+  color: var(--text-secondary);
+}
+.retention-loading div {
+  display: grid;
+  gap: 3px;
+}
+.retention-loading strong {
+  color: var(--text-primary);
+}
 .retention-inline {
   display: block;
   color: var(--warning);
@@ -2293,4 +2316,22 @@ progress {
 .retention-metrics strong {
   width: 100%;
   color: var(--ink);
+}
+.timekeeping-dashboard-context {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  margin-top: 10px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.timekeeping-dashboard-context .button {
+  min-height: 30px;
+  padding: 5px 9px;
+}
+.timekeeping-metric-filter[aria-pressed="true"],
+.timekeeping-secondary-metric[aria-pressed="true"] {
+  border-color: var(--info);
+  box-shadow: 0 0 0 3px var(--info-bg);
 }

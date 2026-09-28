@@ -14,7 +14,6 @@ import {
 } from "./intake";
 import { accessToken } from "./service";
 import {
-  aivenConfigured,
   postgresConfigured,
   retryableTransaction,
   readTransaction,
@@ -170,16 +169,11 @@ async function backfillStorageStatus() {
           await tx.query("SELECT pg_database_size(current_database()) AS bytes")
         )[0]?.bytes || 0,
       );
-      const connectionLimit = aivenConfigured()
-        ? String(
-            (
-              await tx.query("SELECT current_setting('max_connections') AS n")
-            )[0]?.n || "",
-          )
-        : "";
       const configuredLimit = Number(process.env.DB_STORAGE_LIMIT_BYTES || 0);
-      const limit =
-        configuredLimit || (connectionLimit === "20" ? 1024 ** 3 : 0);
+      // A PostgreSQL connection limit does not identify the Aiven storage
+      // allocation. Historical intake is only paused by an explicit, verified
+      // capacity value; newest intake always continues regardless.
+      const limit = configuredLimit > 0 ? configuredLimit : 0;
       return limit > 0 ? storage / limit : null;
     });
     return result !== null && result >= BACKFILL_STORAGE_WARNING

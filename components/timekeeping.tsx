@@ -233,6 +233,7 @@ export function Timekeeping() {
     [error, setError] = useState(""),
     [query, setQuery] = useState(""),
     [reviewFilter, setReviewFilter] = useState(""),
+    [reviewedOnly, setReviewedOnly] = useState(false),
     [resultFilter, setResultFilter] = useState(""),
     [dayFilter, setDayFilter] = useState(""),
     [department, setDepartment] = useState(""),
@@ -345,6 +346,7 @@ export function Timekeeping() {
         (r) =>
           (!query || r.employee.toLowerCase().includes(query.toLowerCase())) &&
           (!reviewFilter || r.review.status === reviewFilter) &&
+          (!reviewedOnly || r.review.status !== "For Review") &&
           (!resultFilter || r.results.includes(resultFilter)) &&
           (!dayFilter || r.date === dayFilter) &&
           (!department || r.department === department) &&
@@ -354,6 +356,7 @@ export function Timekeeping() {
       records,
       query,
       reviewFilter,
+      reviewedOnly,
       resultFilter,
       dayFilter,
       department,
@@ -378,17 +381,19 @@ export function Timekeeping() {
     (record) => record.review.status === "For Review",
   ).length;
   const resolvedCount = records.length - reviewCount;
+  const activeDashboardMetric = reviewFilter
+    ? reviewFilter === "For Review"
+      ? "review"
+      : ""
+    : reviewedOnly
+      ? "resolved"
+      : resultFilter;
   function filterMetric(filter: string) {
     setEmployee("");
     setPage(1);
     setResultFilter(filter === "review" || filter === "resolved" ? "" : filter);
-    setReviewFilter(
-      filter === "review"
-        ? "For Review"
-        : filter === "resolved"
-          ? "Resolved"
-          : "",
-    );
+    setReviewedOnly(filter === "resolved");
+    setReviewFilter(filter === "review" ? "For Review" : "");
   }
   if (dataset === "demo")
     return (
@@ -764,6 +769,17 @@ export function Timekeeping() {
                 {new Set(records.map(key)).size} employees · {records.length}{" "}
                 employee-days · Odoo remains the source record.
               </p>
+              <div className="timekeeping-dashboard-context">
+                <span>
+                  Showing {filtered.length} employee-day
+                  {filtered.length === 1 ? "" : "s"}
+                </span>
+                {activeDashboardMetric && (
+                  <Button variant="ghost" onClick={() => filterMetric("")}>
+                    Clear queue filter
+                  </Button>
+                )}
+              </div>
             </div>
             <div className="timekeeping-primary-metrics">
               {(
@@ -803,6 +819,7 @@ export function Timekeeping() {
                   className={`timekeeping-metric-filter ${tone}`}
                   key={label}
                   type="button"
+                  aria-pressed={activeDashboardMetric === filter}
                   onClick={() => filterMetric(filter)}
                   disabled={!value}
                   title={`Show ${label.toLowerCase()} records`}
@@ -858,6 +875,7 @@ export function Timekeeping() {
                     className="timekeeping-secondary-metric"
                     key={label}
                     type="button"
+                    aria-pressed={activeDashboardMetric === filter}
                     onClick={() => filterMetric(filter)}
                     disabled={!value}
                   >
@@ -922,7 +940,10 @@ export function Timekeeping() {
               <Field label="Calculated result">
                 <Select
                   value={resultFilter}
-                  onChange={(e) => setResultFilter(e.target.value)}
+                  onChange={(e) => {
+                    setResultFilter(e.target.value);
+                    setReviewedOnly(false);
+                  }}
                 >
                   <option value="">All results</option>
                   {[...new Set(records.flatMap((r) => r.results))]
@@ -935,7 +956,10 @@ export function Timekeeping() {
               <Field label="HR review status">
                 <Select
                   value={reviewFilter}
-                  onChange={(e) => setReviewFilter(e.target.value)}
+                  onChange={(e) => {
+                    setReviewFilter(e.target.value);
+                    setReviewedOnly(false);
+                  }}
                 >
                   <option value="">All reviews</option>
                   {reviewStatuses.map((s) => (

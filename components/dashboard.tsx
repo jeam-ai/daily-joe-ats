@@ -54,8 +54,18 @@ type RetentionSnapshot = {
   activityRecordsPending: number;
   storagePercent: number | null;
   storageLevel: string;
+  storageBytes: number | null;
+  storageLimitBytes: number | null;
+  storageCapacityConfigured: boolean;
   metrics: { month: string; metric: string; count: number }[];
 };
+
+function formatStorage(bytes: number | null) {
+  if (bytes === null) return "Database size unavailable";
+  if (bytes < 1024 ** 2) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  if (bytes < 1024 ** 3) return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
+  return `${(bytes / 1024 ** 3).toFixed(2)} GB`;
+}
 export function Dashboard() {
   const { state, dataset } = useApp();
   const [showAllNeeds, setShowAllNeeds] = useState(false);
@@ -407,81 +417,105 @@ export function Dashboard() {
           )}
         </div>
         <div>
-          {state.currentUser?.role === "Admin" && retention && (
+          {state.currentUser?.role === "Admin" && (
             <Card className="retention-card">
-              <div className="card-heading">
-                <div>
-                  <h2>
-                    <Database size={18} /> System Retention
-                  </h2>
-                  <p>
-                    {retention.dryRun
-                      ? "Dry run · no records are permanently deleted"
-                      : "Scheduled cleanup is active"}
+              {retention ? (
+                <>
+                  <div className="card-heading">
+                    <div>
+                      <h2>
+                        <Database size={18} /> System Retention
+                      </h2>
+                      <p>
+                        {retention.dryRun
+                          ? "Dry run · no records are permanently deleted"
+                          : "Scheduled cleanup is active"}
+                      </p>
+                    </div>
+                    {retention.storagePercent !== null ? (
+                      <Badge
+                        tone={
+                          retention.storageLevel === "critical"
+                            ? "red"
+                            : retention.storageLevel === "healthy"
+                              ? "green"
+                              : "orange"
+                        }
+                      >
+                        Database {retention.storagePercent}%
+                      </Badge>
+                    ) : (
+                      <Badge>
+                        Database {formatStorage(retention.storageBytes)}
+                      </Badge>
+                    )}
+                  </div>
+                  <div className="retention-summary">
+                    <div className="retention-summary-row">
+                      <strong>{retention.queue.retentionPending}</strong>
+                      <span>Applications outside live queue</span>
+                    </div>
+                    <div className="retention-summary-row">
+                      <strong>{retention.talentPoolExpiring}</strong>
+                      <span>Talent Pool records expiring soon</span>
+                    </div>
+                    <div className="retention-summary-row">
+                      <strong>
+                        {retention.hiringNeedsExpiring +
+                          retention.expiredHiringNeedsPending}
+                      </strong>
+                      <span>Hiring Needs due or in grace</span>
+                    </div>
+                    <div className="retention-summary-row">
+                      <strong>{retention.activityRecordsPending}</strong>
+                      <span>Activity records due for cleanup</span>
+                    </div>
+                  </div>
+                  <p className="fine-print">
+                    Live queue:{" "}
+                    {retention.queue.active + retention.queue.queued} · active
+                    HR view: {retention.queue.active}
                   </p>
+                  <p className="fine-print retention-storage-note">
+                    Database data: {formatStorage(retention.storageBytes)}
+                    {retention.storageCapacityConfigured
+                      ? ` of ${formatStorage(retention.storageLimitBytes)} configured Aiven capacity.`
+                      : ". Aiven disk capacity is not configured here, so no percentage is shown."}
+                  </p>
+                  {retention.queue.retentionAwaitingMarker > 0 && (
+                    <p className="fine-print">
+                      {retention.queue.retentionAwaitingMarker} outside-queue
+                      records await the next retention scan before their grace
+                      dates are set.
+                    </p>
+                  )}
+                  <div className="retention-metrics">
+                    <strong>Cleanup totals this month</strong>
+                    {retention.metrics
+                      .filter(
+                        (item) =>
+                          item.month === new Date().toISOString().slice(0, 7),
+                      )
+                      .map((item) => (
+                        <span key={item.metric}>
+                          {item.metric.replaceAll("_", " ")}: {item.count}
+                        </span>
+                      ))}
+                    {!retention.metrics.some(
+                      (item) =>
+                        item.month === new Date().toISOString().slice(0, 7),
+                    ) && <span>No cleanup actions recorded this month.</span>}
+                  </div>
+                </>
+              ) : (
+                <div className="retention-loading" role="status">
+                  <Database size={18} aria-hidden="true" />
+                  <div>
+                    <strong>System Retention</strong>
+                    <span>Loading retention health…</span>
+                  </div>
                 </div>
-                {retention.storagePercent !== null && (
-                  <Badge
-                    tone={
-                      retention.storageLevel === "critical"
-                        ? "red"
-                        : retention.storageLevel === "healthy"
-                          ? "green"
-                          : "orange"
-                    }
-                  >
-                    Storage {retention.storagePercent}%
-                  </Badge>
-                )}
-              </div>
-              <div className="retention-summary">
-                <div className="retention-summary-row">
-                  <strong>{retention.queue.retentionPending}</strong>
-                  <span>Applications outside live queue</span>
-                </div>
-                <div className="retention-summary-row">
-                  <strong>{retention.talentPoolExpiring}</strong>
-                  <span>Talent Pool records expiring soon</span>
-                </div>
-                <div className="retention-summary-row">
-                  <strong>
-                    {retention.hiringNeedsExpiring +
-                      retention.expiredHiringNeedsPending}
-                  </strong>
-                  <span>Hiring Needs due or in grace</span>
-                </div>
-                <div className="retention-summary-row">
-                  <strong>{retention.activityRecordsPending}</strong>
-                  <span>Activity records due for cleanup</span>
-                </div>
-              </div>
-              <p className="fine-print">
-                Live queue: {retention.queue.active + retention.queue.queued} ·
-                active HR view: {retention.queue.active}
-              </p>
-              {retention.queue.retentionAwaitingMarker > 0 && (
-                <p className="fine-print">
-                  {retention.queue.retentionAwaitingMarker} outside-queue
-                  records await the next dry-run retention scan before their
-                  grace dates are set.
-                </p>
               )}
-              <div className="retention-metrics">
-                <strong>Cleanup totals this month</strong>
-                {retention.metrics
-                  .filter(
-                    (item) =>
-                      item.month === new Date().toISOString().slice(0, 7),
-                  )
-                  .map((item) => (
-                    <span key={item.metric}>
-                      {item.metric.replaceAll("_", " ")}: {item.count}
-                    </span>
-                  ))}
-                {!retention.metrics.some(
-                  (item) => item.month === new Date().toISOString().slice(0, 7),
-                ) && <span>No cleanup actions recorded this month.</span>}
-              </div>
             </Card>
           )}
           <Card className="attention-card">
