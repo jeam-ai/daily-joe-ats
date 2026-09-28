@@ -33,7 +33,8 @@ import {
 
 export function sampleQualifications(): QualificationTemplate[] {
   return [...baselineQualificationTemplates(), "Other"].map((template) => {
-    const position = typeof template === "string" ? template : template.position;
+    const position =
+      typeof template === "string" ? template : template.position;
     if (typeof template !== "string") return template;
     const labels =
       position === "Barista"
@@ -235,6 +236,9 @@ export async function enrichApplicants(user: User, ids: string[]) {
         locations: snapshot.locations
           ?.filter((location) => location.active)
           .map((location) => location.name),
+        locationDetails: snapshot.locations?.filter(
+          (location) => location.active,
+        ),
       }),
       before: a,
     });

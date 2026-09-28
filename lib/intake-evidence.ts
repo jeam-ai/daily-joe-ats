@@ -1,7 +1,8 @@
 import { formalName, plausiblePersonName } from "./names";
 import { formalFact } from "./formal-facts";
 import { senderName } from "./intake-matching";
-import { canonicalLocationName } from "./locations";
+import { canonicalLocationName, nearbyConfiguredBranch } from "./locations";
+import type { Location } from "@/types";
 export interface IntakeEvidence {
   name: string;
   position: string;
@@ -69,6 +70,8 @@ export function intakeEvidence(input: {
   from?: string;
   positions?: string[];
   locations?: string[];
+  /** Active configured locations provide city-level nearby branch matching. */
+  locationDetails?: Pick<Location, "name" | "city" | "province" | "active">[];
 }): IntakeEvidence {
   const subject = input.subject.slice(0, 500),
     body = input.body || "",
@@ -260,7 +263,8 @@ export function intakeEvidence(input: {
         l.split(/\s+/).length <= 5 &&
         !/resume|curriculum|vitae|address|contact|profile|personal|information|experience|education|skills|objective|university|college|school|bachelor|barista|cashier|supervisor|leader|accounting|analyst|manager|staff|assistant|engineer|developer|administrator|intern|clerk|officer|executive|representative|specialist|recruitment|human resources|street|barangay|camarines|philippines|city|summary|references|career|history|employment|certification|achievement|to obtain|seeking|applying|dear|thank you|place of birth|single/i.test(
           l,
-        ) && !genericProfileName(l),
+        ) &&
+        !genericProfileName(l),
     );
   const explicitResumeName = named(resume);
   const resumeName = explicitResumeName || headingName;
@@ -295,7 +299,8 @@ export function intakeEvidence(input: {
       ? `${lines[index]} ${lines[index + 1] || ""}`
       : lines[index];
   const addressIsSafe = (line: string) =>
-    (addressPattern.test(line) || (addressCue.test(line) && localityCue.test(line))) &&
+    (addressPattern.test(line) ||
+      (addressCue.test(line) && localityCue.test(line))) &&
     !/@|(?:school|university|college|company|office|career\s+objective|profile|experience|skills?|processed\s+(?:cash|card|digital)|customer\s+service)/i.test(
       line,
     );
@@ -372,26 +377,20 @@ export function intakeEvidence(input: {
   // safely pre-fill the separate assigned-branch field when it contains one
   // and only one currently configured location. This never overwrites an HR
   // assignment and keeps the preferred-location field evidence-pure.
-  const configuredResidenceLocations = [
-    ...new Set(
-      (input.locations || [])
-        .map(canonicalLocationName)
-        .filter((name) => name && name !== "Other"),
-    ),
-  ];
-  const residenceLocationMatches =
-    residence === "Not verified"
-      ? []
-      : configuredResidenceLocations.filter((name) =>
-          new RegExp(
-            `(?<![\\p{L}\\p{N}])${name
-              .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-              .replace(/\s+/g, "\\s+")}(?![\\p{L}\\p{N}])`,
-            "iu",
-          ).test(residence),
-        );
-  const residenceLocation =
-    residenceLocationMatches.length === 1 ? residenceLocationMatches[0] : "";
+  const configuredResidenceLocations = input.locationDetails?.length
+    ? input.locationDetails
+        .filter((location) => location.active && location.name !== "Other")
+        .map((location) => ({
+          ...location,
+          name: canonicalLocationName(location.name),
+        }))
+    : [...new Set((input.locations || []).map(canonicalLocationName))]
+        .filter((name) => name && name !== "Other")
+        .map((name) => ({ name, city: "", province: "", active: true }));
+  const residenceLocation = nearbyConfiguredBranch(
+    residence,
+    configuredResidenceLocations,
+  );
   if (residenceLocation) {
     evidence.assignedBranch = `Residence matched configured location: ${residenceLocation}.`;
     provenance.assignedBranch = "Residence match";
@@ -493,7 +492,8 @@ export function intakeEvidence(input: {
         .map((line) => line.trim().replace(/^[-–•]\s*/, ""))
         .filter(Boolean);
       const start = lines.findIndex(
-        (line) => educationHeading.test(line) || educationLevelHeading.test(line),
+        (line) =>
+          educationHeading.test(line) || educationLevelHeading.test(line),
       );
       if (start < 0) return { values: [] as string[], source: document.source };
       const values: string[] = [];
@@ -512,16 +512,27 @@ export function intakeEvidence(input: {
             if (sectionBoundary.test(next) || educationPeriod.test(next)) break;
             if (institution.test(next) && after.length) break;
             if (degree.test(next)) after.push(next);
-            else if (!after.length && /\b(?:major|strand|speciali[sz]ation)\b/i.test(next)) after.push(next);
+            else if (
+              !after.length &&
+              /\b(?:major|strand|speciali[sz]ation)\b/i.test(next)
+            )
+              after.push(next);
           }
-          const details = [...new Set([...beforePeriod, ...after])]
-            .filter((item) => institution.test(item) || degree.test(item) || /\b(?:major|strand|speciali[sz]ation)\b/i.test(item));
-          if (details.length)
-            values.push(`${details.join(" · ")} — ${line}`);
+          const details = [...new Set([...beforePeriod, ...after])].filter(
+            (item) =>
+              institution.test(item) ||
+              degree.test(item) ||
+              /\b(?:major|strand|speciali[sz]ation)\b/i.test(item),
+          );
+          if (details.length) values.push(`${details.join(" · ")} — ${line}`);
           beforePeriod = [];
           continue;
         }
-        if (institution.test(line) || degree.test(line) || /\b(?:major|strand|speciali[sz]ation)\b/i.test(line))
+        if (
+          institution.test(line) ||
+          degree.test(line) ||
+          /\b(?:major|strand|speciali[sz]ation)\b/i.test(line)
+        )
           beforePeriod.push(line);
       }
       return { values, source: document.source };
@@ -560,7 +571,9 @@ export function intakeEvidence(input: {
   );
   const educationCandidates = [
     ...(educationTimeline?.values || []),
-    ...(educationTimeline?.values.length ? [] : structuredEducation?.values || []),
+    ...(educationTimeline?.values.length
+      ? []
+      : structuredEducation?.values || []),
     ...(educationTimeline?.values.length || structuredEducation?.values.length
       ? []
       : educationSection.values.filter((line) => educationTerms.test(line))),
@@ -579,7 +592,11 @@ export function intakeEvidence(input: {
       return true;
     })
     .slice(0, 5)
-    .join(educationTimeline?.values.length || structuredEducation?.values.length ? "\n" : " · ")
+    .join(
+      educationTimeline?.values.length || structuredEducation?.values.length
+        ? "\n"
+        : " · ",
+    )
     .slice(0, 600);
   const availabilityMatch = firstMatch(
     new RegExp(`(?:^|\\n)\\s*[^\\n]*${availabilityPattern.source}[^\\n]*`, "i"),

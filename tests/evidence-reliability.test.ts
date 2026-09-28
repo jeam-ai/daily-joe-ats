@@ -158,6 +158,47 @@ test("a configured location in a residence auto-assigns only an empty branch", (
   });
   assert.equal(santaRosa.residenceLocation, "Santa Rosa, Laguna");
 });
+
+test("configured branch geography recognizes nearby residences without guessing a shared city", () => {
+  const locations = [
+    {
+      name: "Washington",
+      city: "Legazpi City",
+      province: "Albay",
+      active: true,
+    },
+    {
+      name: "Legazpi",
+      city: "Legazpi City",
+      province: "Albay",
+      active: true,
+    },
+    {
+      name: "Tagapo",
+      city: "Santa Rosa",
+      province: "Laguna",
+      active: true,
+    },
+  ];
+  assert.equal(
+    intakeEvidence({
+      subject: "Application for Barista",
+      locations: locations.map((location) => location.name),
+      locationDetails: locations,
+      resume: "Address: Barangay 16, Kawit East, Legazpi City, Albay",
+    }).residenceLocation,
+    "Washington",
+  );
+  assert.equal(
+    intakeEvidence({
+      subject: "Application for Barista",
+      locations: locations.map((location) => location.name),
+      locationDetails: locations,
+      resume: "Address: Barangay Tagapo, Santa Rosa, Laguna",
+    }).residenceLocation,
+    "Tagapo",
+  );
+});
 test("built-in resume sections recover skills and job history without AI", () => {
   const result = intakeEvidence({
     subject: "Job application",
@@ -484,7 +525,11 @@ test("missing baseline templates are repaired before applicant evidence is scree
     (template) => template.position === "Barista",
   );
   assert.equal(barista?.rules?.length, 4);
-  assert.ok(state.locations.some((location) => location.name === "General Trias, Cavite"));
+  assert.ok(
+    state.locations.some(
+      (location) => location.name === "General Trias, Cavite",
+    ),
+  );
 });
 
 test("legacy subject-gated Gmail filters are upgraded so labelled no-subject applications are included", () => {

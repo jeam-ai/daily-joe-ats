@@ -1,6 +1,6 @@
 "use client";
 import { clientFetch, requestJson } from "@/lib/client-request";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { User, Location, QualificationRule } from "@/types";
 import { useApp } from "./provider";
 import { Button, Card, Field, Input, Select, Modal, Badge } from "./ui";
@@ -155,8 +155,31 @@ export function UsersSettings() {
   );
 }
 export function LocationsSettings() {
-  const { state, update, saving } = useApp();
+  const { state, update, saving, refresh, notify, dataset } = useApp();
   const [editing, setEditing] = useState<Location | null>(null);
+  const geographySynced = useRef(false);
+  useEffect(() => {
+    if (
+      geographySynced.current ||
+      dataset !== "real" ||
+      state?.currentUser?.role !== "Admin"
+    )
+      return;
+    geographySynced.current = true;
+    void requestJson<{ updated: number }>("/api/system", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "normalize-locations" }),
+    })
+      .then(async ({ updated }) => {
+        if (!updated) return;
+        await refresh();
+        notify(
+          `Branch geography updated; ${updated} location and assignment records refreshed.`,
+        );
+      })
+      .catch(() => undefined);
+  }, [dataset, notify, refresh, state?.currentUser?.role]);
   if (!state) return null;
   return (
     <Card>
@@ -178,6 +201,11 @@ export function LocationsSettings() {
         </Button>
       </div>
       <div className="padded">
+        <p className="fine-print">
+          Branch city and province are verified from the official branch
+          directory. Nearby residence matching assigns an unassigned branch only
+          when one branch is unambiguous; HR assignments are preserved.
+        </p>
         {state.locations?.map((l) => (
           <div className="permission-row" key={l.id}>
             <div>

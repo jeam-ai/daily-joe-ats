@@ -282,6 +282,9 @@ export async function previewImport(
           locations: state.locations
             ?.filter((location) => location.active)
             .map((location) => location.name),
+          locationDetails: state.locations?.filter(
+            (location) => location.active,
+          ),
         });
         rows.push({
           messageId: message.id,
@@ -411,6 +414,9 @@ export async function previewImport(
           locations: state.locations
             ?.filter((location) => location.active)
             .map((location) => location.name),
+          locationDetails: state.locations?.filter(
+            (location) => location.active,
+          ),
         });
         rows.push({
           messageId: message.id,
@@ -615,6 +621,9 @@ export async function confirmImport(
           locations: state.locations
             ?.filter((location) => location.active)
             .map((location) => location.name),
+          locationDetails: state.locations?.filter(
+            (location) => location.active,
+          ),
         });
       const a: Application = {
         id: applicationId,

@@ -5,7 +5,10 @@ import {
   vacancyReport20260921,
 } from "../lib/vacancy-report";
 import { initialState } from "../lib/server/initial-state";
-import { canonicalizeStoredLocations } from "../lib/locations";
+import {
+  canonicalizeStoredLocations,
+  nearbyConfiguredBranch,
+} from "../lib/locations";
 import type { Application } from "../types";
 
 test("report keeps 18 itemized operations and 2 office slots without inventing the printed missing slot", () => {
@@ -65,4 +68,96 @@ test("the previous Gen. Tri label becomes General Trias without duplicate vacanc
   assert.equal(state.applications[0].location, "General Trias");
   assert.equal(state.applications[0].assignedBranch, "General Trias");
   assert.equal(canonicalizeStoredLocations(state), 0);
+});
+
+test("branch geography separates Daet and Sipocot and assigns only clear nearby residences", () => {
+  const state = initialState();
+  state.locations = [
+    {
+      id: "tagapo",
+      name: "Tagapo",
+      city: "",
+      province: "",
+      active: true,
+    },
+    {
+      id: "washington",
+      name: "Washington",
+      city: "",
+      province: "",
+      active: true,
+    },
+    {
+      id: "legazpi",
+      name: "Legazpi",
+      city: "",
+      province: "",
+      active: true,
+    },
+    {
+      id: "daet-sipocot",
+      name: "Daet & Sipocot",
+      city: "",
+      province: "",
+      active: true,
+    },
+  ];
+  state.hiringNeeds.push({
+    id: "area-supervisor-daet-sipocot",
+    position: "Area Supervisor",
+    location: "Daet & Sipocot",
+    slots: 1,
+    filled: 0,
+    urgency: "High",
+    targetDate: "2026-10-15",
+    status: "Open",
+    qualifications: "",
+    questions: "",
+  });
+  state.applications.push({
+    applicant: { location: "Brgy. Tagapo, Santa Rosa, Laguna" },
+    assignedBranch: "",
+  } as Application);
+  assert.ok(canonicalizeStoredLocations(state) > 0);
+  assert.deepEqual(
+    state.locations?.find((location) => location.name === "Washington"),
+    {
+      id: "washington",
+      name: "Washington",
+      city: "Legazpi City",
+      province: "Albay",
+      active: true,
+    },
+  );
+  assert.ok(state.locations?.some((location) => location.name === "Daet"));
+  assert.ok(state.locations?.some((location) => location.name === "Sipocot"));
+  assert.equal(
+    state.hiringNeeds.find((need) => need.id === "area-supervisor-daet-sipocot")
+      ?.location,
+    "Daet",
+  );
+  assert.equal(
+    state.hiringNeeds.find(
+      (need) => need.id === "area-supervisor-daet-sipocot-sipocot",
+    )?.status,
+    "Open",
+  );
+  assert.equal(
+    state.hiringNeeds.find(
+      (need) => need.id === "area-supervisor-daet-sipocot-sipocot",
+    )?.targetDate,
+    "2026-10-15",
+  );
+  assert.equal(state.applications[0].assignedBranch, "Tagapo");
+  assert.equal(
+    nearbyConfiguredBranch(
+      "Barangay 16, Kawit East, Legazpi City, Albay",
+      state.locations!,
+    ),
+    "Washington",
+  );
+  assert.equal(
+    nearbyConfiguredBranch("Old Albay, Legazpi City, Albay", state.locations!),
+    "Legazpi",
+  );
 });

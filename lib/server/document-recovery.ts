@@ -125,6 +125,9 @@ export async function refreshStoredEvidenceBatch(limit = 25, onlyId?: string) {
           resume: text,
           positions,
           locations,
+          locationDetails: state.locations?.filter(
+            (location) => location.active,
+          ),
         }),
       );
       if (
@@ -184,9 +187,15 @@ export async function refreshStoredEvidenceBatch(limit = 25, onlyId?: string) {
         correctedReferences: normalized,
       });
     if (configured)
-      await audit(tx, "System", "settings.recruitment_configuration_repaired", undefined, {
-        updated: configured,
-      });
+      await audit(
+        tx,
+        "System",
+        "settings.recruitment_configuration_repaired",
+        undefined,
+        {
+          updated: configured,
+        },
+      );
     if (updated || configured) await saveState(tx, state, { sync: false });
     return { examined: candidates.length, updated };
   });
@@ -233,6 +242,7 @@ export async function recoverApplicationDocument(
       locations: state.locations
         ?.filter((location) => location.active)
         .map((location) => location.name),
+      locationDetails: state.locations?.filter((location) => location.active),
     };
   });
   await transaction((tx) =>
@@ -259,6 +269,7 @@ export async function recoverApplicationDocument(
     resume: document.text,
     positions: snapshot.positions,
     locations: snapshot.locations,
+    locationDetails: snapshot.locationDetails,
   });
   await transaction(async (tx) => {
     const state = await getState(tx);

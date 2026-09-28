@@ -12,6 +12,8 @@ import { diagnosticHistory, markDiagnostic } from "@/lib/server/diagnostics";
 import { SafeError, demoEnabled } from "@/lib/server/config";
 import { safeError } from "@/lib/server/response";
 import { transaction } from "@/lib/server/database";
+import { getState, saveState, audit } from "@/lib/server/repository";
+import { canonicalizeStoredLocations } from "@/lib/locations";
 import { controlledTestApplicant } from "@/lib/server/demo";
 import {
   installSampleConfiguration,
@@ -78,6 +80,27 @@ export async function POST(request: Request) {
     }
     if (body.action === "sample-config")
       return Response.json(await installSampleConfiguration(user));
+    if (body.action === "normalize-locations") {
+      const result = await transaction(async (tx) => {
+        const state = await getState(tx);
+        const updated = canonicalizeStoredLocations(state);
+        if (updated) {
+          await saveState(tx, state, { sync: false });
+          await audit(
+            tx,
+            user.email,
+            "locations.geography_normalized",
+            undefined,
+            {
+              updated,
+              source: "Official branch geography",
+            },
+          );
+        }
+        return { updated };
+      });
+      return Response.json(result);
+    }
     if (
       body.action === "enrich" &&
       Array.isArray(body.ids) &&
