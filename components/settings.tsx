@@ -89,15 +89,15 @@ export function Settings({ section = "integrations" }: { section?: string }) {
     state.emailTemplates.find((t) => t.id === selected) ||
     state.emailTemplates[0];
   return (
-    <>
-      <div className="page-heading">
+    <div className="workspace-page settings-page">
+      <div className="page-heading workspace-page-heading">
         <div>
           <div className="eyebrow">MAKE IT WORK FOR YOUR TEAM</div>
           <h1>Settings</h1>
           <p>A well-organized workspace for thoughtful hiring.</p>
         </div>
       </div>
-      <div className="settings-layout">
+      <div className="settings-layout settings-workspace-layout">
         <nav className="settings-nav" aria-label="Settings sections">
           {sections.map(([slug, label, Icon]) => (
             <div key={slug}>
@@ -137,7 +137,7 @@ export function Settings({ section = "integrations" }: { section?: string }) {
             </div>
           ))}
         </nav>
-        <div className="settings-content">
+        <div className="settings-content settings-workspace-content">
           {demoReadOnly && (
             <p className="info-banner">
               These settings apply to real recruitment. Exit Demo to edit them.
@@ -444,6 +444,6 @@ export function Settings({ section = "integrations" }: { section?: string }) {
           </div>
         </Modal>
       )}
-    </>
+    </div>
   );
 }

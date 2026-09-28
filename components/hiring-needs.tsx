@@ -126,8 +126,8 @@ export function HiringNeeds() {
     }
   }
   return (
-    <>
-      <div className="page-heading">
+    <div className="workspace-page hiring-needs-page">
+      <div className="page-heading workspace-page-heading">
         <div>
           <div className="eyebrow">MAKE ROOM FOR GREAT PEOPLE</div>
           <h1>Hiring Needs</h1>
@@ -162,7 +162,10 @@ export function HiringNeeds() {
           </Button>
         </div>
       </div>
-      <div className="metrics-grid vacancy-metrics" aria-label="Vacancy report">
+      <div
+        className="metrics-grid vacancy-metrics hiring-needs-summary"
+        aria-label="Vacancy report"
+      >
         <MetricCard
           label="Open vacancies"
           value={vacancies}
@@ -196,7 +199,7 @@ export function HiringNeeds() {
           tone="metric-interviews"
         />
       </div>
-      <div className="section-heading">
+      <div className="section-heading workspace-section-toolbar">
         <h2>{rows.length} hiring requests</h2>
         <Select
           aria-label="Hiring need status"
@@ -210,8 +213,8 @@ export function HiringNeeds() {
       </div>
       <div className="needs-grid">
         {rows.map((n) => (
-          <Card key={n.id} className="need-card">
-            <div className="section-heading">
+          <Card key={n.id} className="need-card hiring-need-card">
+            <div className="section-heading need-card-top">
               <span className="job-icon">
                 <UsersRound size={24} />
               </span>
@@ -279,17 +282,25 @@ export function HiringNeeds() {
                 </p>
               );
             })()}
-            <ul>
-              {n.criteria?.map((r) => (
-                <li key={r.id}>
-                  {r.label} · {r.kind}
-                </li>
-              ))}
-            </ul>
-            <Link className="text-link" href={`/applications?need=${n.id}`}>
-              View associated applicants →
-            </Link>
-            <div className="section-heading">
+            {(n.criteria?.length || 0) > 0 && (
+              <details className="need-criteria">
+                <summary>
+                  {n.criteria!.length} qualification
+                  {n.criteria!.length === 1 ? "" : "s"} configured
+                </summary>
+                <ul>
+                  {n.criteria?.map((r) => (
+                    <li key={r.id}>
+                      {r.label} · {r.kind}
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            )}
+            <div className="need-card-footer">
+              <Link className="text-link" href={`/applications?need=${n.id}`}>
+                View associated applicants →
+              </Link>
               <Badge>{n.status}</Badge>
               {n.id.startsWith("sample-need-") && (
                 <Badge tone="amber">Sample configuration</Badge>
@@ -467,6 +478,6 @@ export function HiringNeeds() {
           </div>
         </Modal>
       )}
-    </>
+    </div>
   );
 }

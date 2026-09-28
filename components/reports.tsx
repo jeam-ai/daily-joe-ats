@@ -73,8 +73,8 @@ export function Reports() {
     count,
   }));
   return (
-    <>
-      <div className="page-heading">
+    <div className="workspace-page reports-page">
+      <div className="page-heading workspace-page-heading">
         <div>
           <div className="eyebrow">THE BIGGER PICTURE</div>
           <h1>Reports</h1>
@@ -119,7 +119,7 @@ export function Reports() {
         />
       ) : (
         <>
-          <div className="report-metrics">
+          <div className="report-metrics reports-summary">
             {[
               [
                 range === "all"
@@ -147,7 +147,7 @@ export function Reports() {
             })}
           </div>
           <div className="reports-grid">
-            <Card className="padded">
+            <Card className="padded report-panel report-panel-featured">
               <div className="section-heading">
                 <h2>Applications by month</h2>
                 <Badge>
@@ -174,7 +174,7 @@ export function Reports() {
                 ))}
               </div>
             </Card>
-            <Card className="padded">
+            <Card className="padded report-panel">
               <h2>Screening outcomes</h2>
               {["Meets Criteria", "Requires Review", "Criteria Not Met"].map(
                 (s, i) => {
@@ -208,7 +208,7 @@ export function Reports() {
                 const visible =
                   expandable && !expanded ? buckets.slice(0, 5) : buckets;
                 return (
-                  <Card className="padded" key={key}>
+                  <Card className="padded report-panel" key={key}>
                     <h2>
                       {key === "stage"
                         ? "Interview & recruitment pipeline"
@@ -254,6 +254,6 @@ export function Reports() {
         </>
       )}
       {data && data.total > 0 && <ReportDetails data={data} />}
-    </>
+    </div>
   );
 }

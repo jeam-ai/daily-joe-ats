@@ -168,7 +168,7 @@ export function Applications({ talent = false }: { talent?: boolean }) {
 
   return (
     <>
-      <div className="page-heading">
+      <div className={`page-heading ${talent ? "talent-pool-heading" : ""}`}>
         <div>
           <div className="eyebrow">
             {talent ? "KEEP THE CONNECTION" : "PEOPLE & POSSIBILITIES"}
@@ -219,7 +219,9 @@ export function Applications({ talent = false }: { talent?: boolean }) {
           </Button>
         </div>
       </div>
-      <Card className="workspace-card">
+      <Card
+        className={`workspace-card ${talent ? "talent-pool-workspace" : ""}`}
+      >
         {state.intakePaused && dataset === "real" && (
           <p className="warning-banner">
             Gmail intake is paused for this fresh workspace. When you are ready,
