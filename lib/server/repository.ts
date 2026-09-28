@@ -48,6 +48,8 @@ export async function getState(tx: Transaction): Promise<AppState> {
     if (a.source === "Demo") a.isDemo = true;
   if (stored) {
     balanceIntakeWindow(stored.applications);
+    if (!stored.issuance) stored.issuance = [];
+    if (!stored.issuanceInventory) stored.issuanceInventory = [];
     for (const name of ["Application Received", "Withdrawal"])
       if (!stored.emailTemplates.some((t) => t.name === name))
         stored.emailTemplates.push(defaultEmailTemplate(name));
@@ -121,6 +123,8 @@ export async function saveState(
     requirements: state.requirementTemplates,
     locations: state.locations || [],
     notifications: state.notifications,
+    employee_issuance: state.issuance || [],
+    issuance_inventory: state.issuanceInventory || [],
   })) {
     for (const record of records)
       await queue.query(
@@ -603,6 +607,8 @@ export async function updateState(
       next.requirementTemplates,
       next.emailTemplates,
       next.locations || [],
+      next.issuance || [],
+      next.issuanceInventory || [],
     ]) {
       if (new Set(records.map((record) => record.id)).size !== records.length)
         throw new SafeError("Each workspace record must have a unique ID.");
@@ -729,6 +735,14 @@ export async function updateState(
         changed(before.hiringNeeds, next.hiringNeeds)
       )
         assertEditor(user);
+      if (changed(before.issuance || [], next.issuance || []))
+        throw new DomainError(
+          "Use Employee Issuance to update uniform and welcome kit records.",
+        );
+      if (changed(before.issuanceInventory || [], next.issuanceInventory || []))
+        throw new DomainError(
+          "Use Employee Issuance to update on-hand inventory.",
+        );
       if (changed(before.users, next.users)) {
         if (!confirmed) throw new DomainError("Confirm user access changes.");
         if (

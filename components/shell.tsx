@@ -20,6 +20,7 @@ import {
   ArrowUpRight,
   LogOut,
   Clock3,
+  PackageCheck,
   X,
   Mail,
 } from "lucide-react";
@@ -33,6 +34,7 @@ const navigation = [
   ["Hiring Needs", "/hiring-needs", BriefcaseBusiness],
   ["Talent Pool", "/talent-pool", Bookmark],
   ["Timekeeping", "/timekeeping", Clock3],
+  ["Employee Issuance", "/issuance", PackageCheck],
   ["Reports", "/reports", ChartNoAxesCombined],
   ["Settings", "/settings", Settings],
 ] as const;

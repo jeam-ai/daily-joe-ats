@@ -34,6 +34,17 @@ import type { QualificationRule } from "@/types";
 import { canManage } from "@/lib/data-policy";
 import { planVacancyReportImport } from "@/lib/vacancy-report";
 import { clientFetch } from "@/lib/client-request";
+
+function operationalUrgency(need: HiringNeed) {
+  if (need.status !== "Open") return need.urgency;
+  const daysToTarget = Math.ceil(
+    (Date.parse(need.targetDate) - Date.now()) / 86400000,
+  );
+  if (!Number.isFinite(daysToTarget)) return need.urgency;
+  if (daysToTarget <= 0) return "Urgent";
+  if (daysToTarget <= 7 && need.urgency !== "Urgent") return "High";
+  return need.urgency;
+}
 export function HiringNeeds() {
   const { state, update, notify, refresh, saving, dataset } = useApp();
   const params = useSearchParams();
@@ -78,6 +89,11 @@ export function HiringNeeds() {
     const need: HiringNeed = {
       id: existing?.id || crypto.randomUUID(),
       isDemo: existing?.isDemo,
+      openedAt: String(data.get("openedAt") || "")
+        ? new Date(
+            `${String(data.get("openedAt"))}T00:00:00.000Z`,
+          ).toISOString()
+        : existing?.openedAt || new Date().toISOString(),
       position: String(data.get("position")),
       location: String(data.get("location")),
       slots: Number(data.get("slots")),
@@ -227,7 +243,9 @@ export function HiringNeeds() {
               <span className="job-icon">
                 <UsersRound size={24} />
               </span>
-              <StatusBadge status={n.urgency} />
+              <span title="Urgency is raised automatically when an open target is due within seven days or overdue.">
+                <StatusBadge status={operationalUrgency(n)} />
+              </span>
             </div>
             <h2>
               {n.isDemo ? "DEMO — " : ""}
@@ -237,6 +255,24 @@ export function HiringNeeds() {
               <MapPin size={15} />
               {n.location}
             </p>
+            {n.status === "Open" && (
+              <p className="need-days-open">
+                {n.openedAt
+                  ? (() => {
+                      const parsedOpenedAt = Date.parse(n.openedAt);
+                      if (!Number.isFinite(parsedOpenedAt))
+                        return "Open date not recorded";
+                      const days = Math.max(
+                        0,
+                        Math.floor((Date.now() - parsedOpenedAt) / 86400000),
+                      );
+                      return days
+                        ? `Open for ${days} day${days === 1 ? "" : "s"}`
+                        : "Opened today";
+                    })()
+                  : "Open date not recorded"}
+              </p>
+            )}
             <div className="need-numbers">
               <div>
                 <strong>{Math.max(0, n.slots - n.filled)}</strong>
@@ -403,6 +439,13 @@ export function HiringNeeds() {
                   name="date"
                   required
                   defaultValue={existing?.targetDate}
+                />
+              </Field>
+              <Field label="Opened on">
+                <Input
+                  type="date"
+                  name="openedAt"
+                  defaultValue={existing?.openedAt?.slice(0, 10) || ""}
                 />
               </Field>
               <Field label="Status">

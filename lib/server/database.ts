@@ -122,6 +122,8 @@ const schema = [
     "email_templates",
     "locations",
     "notifications",
+    "employee_issuance",
+    "issuance_inventory",
   ].map(
     (name) =>
       `CREATE TABLE IF NOT EXISTS ${name} (id TEXT PRIMARY KEY, payload TEXT NOT NULL)`,
@@ -166,7 +168,8 @@ async function databaseTransaction<T>(
         // 20 total connections, so one idle connection per instance is safer
         // than multiplying a 2-client pool by concurrent route instances.
         max: process.env.VERCEL ? 1 : 5,
-        idleTimeoutMillis: process.env.VERCEL && aiven ? 1 : process.env.VERCEL ? 1000 : 10000,
+        idleTimeoutMillis:
+          process.env.VERCEL && aiven ? 1 : process.env.VERCEL ? 1000 : 10000,
         maxUses: process.env.VERCEL && aiven ? 1 : 0,
         connectionTimeoutMillis: 10000,
         statement_timeout: 30000,
@@ -384,10 +387,8 @@ export function readTransaction<T>(fn: (tx: Transaction) => Promise<T>) {
           temporaryDatabaseRead = isDatabaseFailure(error);
         if (!revisionChanged && !temporarySheetsRead && !temporaryDatabaseRead)
           throw error;
-        if (temporarySheetsRead && attempt >= 2)
-          throw error;
-        if (temporaryDatabaseRead && attempt >= 7)
-          throw error;
+        if (temporarySheetsRead && attempt >= 2) throw error;
+        if (temporaryDatabaseRead && attempt >= 7) throw error;
         // Intake checkpoints can create a short burst of revisions. A small
         // bounded backoff lets the reader hydrate one coherent revision while
         // keeping every browser request within its deadline.

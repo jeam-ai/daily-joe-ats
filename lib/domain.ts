@@ -10,6 +10,45 @@ export const ruleSchema = z.object({
   kind: z.enum(["Minimum", "Preferred"]),
   absenceFails: z.boolean(),
 });
+export const issuanceSchema = z.object({
+  id,
+  category: z.enum(["Uniform", "Welcome Kit", "Other"]),
+  employeeName: text,
+  employeeId: text.optional(),
+  position: text.optional(),
+  branch: text.optional(),
+  item: text,
+  size: text.optional(),
+  quantity: z.number().int().min(1).max(1000),
+  condition: text.optional(),
+  status: z.enum([
+    "Issued",
+    "Pending",
+    "Incomplete",
+    "For Replacement",
+    "Returned",
+  ]),
+  issuedAt: text.optional(),
+  receivedAt: text.optional(),
+  signed: z.boolean(),
+  returnedAt: text.optional(),
+  remarks: text.optional(),
+  source: text.optional(),
+  createdAt: z.iso.datetime(),
+  updatedAt: z.iso.datetime(),
+});
+export const issuanceInventorySchema = z.object({
+  id,
+  category: z.enum(["Uniform", "Welcome Kit", "Other"]),
+  role: text.optional(),
+  item: text,
+  size: text.optional(),
+  beginning: z.number().int().min(0).max(1000000),
+  issued: z.number().int().min(0).max(1000000),
+  onHand: z.number().int().min(0).max(1000000),
+  updatedAt: z.iso.datetime(),
+  source: text.optional(),
+});
 export const userSchema = z.object({
   id,
   email: z.email(),
@@ -206,6 +245,7 @@ export const stateSchema = z.object({
     .array(
       z.object({
         id,
+        openedAt: z.iso.datetime().optional(),
         position: text,
         isDemo: z.boolean().optional(),
         location: text,
@@ -260,6 +300,8 @@ export const stateSchema = z.object({
       }),
     )
     .max(1000),
+  issuance: z.array(issuanceSchema).max(20000).optional(),
+  issuanceInventory: z.array(issuanceInventorySchema).max(10000).optional(),
   preferences: z.object({
     compact: z.boolean(),
     weekStartsMonday: z.boolean(),

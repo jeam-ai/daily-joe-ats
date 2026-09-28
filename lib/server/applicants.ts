@@ -1,12 +1,18 @@
 import "server-only";
 import { formalName } from "@/lib/names";
 import { z } from "zod";
-import type { Application, User } from "@/types";
+import type { Application, ScreeningCriterion, User } from "@/types";
 import { canEdit, canManage } from "@/lib/data-policy";
 import { transaction, readRecord, putRecord } from "./database";
 import { getState, saveState, audit } from "./repository";
-import { SafeError } from "./config";
+import { config, SafeError } from "./config";
 import { purgeDemoApplication } from "./demo";
+import { unseal } from "@/lib/auth/security";
+import {
+  buildInsight,
+  qualificationRulesForPosition,
+  screenResumeAgainstCriteria,
+} from "@/lib/screening";
 import {
   applicationSchema,
   assertEditor,
@@ -141,25 +147,52 @@ export async function updateApplicantWorkflow(
     const now = new Date().toISOString();
     const next = structuredClone(submitted);
     if (next.hiringNeedId !== before.hiringNeedId) {
-      next.screening = assignedNeed
-        ? {
-            outcome: "Requires Review",
-            completedAt: "",
-            criteria: (assignedNeed.criteria || []).map((rule) => ({
-              id: rule.id,
-              requirement: rule.label,
-              result: "Unclear" as const,
-              evidence:
-                "HR review required after the hiring-need assignment changed.",
-            })),
-          }
-        : {
-            outcome: "Requires Review",
-            completedAt: "",
-            criteria: [],
-            insight:
-              "Assign a hiring need with configured qualifications before screening.",
-          };
+      const rules = qualificationRulesForPosition(
+        next.position,
+        assignedNeed?.criteria,
+        state.qualifications,
+      );
+      let criteria: ScreeningCriterion[] = rules.map((rule) => ({
+        id: rule.id,
+        requirement: rule.label,
+        result: "Not Assessed" as const,
+        evidence:
+          "A readable resume is needed before the assigned qualifications can be assessed.",
+      }));
+      let readable = false;
+      if (next.resumeId && rules.length) {
+        const resume = (
+          await tx.query("SELECT extracted_text FROM resumes WHERE id=$1", [
+            next.resumeId,
+          ])
+        )[0];
+        if (resume?.extracted_text) {
+          const text = unseal<string>(
+            String(resume.extracted_text),
+            config().encryptionKey,
+          );
+          readable = !!text.trim();
+          criteria = screenResumeAgainstCriteria(text, rules, readable);
+        }
+      }
+      const outcome =
+        !criteria.length ||
+        criteria.some(
+          (criterion) =>
+            criterion.result === "Unclear" ||
+            criterion.result === "Not Assessed",
+        )
+          ? "Requires Review"
+          : criteria.some((criterion) => criterion.result === "Not Met")
+            ? "Criteria Not Met"
+            : "Meets Criteria";
+      next.screening = {
+        outcome,
+        completedAt: readable ? now : "",
+        criteria,
+        method: readable ? "rules" : undefined,
+        insight: buildInsight(criteria, next.position, next.location, readable),
+      };
     }
     // Membership and source data are calculated or retained server-side.
     next.queueState = before.queueState;

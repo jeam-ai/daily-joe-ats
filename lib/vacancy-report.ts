@@ -29,6 +29,7 @@ export const vacancyReport20260921 = [
   ["ops-15", "Barista", "Pili", 1],
   ["admin-01", "Business Development Manager", "Head Office — CALABARZON", 1],
   ["admin-02", "Social Media Manager", "Head Office — Bicol", 1],
+  ["admin-03", "Junior Accounting Analyst", "Head Office — Bicol", 1],
 ] as const;
 
 const draftCriteria: Record<string, string[]> = {
@@ -66,6 +67,11 @@ const draftCriteria: Record<string, string[]> = {
     "Social media content planning experience",
     "Campaign performance reporting experience",
     "Audience engagement experience",
+  ],
+  "Junior Accounting Analyst": [
+    "Accounting, bookkeeping, or finance experience",
+    "Spreadsheet and data accuracy skills",
+    "Accounting or finance education",
   ],
 };
 
@@ -121,6 +127,7 @@ export function planVacancyReportImport(state: AppState) {
       urgency: "High",
       targetDate: "2026-10-15",
       status: "Open",
+      openedAt: new Date().toISOString(),
       criteria,
       qualifications:
         "Draft role-specific criteria for HR review; not stated in the 21 September 2026 vacancies report.",

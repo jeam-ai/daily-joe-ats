@@ -580,7 +580,7 @@ export function Applications({ talent = false }: { talent?: boolean }) {
                                 (c) => c.result === "Unclear",
                               ).length
                             } unclear`
-                          : "Qualifications not configured"}
+                          : "Assign a position set"}
                       </small>
                     </td>
                     <td>

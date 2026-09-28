@@ -665,24 +665,36 @@ export function ApplicantProfile({ id }: { id: string }) {
                   <StatusBadge status={a.screening.outcome} />
                 </div>
                 <div className="qualification-dashboard-summary">
-                  <strong>
-                    {
-                      a.screening.criteria.filter(
-                        (criterion) => criterion.result === "Met",
-                      ).length
-                    }
-                    /{a.screening.criteria.length} supported by evidence
-                  </strong>
-                  <span>
-                    {
-                      a.screening.criteria.filter(
-                        (criterion) =>
-                          criterion.result === "Unclear" ||
-                          criterion.result === "Not Assessed",
-                      ).length
-                    }{" "}
-                    still need HR review
-                  </span>
+                  {a.screening.criteria.length ? (
+                    <>
+                      <strong>
+                        {
+                          a.screening.criteria.filter(
+                            (criterion) => criterion.result === "Met",
+                          ).length
+                        }
+                        /{a.screening.criteria.length} supported by evidence
+                      </strong>
+                      <span>
+                        {
+                          a.screening.criteria.filter(
+                            (criterion) =>
+                              criterion.result === "Unclear" ||
+                              criterion.result === "Not Assessed",
+                          ).length
+                        }{" "}
+                        still need HR review
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <strong>Position qualifications not assigned</strong>
+                      <span>
+                        Choose a position set in System Analysis before
+                        screening this resume.
+                      </span>
+                    </>
+                  )}
                 </div>
                 <details className="qualification-evidence">
                   <summary>

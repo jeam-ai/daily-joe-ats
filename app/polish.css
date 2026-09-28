@@ -2492,6 +2492,16 @@ progress {
 .hiring-need-card .location-line {
   margin: 7px 0 15px;
 }
+.need-days-open {
+  width: fit-content;
+  margin: -7px 0 15px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--info-bg);
+  color: var(--info);
+  font-size: 11px;
+  font-weight: 650;
+}
 .hiring-need-card .need-numbers {
   justify-content: space-between;
   gap: 10px;
@@ -2564,6 +2574,80 @@ progress {
 }
 .talent-pool-workspace .applications-table th {
   background: color-mix(in srgb, var(--info-bg) 55%, var(--surface));
+}
+
+/* Employee Issuance shares the operational workspace composition used by
+   Timekeeping: summary first, a concise inventory source, then editable HR
+   records. */
+.issuance-summary {
+  margin: 0;
+}
+.issuance-inventory-card {
+  padding: 20px;
+  box-shadow: none;
+}
+.issuance-inventory-card .section-heading {
+  align-items: flex-start;
+  margin-bottom: 16px;
+}
+.issuance-inventory-card .section-heading p {
+  max-width: 680px;
+  margin-top: 4px;
+  font-size: 12px;
+}
+.issuance-inventory-card .table-scroll {
+  margin: 0 -20px -20px;
+}
+.issuance-workspace {
+  overflow: hidden;
+  border-color: color-mix(in srgb, var(--accent) 18%, var(--border));
+  box-shadow: none;
+}
+.issuance-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+.issuance-toolbar .tabs {
+  min-width: 0;
+}
+.issuance-search {
+  width: min(100%, 310px);
+  flex: 0 1 310px;
+}
+.issuance-workspace .table-scroll {
+  border: 0;
+}
+.issuance-record-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-subtle);
+}
+.issuance-record-heading svg {
+  color: var(--accent);
+}
+.issuance-record-heading span,
+.issuance-record-heading small {
+  display: block;
+}
+.issuance-record-heading small {
+  margin-top: 2px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.empty-inline {
+  margin: 0;
+  padding: 12px 0 2px;
+  color: var(--text-secondary);
+  font-size: 12px;
 }
 
 /* Settings */
@@ -2673,6 +2757,14 @@ progress {
   }
   .hiring-need-card .need-numbers {
     padding: 11px;
+  }
+  .issuance-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .issuance-search {
+    width: 100%;
+    flex-basis: auto;
   }
   .settings-workspace-layout .settings-nav {
     padding: 6px;

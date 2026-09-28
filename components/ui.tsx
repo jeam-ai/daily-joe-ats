@@ -67,6 +67,11 @@ export function StatusBadge({ status }: { status: string }) {
     Active: "green",
     Resigned: "neutral",
     Terminated: "red",
+    Issued: "green",
+    Pending: "amber",
+    Incomplete: "red",
+    "For Replacement": "orange",
+    Returned: "neutral",
   };
   const tone =
     stageTones[status] ||

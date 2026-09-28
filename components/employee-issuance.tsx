@@ -1,0 +1,781 @@
+"use client";
+
+import { useMemo, useRef, useState } from "react";
+import {
+  CheckCircle2,
+  Clock3,
+  Gift,
+  PackageCheck,
+  Plus,
+  Search,
+  Shirt,
+  Upload,
+} from "lucide-react";
+import { useApp } from "./provider";
+import { clientFetch } from "@/lib/client-request";
+import { formatDate } from "@/lib/dates";
+import type {
+  IssuanceCategory,
+  IssuanceInventory,
+  IssuanceRecord,
+  IssuanceStatus,
+} from "@/types";
+import {
+  Badge,
+  Button,
+  Card,
+  EmptyState,
+  Field,
+  Input,
+  LoadingSkeleton,
+  MetricCard,
+  Modal,
+  Select,
+  StatusBadge,
+  Table,
+  Tabs,
+} from "./ui";
+
+const statuses: IssuanceStatus[] = [
+  "Issued",
+  "Pending",
+  "Incomplete",
+  "For Replacement",
+  "Returned",
+];
+const categories: IssuanceCategory[] = ["Uniform", "Welcome Kit", "Other"];
+const today = () => new Date().toISOString().slice(0, 10);
+
+function employeeCount(records: IssuanceRecord[]) {
+  return new Set(records.map((record) => record.employeeName.toLowerCase()))
+    .size;
+}
+
+export function EmployeeIssuance() {
+  const { state, notify, refresh, dataset } = useApp();
+  const [view, setView] = useState("All issuance");
+  const [query, setQuery] = useState("");
+  const [adding, setAdding] = useState(false);
+  const [editing, setEditing] = useState<IssuanceRecord | null>(null);
+  const [editingStock, setEditingStock] = useState<
+    IssuanceInventory | "new" | null
+  >(null);
+  const [busy, setBusy] = useState("");
+  const file = useRef<HTMLInputElement>(null);
+  if (!state) return <LoadingSkeleton />;
+  const records = state.issuance || [];
+  const inventory = state.issuanceInventory || [];
+  const uniforms = records.filter((record) => record.category === "Uniform");
+  const welcomeKits = records.filter(
+    (record) => record.category === "Welcome Kit",
+  );
+  const filtered = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return records
+      .filter(
+        (record) =>
+          view === "All issuance" ||
+          (view === "Uniforms" && record.category === "Uniform") ||
+          (view === "Welcome kits" && record.category === "Welcome Kit"),
+      )
+      .filter(
+        (record) =>
+          !needle ||
+          [
+            record.employeeName,
+            record.employeeId,
+            record.position,
+            record.branch,
+            record.item,
+            record.size,
+          ].some((value) => value?.toLowerCase().includes(needle)),
+      )
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  }, [query, records, view]);
+  const editable =
+    dataset === "real" &&
+    ["Admin", "Talent Acquisition", "HR Generalist"].includes(
+      state.currentUser?.role || "",
+    );
+
+  async function importWorkbook(selected: File) {
+    setBusy("Importing issuance workbook");
+    try {
+      const form = new FormData();
+      form.set("file", selected);
+      const response = await clientFetch("/api/issuance", {
+        method: "POST",
+        body: form,
+      });
+      const result = await response.json();
+      if (!response.ok)
+        throw Error(result.error || "The workbook could not be imported.");
+      await refresh();
+      notify(
+        `${result.created} issuance record${result.created === 1 ? "" : "s"} imported${result.inventoryUpdated ? `; ${result.inventoryUpdated} on-hand stock item${result.inventoryUpdated === 1 ? "" : "s"} refreshed` : ""}${result.skipped ? `; ${result.skipped} duplicate${result.skipped === 1 ? "" : "s"} skipped` : ""}.`,
+      );
+    } catch (error) {
+      notify((error as Error).message, "error");
+    } finally {
+      setBusy("");
+      if (file.current) file.current.value = "";
+    }
+  }
+
+  async function saveRecord(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    setBusy("Saving issuance record");
+    try {
+      const response = await clientFetch("/api/issuance", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "create",
+          category: form.get("category"),
+          employeeName: form.get("employeeName"),
+          employeeId: form.get("employeeId"),
+          position: form.get("position"),
+          branch: form.get("branch"),
+          item: form.get("item"),
+          size: form.get("size"),
+          quantity: Number(form.get("quantity")),
+          condition: form.get("condition"),
+          status: form.get("status"),
+          issuedAt: form.get("issuedAt"),
+          receivedAt: form.get("receivedAt"),
+          signed: form.get("signed") === "on",
+          returnedAt: form.get("returnedAt"),
+          remarks: form.get("remarks"),
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok)
+        throw Error(result.error || "The issuance record could not be saved.");
+      await refresh();
+      setAdding(false);
+      notify("Issuance record saved.");
+    } catch (error) {
+      notify((error as Error).message, "error");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function updateRecord(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!editing) return;
+    const form = new FormData(event.currentTarget);
+    setBusy("Updating issuance record");
+    try {
+      const response = await clientFetch("/api/issuance", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "update",
+          id: editing.id,
+          status: form.get("status"),
+          signed: form.get("signed") === "on",
+          receivedAt: form.get("receivedAt"),
+          returnedAt: form.get("returnedAt"),
+          remarks: form.get("remarks"),
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok)
+        throw Error(
+          result.error || "The issuance record could not be updated.",
+        );
+      await refresh();
+      setEditing(null);
+      notify("Issuance status saved.");
+    } catch (error) {
+      notify((error as Error).message, "error");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function saveStock(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const existing = editingStock === "new" ? null : editingStock;
+    setBusy("Saving on-hand inventory");
+    try {
+      const response = await clientFetch("/api/issuance", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: existing ? "update-inventory" : "create-inventory",
+          id: existing?.id,
+          category: form.get("category"),
+          role: form.get("role"),
+          item: form.get("item"),
+          size: form.get("size"),
+          beginning: Number(form.get("beginning")),
+          issued: Number(form.get("issued")),
+          onHand: Number(form.get("onHand")),
+          updatedAt: form.get("updatedAt"),
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok)
+        throw Error(result.error || "The stock item could not be saved.");
+      await refresh();
+      setEditingStock(null);
+      notify("On-hand inventory saved.");
+    } catch (error) {
+      notify((error as Error).message, "error");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  return (
+    <div className="workspace-page issuance-page">
+      <div className="page-heading workspace-page-heading">
+        <div>
+          <div className="eyebrow">HR OPERATIONS</div>
+          <h1>Employee Issuance</h1>
+          <p>
+            Track uniforms and welcome kits after an employee joins Daily Joe.
+          </p>
+        </div>
+        <div className="workspace-heading-side">
+          <span className="workspace-heading-context">
+            Employee asset and acknowledgment records
+          </span>
+          <div className="button-row">
+            <input
+              className="sr-only"
+              ref={file}
+              type="file"
+              accept=".xlsx"
+              onChange={(event) => {
+                const selected = event.target.files?.[0];
+                if (selected) void importWorkbook(selected);
+              }}
+            />
+            <Button
+              variant="secondary"
+              disabled={!editable || !!busy}
+              title={
+                !editable ? "An authorized HR role is required" : undefined
+              }
+              onClick={() => file.current?.click()}
+            >
+              <Upload size={16} />
+              Import workbook
+            </Button>
+            <Button
+              disabled={!editable || !!busy}
+              title={
+                !editable ? "An authorized HR role is required" : undefined
+              }
+              onClick={() => setAdding(true)}
+            >
+              <Plus size={16} />
+              Record issuance
+            </Button>
+          </div>
+        </div>
+      </div>
+      <p className="workspace-heading-note">
+        The import reads the updated Uniform and Welcome Kit sheets only. The
+        workbook’s Monitoring sheet is deliberately excluded.
+      </p>
+      {busy && (
+        <p className="notice" role="status">
+          {busy}…
+        </p>
+      )}
+      <div className="issuance-summary" aria-label="Employee issuance summary">
+        <MetricCard
+          label="Uniform records"
+          value={uniforms.length}
+          note={`${employeeCount(uniforms)} employees with uniform history`}
+          icon={<Shirt size={20} />}
+          href="/issuance"
+          tone="featured"
+        />
+        <MetricCard
+          label="Uniform pending"
+          value={
+            uniforms.filter((record) => record.status === "Pending").length
+          }
+          note="Items still awaiting issue or receipt"
+          icon={<Clock3 size={20} />}
+          href="/issuance"
+          tone="metric-review"
+        />
+        <MetricCard
+          label="Welcome kit records"
+          value={welcomeKits.length}
+          note={`${employeeCount(welcomeKits)} employees with kit history`}
+          icon={<Gift size={20} />}
+          href="/issuance"
+          tone="hired"
+        />
+        <MetricCard
+          label="Replacement review"
+          value={
+            records.filter((record) => record.status === "For Replacement")
+              .length
+          }
+          note="Items HR marked for replacement"
+          icon={<PackageCheck size={20} />}
+          href="/issuance"
+          tone="metric-interviews"
+        />
+      </div>
+      <Card className="issuance-inventory-card">
+        <div className="section-heading">
+          <div>
+            <h2>On-hand inventory</h2>
+            <p className="muted">
+              Current stock from the workbook’s ON-HAND sheet. It is separate
+              from employee issuance history.
+            </p>
+          </div>
+          <div className="button-row">
+            <Badge>{inventory.length} tracked items</Badge>
+            <Button
+              variant="secondary"
+              disabled={!editable || !!busy}
+              onClick={() => setEditingStock("new")}
+            >
+              <Plus size={15} />
+              Add stock item
+            </Button>
+          </div>
+        </div>
+        {inventory.length ? (
+          <Table>
+            <thead>
+              <tr>
+                <th>Stock group</th>
+                <th>Item</th>
+                <th>Size</th>
+                <th>Beginning</th>
+                <th>Out</th>
+                <th>On hand</th>
+                <th>Updated</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {inventory
+                .slice()
+                .sort(
+                  (a, b) =>
+                    a.category.localeCompare(b.category) ||
+                    a.item.localeCompare(b.item),
+                )
+                .map((stock) => (
+                  <tr key={stock.id}>
+                    <td>
+                      <Badge
+                        tone={stock.category === "Uniform" ? "blue" : "green"}
+                      >
+                        {stock.category}
+                      </Badge>
+                      <small className="cell-secondary">
+                        {stock.role || "All employees"}
+                      </small>
+                    </td>
+                    <td>
+                      <strong>{stock.item}</strong>
+                    </td>
+                    <td>{stock.size || "—"}</td>
+                    <td>{stock.beginning}</td>
+                    <td>{stock.issued}</td>
+                    <td>
+                      <strong>{stock.onHand}</strong>
+                    </td>
+                    <td>{formatDate(stock.updatedAt, state.preferences)}</td>
+                    <td>
+                      <Button
+                        variant="secondary"
+                        disabled={!editable || !!busy}
+                        onClick={() => setEditingStock(stock)}
+                      >
+                        Edit
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+            </tbody>
+          </Table>
+        ) : (
+          <p className="empty-inline">
+            Import the ON-HAND sheet to show current stock levels.
+          </p>
+        )}
+      </Card>
+      <Card className="issuance-workspace">
+        <div className="issuance-toolbar">
+          <Tabs
+            items={["All issuance", "Uniforms", "Welcome kits"]}
+            value={view}
+            onChange={setView}
+          />
+          <div className="search-field issuance-search">
+            <Search size={17} />
+            <Input
+              aria-label="Search employee issuance"
+              placeholder="Search employee, branch, or item"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+            />
+          </div>
+        </div>
+        {filtered.length ? (
+          <Table>
+            <thead>
+              <tr>
+                <th>Employee</th>
+                <th>Issuance</th>
+                <th>Size / quantity</th>
+                <th>Issued / received</th>
+                <th>Status</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((record) => (
+                <tr key={record.id}>
+                  <td>
+                    <strong>{record.employeeName}</strong>
+                    <small className="cell-secondary">
+                      {[record.employeeId, record.position, record.branch]
+                        .filter(Boolean)
+                        .join(" · ") || "Employee details not recorded"}
+                    </small>
+                  </td>
+                  <td>
+                    <Badge
+                      tone={record.category === "Uniform" ? "blue" : "green"}
+                    >
+                      {record.category}
+                    </Badge>
+                    <small className="cell-secondary">{record.item}</small>
+                  </td>
+                  <td>
+                    <strong>{record.quantity}</strong>
+                    <small className="cell-secondary">
+                      {record.size
+                        ? `Size ${record.size}`
+                        : "Size not recorded"}
+                      {record.condition ? ` · ${record.condition}` : ""}
+                    </small>
+                  </td>
+                  <td>
+                    <strong>
+                      {record.issuedAt
+                        ? formatDate(record.issuedAt, state.preferences)
+                        : "Not issued"}
+                    </strong>
+                    <small className="cell-secondary">
+                      {record.receivedAt
+                        ? `Received ${formatDate(record.receivedAt, state.preferences)}`
+                        : "Receipt pending"}
+                    </small>
+                  </td>
+                  <td>
+                    <StatusBadge status={record.status} />
+                    <small className="cell-secondary">
+                      {record.signed
+                        ? "Acknowledgment recorded"
+                        : "Acknowledgment pending"}
+                    </small>
+                  </td>
+                  <td>
+                    <Button
+                      variant="secondary"
+                      disabled={!editable || !!busy}
+                      onClick={() => setEditing(record)}
+                    >
+                      Update
+                    </Button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        ) : (
+          <EmptyState
+            title={
+              records.length
+                ? "No issuance records match"
+                : "No issuance records yet"
+            }
+            description={
+              records.length
+                ? "Try a different view or search phrase."
+                : "Import the current Uniform and Welcome Kit workbook, or record an issuance manually."
+            }
+          />
+        )}
+      </Card>
+      {adding && (
+        <Modal
+          title="Record employee issuance"
+          busy={!!busy}
+          onClose={() => setAdding(false)}
+        >
+          <form className="form-stack" onSubmit={saveRecord}>
+            <div className="form-grid">
+              <Field label="Category">
+                <Select name="category" defaultValue="Uniform">
+                  {categories.map((category) => (
+                    <option key={category}>{category}</option>
+                  ))}
+                </Select>
+              </Field>
+              <Field label="Employee name">
+                <Input name="employeeName" required />
+              </Field>
+              <Field label="Employee ID">
+                <Input name="employeeId" />
+              </Field>
+              <Field label="Position">
+                <Input name="position" />
+              </Field>
+              <Field label="Branch / location">
+                <Input name="branch" />
+              </Field>
+              <Field label="Item">
+                <Input
+                  name="item"
+                  required
+                  placeholder="Polo shirt, tote bag, access card"
+                />
+              </Field>
+              <Field label="Size">
+                <Input name="size" placeholder="Optional for non-sized items" />
+              </Field>
+              <Field label="Quantity">
+                <Input
+                  name="quantity"
+                  type="number"
+                  min="1"
+                  defaultValue="1"
+                  required
+                />
+              </Field>
+              <Field label="Condition">
+                <Input name="condition" placeholder="New, used, replacement" />
+              </Field>
+              <Field label="Status">
+                <Select name="status" defaultValue="Issued">
+                  {statuses.map((status) => (
+                    <option key={status}>{status}</option>
+                  ))}
+                </Select>
+              </Field>
+              <Field label="Date issued">
+                <Input name="issuedAt" type="date" defaultValue={today()} />
+              </Field>
+              <Field label="Date received">
+                <Input name="receivedAt" type="date" />
+              </Field>
+            </div>
+            <label className="check-row">
+              <input name="signed" type="checkbox" /> Issuance acknowledgment
+              signed
+            </label>
+            <Field label="Remarks">
+              <textarea name="remarks" />
+            </Field>
+            <div className="modal-actions">
+              <Button
+                variant="secondary"
+                type="button"
+                onClick={() => setAdding(false)}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" disabled={!!busy}>
+                Save issuance
+              </Button>
+            </div>
+          </form>
+        </Modal>
+      )}
+      {editing && (
+        <Modal
+          title="Update issuance status"
+          busy={!!busy}
+          onClose={() => setEditing(null)}
+        >
+          <form className="form-stack" onSubmit={updateRecord}>
+            <div className="issuance-record-heading">
+              <CheckCircle2 size={18} />
+              <span>
+                <strong>{editing.employeeName}</strong>
+                <small>
+                  {editing.category} · {editing.item}
+                </small>
+              </span>
+            </div>
+            <div className="form-grid">
+              <Field label="Status">
+                <Select name="status" defaultValue={editing.status}>
+                  {statuses.map((status) => (
+                    <option key={status}>{status}</option>
+                  ))}
+                </Select>
+              </Field>
+              <Field label="Date received">
+                <Input
+                  name="receivedAt"
+                  type="date"
+                  defaultValue={editing.receivedAt || ""}
+                />
+              </Field>
+              <Field label="Date returned">
+                <Input
+                  name="returnedAt"
+                  type="date"
+                  defaultValue={editing.returnedAt || ""}
+                />
+              </Field>
+            </div>
+            <label className="check-row">
+              <input
+                name="signed"
+                type="checkbox"
+                defaultChecked={editing.signed}
+              />{" "}
+              Issuance acknowledgment signed
+            </label>
+            <Field label="Remarks">
+              <textarea name="remarks" defaultValue={editing.remarks || ""} />
+            </Field>
+            <div className="modal-actions">
+              <Button
+                variant="secondary"
+                type="button"
+                onClick={() => setEditing(null)}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" disabled={!!busy}>
+                Save update
+              </Button>
+            </div>
+          </form>
+        </Modal>
+      )}
+      {editingStock && (
+        <Modal
+          title={editingStock === "new" ? "Add stock item" : "Edit stock item"}
+          busy={!!busy}
+          onClose={() => setEditingStock(null)}
+        >
+          <form className="form-stack" onSubmit={saveStock}>
+            <div className="form-grid">
+              <Field label="Category">
+                <Select
+                  name="category"
+                  defaultValue={
+                    editingStock === "new" ? "Uniform" : editingStock.category
+                  }
+                >
+                  {categories.map((category) => (
+                    <option key={category}>{category}</option>
+                  ))}
+                </Select>
+              </Field>
+              <Field label="Role / stock group">
+                <Input
+                  name="role"
+                  defaultValue={
+                    editingStock === "new" ? "" : editingStock.role || ""
+                  }
+                  placeholder="Barista, Admin, all employees"
+                />
+              </Field>
+              <Field label="Item">
+                <Input
+                  name="item"
+                  required
+                  defaultValue={editingStock === "new" ? "" : editingStock.item}
+                />
+              </Field>
+              <Field label="Size">
+                <Input
+                  name="size"
+                  defaultValue={
+                    editingStock === "new" ? "" : editingStock.size || ""
+                  }
+                  placeholder="Optional for non-sized items"
+                />
+              </Field>
+              <Field label="Beginning">
+                <Input
+                  name="beginning"
+                  type="number"
+                  min="0"
+                  required
+                  defaultValue={
+                    editingStock === "new" ? 0 : editingStock.beginning
+                  }
+                />
+              </Field>
+              <Field label="Out">
+                <Input
+                  name="issued"
+                  type="number"
+                  min="0"
+                  required
+                  defaultValue={
+                    editingStock === "new" ? 0 : editingStock.issued
+                  }
+                />
+              </Field>
+              <Field label="On hand">
+                <Input
+                  name="onHand"
+                  type="number"
+                  min="0"
+                  required
+                  defaultValue={
+                    editingStock === "new" ? 0 : editingStock.onHand
+                  }
+                />
+              </Field>
+              <Field label="Updated on">
+                <Input
+                  name="updatedAt"
+                  type="date"
+                  defaultValue={
+                    editingStock === "new"
+                      ? today()
+                      : editingStock.updatedAt.slice(0, 10)
+                  }
+                />
+              </Field>
+            </div>
+            <p className="fine-print">
+              On hand is stored separately so HR can preserve a verified
+              physical count when adjustments do not equal Beginning minus Out.
+            </p>
+            <div className="modal-actions">
+              <Button
+                variant="secondary"
+                type="button"
+                onClick={() => setEditingStock(null)}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" disabled={!!busy}>
+                Save stock item
+              </Button>
+            </div>
+          </form>
+        </Modal>
+      )}
+    </div>
+  );
+}

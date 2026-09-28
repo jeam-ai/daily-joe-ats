@@ -176,6 +176,8 @@ export interface Application {
 export interface HiringNeed {
   isDemo?: boolean;
   id: string;
+  /** The timestamp the request was opened. Used for the live days-open indicator. */
+  openedAt?: string;
   position: string;
   location: string;
   slots: number;
@@ -187,6 +189,47 @@ export interface HiringNeed {
   criteria?: QualificationRule[];
   qualifications: string;
   questions: string;
+}
+export type IssuanceCategory = "Uniform" | "Welcome Kit" | "Other";
+export type IssuanceStatus =
+  "Issued" | "Pending" | "Incomplete" | "For Replacement" | "Returned";
+/**
+ * Employee asset history is operational data. It deliberately stays separate
+ * from applicant profiles and is only written by the issuance API.
+ */
+export interface IssuanceRecord {
+  id: string;
+  category: IssuanceCategory;
+  employeeName: string;
+  employeeId?: string;
+  position?: string;
+  branch?: string;
+  item: string;
+  size?: string;
+  quantity: number;
+  condition?: string;
+  status: IssuanceStatus;
+  issuedAt?: string;
+  receivedAt?: string;
+  signed: boolean;
+  returnedAt?: string;
+  remarks?: string;
+  source?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+/** Current stock supplied by the ON-HAND worksheet, separate from employee issuance history. */
+export interface IssuanceInventory {
+  id: string;
+  category: "Uniform" | "Welcome Kit" | "Other";
+  role?: string;
+  item: string;
+  size?: string;
+  beginning: number;
+  issued: number;
+  onHand: number;
+  updatedAt: string;
+  source?: string;
 }
 export interface QualificationTemplate {
   rules?: QualificationRule[];
@@ -267,6 +310,8 @@ export interface AppState {
   requirementTemplates: Requirement[];
   emailTemplates: EmailTemplate[];
   notifications: Notification[];
+  issuance?: IssuanceRecord[];
+  issuanceInventory?: IssuanceInventory[];
   preferences: {
     compact: boolean;
     weekStartsMonday: boolean;

@@ -86,6 +86,11 @@ export function AppProvider({
             notifications: state.notifications.filter(
               (n) => !!n.isDemo === (dataset === "demo"),
             ),
+            // Issuance has no fictional counterpart. Keep real employee
+            // records out of the demonstration workspace.
+            issuance: dataset === "demo" ? [] : state.issuance,
+            issuanceInventory:
+              dataset === "demo" ? [] : state.issuanceInventory,
           }
         : null,
     [state, dataset],

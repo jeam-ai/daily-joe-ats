@@ -26,6 +26,8 @@ export function initialState(): AppState {
     users,
     applications: [],
     hiringNeeds: [],
+    issuance: [],
+    issuanceInventory: [],
     notifications: [],
     importLimit: 100,
     importValidated: false,

@@ -5,6 +5,7 @@ import { useApp } from "./provider";
 import { formatDate } from "@/lib/dates";
 import { Sparkles } from "lucide-react";
 import { canManage } from "@/lib/data-policy";
+import { qualificationRulesForPosition } from "@/lib/screening";
 import { ScreeningControls } from "./screening-controls";
 import {
   Badge,
@@ -38,10 +39,26 @@ export function ApplicantTools({
   const { state, updateApplication, saving } = useApp();
   const [employment, setEmployment] = useState(false),
     [review, setReview] = useState(false),
+    [assignment, setAssignment] = useState(false),
+    [assignmentNeedId, setAssignmentNeedId] = useState(a.hiringNeedId || ""),
     [checklistConfirmation, setChecklistConfirmation] = useState(false),
     [checklistDraft, setChecklistDraft] = useState<Record<string, boolean>>({});
   if (!state) return null;
   const need = state.hiringNeeds.find((n) => n.id === a.hiringNeedId);
+  const qualificationNeeds = state.hiringNeeds.filter(
+    (candidate) =>
+      candidate.status === "Open" &&
+      qualificationRulesForPosition(
+        candidate.position,
+        candidate.criteria,
+        state.qualifications,
+      ).length > 0,
+  );
+  const needsQualificationAssignment =
+    !a.screening.criteria.length ||
+    a.screening.criteria.some(
+      (criterion) => criterion.result === "Not Assessed",
+    );
   const directMatches = a.screening.criteria.filter(
     (criterion) => criterion.result === "Met",
   ).length;
@@ -191,6 +208,27 @@ export function ApplicantTools({
               Review criteria and evidence
             </Button>
           </details>
+          {needsQualificationAssignment && qualificationNeeds.length > 0 && (
+            <div className="inline-actions qualification-assignment-action">
+              <p className="fine-print">
+                {a.screening.criteria.length
+                  ? "Assign a different position’s qualification set, then the saved resume is scanned again automatically."
+                  : "No qualification set is assigned yet. Choose the position and location HR wants to assess."}
+              </p>
+              <Button
+                variant="secondary"
+                disabled={!canManage(state.currentUser) || saving}
+                onClick={() => {
+                  setAssignmentNeedId(
+                    a.hiringNeedId || qualificationNeeds[0].id,
+                  );
+                  setAssignment(true);
+                }}
+              >
+                Assign qualification set
+              </Button>
+            </div>
+          )}
           {need?.questions && (
             <>
               <h3>Interview reference questions</h3>
@@ -289,6 +327,80 @@ export function ApplicantTools({
               </Button>
             </div>
           </div>
+        </Modal>
+      )}
+      {assignment && (
+        <Modal
+          busy={saving}
+          title="Assign position qualifications"
+          onClose={() => setAssignment(false)}
+        >
+          <form
+            className="form-stack"
+            onSubmit={async (event) => {
+              event.preventDefault();
+              const selected = qualificationNeeds.find(
+                (candidate) => candidate.id === assignmentNeedId,
+              );
+              if (!selected) return;
+              const saved = await updateApplication(
+                a.id,
+                (application) => ({
+                  ...application,
+                  hiringNeedId: selected.id,
+                  position: selected.position,
+                  location: selected.location,
+                }),
+                true,
+              );
+              if (saved) setAssignment(false);
+            }}
+          >
+            <p>
+              Select the open position whose requirements should be used for
+              this applicant. This changes the assigned position and location;
+              it does not move the applicant’s stage or send email.
+            </p>
+            <Field label="Position qualification set">
+              <Select
+                value={assignmentNeedId}
+                onChange={(event) => setAssignmentNeedId(event.target.value)}
+                required
+              >
+                {qualificationNeeds.map((candidate) => {
+                  const count = qualificationRulesForPosition(
+                    candidate.position,
+                    candidate.criteria,
+                    state.qualifications,
+                  ).length;
+                  return (
+                    <option key={candidate.id} value={candidate.id}>
+                      {candidate.position} · {candidate.location} · {count}{" "}
+                      requirements
+                    </option>
+                  );
+                })}
+              </Select>
+            </Field>
+            <p className="fine-print">
+              If a readable resume is saved, the built-in system analysis runs
+              against this set immediately. Unclear evidence stays for HR’s
+              checklist review.
+            </p>
+            <div className="modal-actions">
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={saving}
+                onClick={() => setAssignment(false)}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" disabled={saving || !assignmentNeedId}>
+                {saving ? "Assigning…" : "Assign & scan resume"}
+              </Button>
+            </div>
+          </form>
         </Modal>
       )}
       {a.hiredAt && (
