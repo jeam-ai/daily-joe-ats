@@ -10,6 +10,7 @@ import {
   BriefcaseBusiness,
   UserCheck,
   ListFilter,
+  CircleHelp,
 } from "lucide-react";
 import type { HiringNeed } from "@/types";
 import { useApp } from "./provider";
@@ -34,6 +35,8 @@ import type { QualificationRule } from "@/types";
 import { canManage } from "@/lib/data-policy";
 import { planVacancyReportImport } from "@/lib/vacancy-report";
 import { clientFetch } from "@/lib/client-request";
+
+const DECLARED_VACANCY_DATE = "2026-09-15";
 
 function operationalUrgency(need: HiringNeed) {
   if (need.status !== "Open") return need.urgency;
@@ -83,6 +86,28 @@ export function HiringNeeds() {
       (state.applicationSummary?.[dataset].activeByHiringNeed[need.id] || 0),
     0,
   );
+  async function setDeclaredOpenDate() {
+    const affected = (state?.hiringNeeds || []).filter(
+      (need) => need.openedAt?.slice(0, 10) !== DECLARED_VACANCY_DATE,
+    ).length;
+    if (!affected) {
+      notify("All hiring needs already use the September 15 vacancy date.");
+      return;
+    }
+    if (
+      !window.confirm(
+        `Set the declared vacancy date to September 15, 2026 for ${affected} hiring need${affected === 1 ? "" : "s"}? This changes only the date used for Days open.`,
+      )
+    )
+      return;
+    await update((workspace) => ({
+      ...workspace,
+      hiringNeeds: workspace.hiringNeeds.map((need) => ({
+        ...need,
+        openedAt: `${DECLARED_VACANCY_DATE}T00:00:00.000Z`,
+      })),
+    }));
+  }
   async function save(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const data = new FormData(e.currentTarget);
@@ -181,6 +206,16 @@ export function HiringNeeds() {
               <Plus size={17} />
               New Hiring Need
             </Button>
+            <Button
+              variant="secondary"
+              disabled={
+                !canManage(state.currentUser) || saving || dataset === "demo"
+              }
+              onClick={() => void setDeclaredOpenDate()}
+              title="Use September 15, 2026 as the declared vacancy date for all current hiring needs."
+            >
+              Set Sep 15 open date
+            </Button>
           </div>
         </div>
       </div>
@@ -272,6 +307,17 @@ export function HiringNeeds() {
                         : "Opened today";
                     })()
                   : "Open date not recorded"}
+                <span
+                  className="info-tooltip"
+                  tabIndex={0}
+                  aria-label="Days open explanation"
+                >
+                  <CircleHelp size={13} />
+                  <span role="tooltip">
+                    Days open is counted from the date HR declared this
+                    vacancy open, not from a later edit.
+                  </span>
+                </span>
               </p>
             )}
             <div className="need-numbers">
@@ -448,6 +494,18 @@ export function HiringNeeds() {
                   name="openedAt"
                   defaultValue={existing?.openedAt?.slice(0, 10) || ""}
                 />
+                <span
+                  className="info-tooltip field-info"
+                  tabIndex={0}
+                  aria-label="Opened on explanation"
+                >
+                  <CircleHelp size={15} />
+                  <span role="tooltip">
+                    This is the date the vacancy was declared open. It drives
+                    the Days open badge and is not the date HR last edited the
+                    request.
+                  </span>
+                </span>
               </Field>
               <Field label="Status">
                 <Select name="status" defaultValue={existing?.status || "Open"}>
