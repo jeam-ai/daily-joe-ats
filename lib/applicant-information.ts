@@ -29,8 +29,8 @@ export function evidenceInformation(
     fields: Object.fromEntries(
       Object.entries(e.evidence).map(([key, evidence]) => [
         key,
-        {
-          source:
+        (() => {
+          const source =
             key === "name"
               ? evidence.startsWith("Resume:")
                 ? "Resume"
@@ -39,14 +39,21 @@ export function evidenceInformation(
                   : evidence.startsWith("Email body:")
                     ? "Email body"
                     : "Gmail display name"
-              : e.sources?.[key] || "Submitted evidence",
-          evidence,
-          confidence:
-            key === "name" &&
-            (e.nameUncertain ?? evidence === "Gmail sender display name")
+              : e.sources?.[key] || "Submitted evidence";
+          const uncertain =
+            source === "Residence match" ||
+            source === "Email subject" ||
+            source === "Attachment filename" ||
+            source === "Gmail display name" ||
+            (key === "name" && (e.nameUncertain ?? false));
+          return {
+            source,
+            evidence,
+            confidence: uncertain
               ? ("Uncertain" as const)
               : ("Confident" as const),
-        },
+          };
+        })(),
       ]),
     ),
     conflicts: e.warnings,

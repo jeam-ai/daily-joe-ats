@@ -2,8 +2,7 @@
 import { useEffect, useState } from "react";
 import { requestJson } from "@/lib/client-request";
 import type { Application } from "@/types";
-import { Card, Badge } from "./ui";
-import { Button } from "./ui";
+import { Card, Badge, Button, HelpTip } from "./ui";
 import { Pencil } from "lucide-react";
 import { useApp } from "./provider";
 import {
@@ -160,7 +159,12 @@ export function ApplicantInformation({
       <div className="profile-coverage" aria-live="polite">
         <div>
           <strong>
-            Profile coverage: {confirmed} of {rows.length} fields found
+            Profile coverage: {confirmed} of {rows.length} fields found{" "}
+            <HelpTip>
+              Detection uses the submitted resume first, then the email body
+              and subject only for any remaining gaps. An uncertain field is a
+              lead for HR to verify, never a confirmed applicant fact.
+            </HelpTip>
           </strong>
           <p>
             Built-in detection checks the resume first, then the email body and
@@ -223,7 +227,13 @@ export function ApplicantInformation({
                     )}
                     {a.information?.fields[key] && (
                       <>
-                        <small className="muted information-source">
+                        <small
+                          className={`muted information-source ${
+                            a.information.fields[key].confidence === "Uncertain"
+                              ? "information-source-uncertain"
+                              : ""
+                          }`}
+                        >
                           {a.information.fields[key].source} ·{" "}
                           {a.information.fields[key].confidence}
                         </small>

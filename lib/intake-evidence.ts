@@ -62,6 +62,21 @@ const genericProfileName = (value: string) =>
   /\b(?:place\s+of\s+birth|date\s+of\s+birth|civil\s+status|marital\s+status|nationality|gender|\bsingle\b)\b/i.test(
     value,
   );
+const safeResumeHeaderName = (value: string) => {
+  const cleaned = cleanOcrName(value)
+    .replace(/^\s*(?:name|full name)\s*[:|–—-]\s*/i, "")
+    .trim();
+  return (
+    cleaned &&
+    plausiblePersonName(cleaned) &&
+    !genericProfileName(cleaned) &&
+    !/\b(?:resume|curriculum|vitae|address|contact|profile|personal|information|experience|education|skills|objective|university|college|school|bachelor|barista|cashier|supervisor|leader|accounting|analyst|manager|staff|assistant|engineer|developer|administrator|intern|clerk|officer|executive|representative|specialist|recruitment|human resources|street|barangay|camarines|philippines|city|summary|references|career|history|employment|certification|achievement|to obtain|seeking|applying|dear|thank you|place of birth|single)\b/i.test(
+      cleaned,
+    )
+      ? cleaned
+      : ""
+  );
+};
 export function intakeEvidence(input: {
   subject: string;
   body?: string;
@@ -259,15 +274,25 @@ export function intakeEvidence(input: {
     .find(
       (l) =>
         /^[\p{L}][\p{L} .,'’-]{4,80}$/u.test(l) &&
-        l.split(/\s+/).length >= 2 &&
-        l.split(/\s+/).length <= 5 &&
-        !/resume|curriculum|vitae|address|contact|profile|personal|information|experience|education|skills|objective|university|college|school|bachelor|barista|cashier|supervisor|leader|accounting|analyst|manager|staff|assistant|engineer|developer|administrator|intern|clerk|officer|executive|representative|specialist|recruitment|human resources|street|barangay|camarines|philippines|city|summary|references|career|history|employment|certification|achievement|to obtain|seeking|applying|dear|thank you|place of birth|single/i.test(
-          l,
-        ) &&
-        !genericProfileName(l),
+        !!safeResumeHeaderName(l),
     );
+  // Some PDF/DOCX extractors flatten the resume header onto one line. Recover
+  // only the leading name before a phone, email, label, or visual separator;
+  // this remains deliberately conservative so prose is never treated as a name.
+  const resumeOpening = resume.replace(/\r/g, "").slice(0, 420);
+  const inlineHeaderName = [
+    resumeOpening.split(/\n|[|•·]/)[0],
+    resumeOpening.split(/\b(?:email|e-mail|mobile|phone|contact(?:\s+(?:number|details))?|address)\b/i)[0],
+    resumeOpening.split(phonePattern)[0],
+    resumeOpening.split(/[^\s@]+@[^\s@]+\.[^\s@]+/i)[0],
+  ]
+    .map(
+      (candidate) => candidate?.replace(/[|•·]+$/g, "").trim() || "",
+    )
+    .map(safeResumeHeaderName)
+    .find(Boolean);
   const explicitResumeName = named(resume);
-  const resumeName = explicitResumeName || headingName;
+  const resumeName = explicitResumeName || headingName || inlineHeaderName;
   const submittedName = named(body);
   const filenameName = input.filename
     ?.replace(/\.(?:pdf|docx|png|jpe?g|txt)$/i, "")
