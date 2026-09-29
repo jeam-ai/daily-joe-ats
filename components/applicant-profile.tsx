@@ -13,6 +13,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { canManage, canEdit } from "@/lib/data-policy";
 import { ApplicantEditor, DeleteApplicantDialog } from "./applicant-management";
+import { RichTextContent, RichTextEditor } from "./rich-text";
 import { ActionMenu } from "./action-menu";
 import {
   ArrowLeft,
@@ -905,7 +906,7 @@ export function ApplicantProfile({ id }: { id: string }) {
                 </div>
                 {requirementList({ compact: true })}
                 <Field label="HR notes">
-                  <textarea name="notes" />
+                  <RichTextEditor name="notes" rows={3} />
                 </Field>
                 <Button type="submit" disabled={!editable || workspaceSaving}>
                   Save onboarding
@@ -963,7 +964,7 @@ export function ApplicantProfile({ id }: { id: string }) {
                       label: "Add Note",
                       onClick: () =>
                         document
-                          .querySelector<HTMLTextAreaElement>(
+                          .querySelector<HTMLElement>(
                             '[aria-label="HR Notes"]',
                           )
                           ?.focus(),
@@ -1019,11 +1020,12 @@ export function ApplicantProfile({ id }: { id: string }) {
                 if (saved) setNote("");
               }}
             >
-              <textarea
+              <RichTextEditor
                 aria-label="HR Notes"
                 placeholder="Add context for your team…"
                 value={note}
-                onChange={(e) => setNote(e.target.value)}
+                onChange={setNote}
+                rows={4}
               />
               <Button
                 variant="secondary"
@@ -1035,9 +1037,7 @@ export function ApplicantProfile({ id }: { id: string }) {
               </Button>
             </form>
             {a.notes.map((n, i) => (
-              <p className="saved-note" key={i}>
-                {n}
-              </p>
+              <RichTextContent className="saved-note" key={i} value={n} />
             ))}
           </Card>
           {tab !== "Notes & timeline" && (

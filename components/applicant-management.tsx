@@ -7,6 +7,7 @@ import { Avatar, Button, Field, Input, Modal, Select, Badge } from "./ui";
 import { requestJson } from "@/lib/client-request";
 import { formalName, nameParts } from "@/lib/names";
 import { canManage } from "@/lib/data-policy";
+import { RichTextEditor } from "./rich-text";
 
 export function ApplicantEditor({
   application,
@@ -350,7 +351,7 @@ export function ApplicantEditor({
           </Field>
         )}
         <Field label="Add an HR note">
-          <textarea
+          <RichTextEditor
             name="notes"
             maxLength={10000}
             rows={3}

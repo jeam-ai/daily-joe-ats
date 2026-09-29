@@ -62,11 +62,14 @@ export function buildEmailPayload(input: {
     !/^<[-a-zA-Z0-9.]+@[-a-zA-Z0-9.]+>$/.test(input.messageId)
   )
     throw new Error("Invalid message identity.");
-  const body =
-    Buffer.from(input.body.replace(/\r?\n/g, "\r\n"))
+  const encodePart = (value: string) =>
+    Buffer.from(value.replace(/\r?\n/g, "\r\n"))
       .toString("base64")
       .match(/.{1,76}/g)
       ?.join("\r\n") || "";
+  const boundary = `daily-joe-${crypto.randomUUID()}`;
+  const textBody = encodePart(richTextToPlainText(input.body));
+  const htmlBody = encodePart(richTextToHtml(input.body));
   const mime = [
     ...(input.messageId ? [`Message-ID: ${input.messageId}`] : []),
     ...(input.from ? [`From: Daily Joe Careers <${input.from}>`] : []),
@@ -76,13 +79,23 @@ export function buildEmailPayload(input: {
       ? [`In-Reply-To: ${input.inReplyTo}`, `References: ${input.inReplyTo}`]
       : []),
     "MIME-Version: 1.0",
+    `Content-Type: multipart/alternative; boundary=\"${boundary}\"`,
+    "",
+    `--${boundary}`,
     "Content-Type: text/plain; charset=UTF-8",
     "Content-Transfer-Encoding: base64",
     "",
-    body,
+    textBody,
+    `--${boundary}`,
+    "Content-Type: text/html; charset=UTF-8",
+    "Content-Transfer-Encoding: base64",
+    "",
+    htmlBody,
+    `--${boundary}--`,
   ].join("\r\n");
   return {
     raw: Buffer.from(mime).toString("base64url"),
     ...(input.threadId ? { threadId: input.threadId } : {}),
   };
 }
+import { richTextToHtml, richTextToPlainText } from "@/lib/rich-text";

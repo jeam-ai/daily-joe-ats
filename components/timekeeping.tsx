@@ -23,6 +23,7 @@ import {
   Modal,
   HelpTip,
 } from "./ui";
+import { RichTextEditor } from "./rich-text";
 import { requestJson, downloadFile } from "@/lib/client-request";
 import {
   defaultOdooRules,
@@ -1703,11 +1704,11 @@ export function Timekeeping() {
             is verified in the separate overtime-monitoring process.
           </p>
           <Field label="Completion note">
-            <textarea
+            <RichTextEditor
               rows={3}
               maxLength={4000}
               value={overtimeCompletionNote}
-              onChange={(event) => setOvertimeCompletionNote(event.target.value)}
+              onChange={setOvertimeCompletionNote}
             />
           </Field>
           <div className="modal-actions">
@@ -1885,11 +1886,11 @@ export function Timekeeping() {
                   </p>
                   {pendingClassification === "Other" && (
                     <Field label="HR note (required for Other)">
-                      <textarea
+                      <RichTextEditor
                         rows={2}
                         maxLength={4000}
                         value={note}
-                        onChange={(event) => setNote(event.target.value)}
+                        onChange={setNote}
                         placeholder="Explain the classification for the cutoff audit trail."
                       />
                     </Field>
@@ -2004,11 +2005,11 @@ export function Timekeeping() {
             </Select>
           </Field>
           <Field label="Resolution / verification note">
-            <textarea
+            <RichTextEditor
               rows={3}
               maxLength={4000}
               value={note}
-              onChange={(e) => setNote(e.target.value)}
+              onChange={setNote}
               placeholder="Record the evidence and reason for this review."
             />
           </Field>
@@ -2022,11 +2023,11 @@ export function Timekeeping() {
           </label>
           {correctedInOdoo && (
             <Field label="Odoo correction note">
-              <textarea
+              <RichTextEditor
                 rows={2}
                 maxLength={4000}
                 value={correctionNote}
-                onChange={(e) => setCorrectionNote(e.target.value)}
+                onChange={setCorrectionNote}
                 placeholder="Reference the Odoo correction or verification."
               />
             </Field>

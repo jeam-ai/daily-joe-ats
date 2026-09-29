@@ -36,7 +36,7 @@ import { canManage } from "@/lib/data-policy";
 import { planVacancyReportImport } from "@/lib/vacancy-report";
 import { clientFetch } from "@/lib/client-request";
 
-const DECLARED_VACANCY_DATE = "2026-09-15";
+const DECLARED_VACANCY_DATE = "2026-09-20";
 
 function operationalUrgency(need: HiringNeed) {
   if (need.status !== "Open") return need.urgency;
@@ -91,12 +91,12 @@ export function HiringNeeds() {
       (need) => need.openedAt?.slice(0, 10) !== DECLARED_VACANCY_DATE,
     ).length;
     if (!affected) {
-      notify("All hiring needs already use the September 15 vacancy date.");
+      notify("All hiring needs already use the September 20 vacancy date.");
       return;
     }
     if (
       !window.confirm(
-        `Set the declared vacancy date to September 15, 2026 for ${affected} hiring need${affected === 1 ? "" : "s"}? This changes only the date used for Days open.`,
+        `Set the declared vacancy date to September 20, 2026 for ${affected} hiring need${affected === 1 ? "" : "s"}? This changes only the date used for Days open.`,
       )
     )
       return;
@@ -212,9 +212,9 @@ export function HiringNeeds() {
                 !canManage(state.currentUser) || saving || dataset === "demo"
               }
               onClick={() => void setDeclaredOpenDate()}
-              title="Use September 15, 2026 as the declared vacancy date for all current hiring needs."
+              title="Use September 20, 2026 as the declared vacancy date for all current hiring needs."
             >
-              Set Sep 15 open date
+              Set Sep 20 open date
             </Button>
           </div>
         </div>

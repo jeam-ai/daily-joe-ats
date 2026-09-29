@@ -6,6 +6,7 @@ import { emailContext, renderEmail } from "@/lib/email-templates";
 import { useApp } from "./provider";
 import { formatDate, formatTime } from "@/lib/dates";
 import { Button, Card, Field, Input, Select, Modal, Badge } from "./ui";
+import { RichTextContent, RichTextEditor } from "./rich-text";
 export function Communication({
   application: a,
 }: {
@@ -143,7 +144,9 @@ export function Communication({
               <p>
                 <b>Subject:</b> {draft.subject}
               </p>
-              <pre className="email-preview">{draft.body}</pre>
+              <div className="email-preview">
+                <RichTextContent value={draft.body} />
+              </div>
               <p>Sending delivers this message to the real applicant.</p>
               <div className="modal-actions">
                 <Button
@@ -180,10 +183,11 @@ export function Communication({
                 />
               </Field>
               <Field label="Message">
-                <textarea
+                <RichTextEditor
                   rows={10}
                   value={body}
-                  onChange={(e) => setBody(e.target.value)}
+                  onChange={setBody}
+                  placeholder="Write the message to the applicant…"
                 />
               </Field>
               {a.rfcMessageId && (

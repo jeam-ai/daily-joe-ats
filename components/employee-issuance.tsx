@@ -35,6 +35,7 @@ import {
   Table,
   Tabs,
 } from "./ui";
+import { RichTextEditor } from "./rich-text";
 
 const statuses: IssuanceStatus[] = [
   "Issued",
@@ -770,7 +771,7 @@ export function EmployeeIssuance() {
               acknowledgment signed
             </label>
             <Field label="Remarks">
-              <textarea name="remarks" />
+              <RichTextEditor name="remarks" rows={3} />
             </Field>
             <div className="modal-actions">
               <Button
@@ -929,7 +930,11 @@ export function EmployeeIssuance() {
               Issuance acknowledgment signed
             </label>
             <Field label="Remarks">
-              <textarea name="remarks" defaultValue={editing.remarks || ""} />
+              <RichTextEditor
+                name="remarks"
+                rows={3}
+                defaultValue={editing.remarks || ""}
+              />
             </Field>
             <div className="modal-actions">
               <Button

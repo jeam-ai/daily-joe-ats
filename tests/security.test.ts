@@ -88,11 +88,16 @@ test("MIME payload preserves UTF-8 text and uses base64url transport", () => {
   const decoded = Buffer.from(raw, "base64url").toString();
   assert.ok(decoded.startsWith("To: test@example.com\r\n"));
   assert.ok(decoded.includes(Buffer.from(DEFAULT_SUBJECT).toString("base64")));
-  const encodedBody = decoded.split("\r\n\r\n")[1];
+  const textPart = decoded.match(
+    /Content-Type: text\/plain; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n([A-Za-z0-9+/=\r\n]+)/,
+  );
+  assert.ok(textPart, "a plain-text MIME alternative is included");
+  const encodedBody = textPart[1];
   assert.equal(
     Buffer.from(encodedBody, "base64").toString().replaceAll("\r\n", "\n"),
     DEFAULT_BODY,
   );
+  assert.match(decoded, /Content-Type: text\/html; charset=UTF-8/);
   const branded = Buffer.from(
     buildEmailPayload({
       from: "careers@example.invalid",

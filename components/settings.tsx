@@ -26,6 +26,7 @@ import {
   Save,
 } from "lucide-react";
 import { useApp } from "./provider";
+import { RichTextContent, RichTextEditor } from "./rich-text";
 import {
   Badge,
   Button,
@@ -338,11 +339,12 @@ export function Settings({ section = "integrations" }: { section?: string }) {
                         />
                       </Field>
                       <Field label="Message">
-                        <textarea
+                        <RichTextEditor
                           name="body"
                           required
                           rows={10}
                           defaultValue={template.body}
+                          placeholder="Write the reusable email message…"
                         />
                       </Field>
                       <div className="variable-list">
@@ -392,7 +394,7 @@ export function Settings({ section = "integrations" }: { section?: string }) {
                         <div className="email-preview">
                           <Badge>DEMO PREVIEW · No email sent</Badge>
                           <h3>{templatePreview.subject}</h3>
-                          <pre>{templatePreview.body}</pre>
+                          <RichTextContent value={templatePreview.body} />
                           {templatePreview.missing.length > 0 && (
                             <p className="error-banner">
                               Missing values:{" "}
