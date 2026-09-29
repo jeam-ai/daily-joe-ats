@@ -24,6 +24,7 @@ import {
 import { useApp } from "./provider";
 import { formatDate } from "@/lib/dates";
 import { canManage } from "@/lib/data-policy";
+import { RichTextEditor } from "./rich-text";
 import { Sparkles, Sheet } from "lucide-react";
 import {
   OfficialIntegration,
@@ -274,12 +275,12 @@ export function GmailSettings() {
             />
           </Field>
           <Field label="Message">
-            <textarea
+            <RichTextEditor
               required
               rows={8}
               maxLength={10000}
               value={body}
-              onChange={(e) => setBody(e.target.value)}
+              onChange={setBody}
               disabled={sending}
             />
           </Field>

@@ -455,7 +455,7 @@ export function DeleteApplicantDialog({
               />
             </Field>
             <Field label="Deletion reason">
-              <textarea name="reason" rows={2} maxLength={2000} required />
+              <RichTextEditor name="reason" rows={2} maxLength={2000} required />
             </Field>
           </>
         )}

@@ -23,7 +23,7 @@ import {
   Modal,
   HelpTip,
 } from "./ui";
-import { RichTextEditor } from "./rich-text";
+import { RichTextContent, RichTextEditor } from "./rich-text";
 import { requestJson, downloadFile } from "@/lib/client-request";
 import {
   defaultOdooRules,
@@ -2085,14 +2085,14 @@ export function Timekeeping() {
             <summary>Review history ({selected.review.history.length})</summary>
             {selected.review.history.length ? (
               selected.review.history.map((h, i) => (
-                <p key={i}>
+                <div key={i} className="timekeeping-history-entry">
                   {h.previous} → {h.next}
                   <br />
                   {h.reviewer} ·{" "}
                   {formatDate(h.timestamp, state?.preferences, true)}
                   <br />
-                  {h.note}
-                </p>
+                  <RichTextContent value={h.note} />
+                </div>
               ))
             ) : (
               <p>No HR review has been recorded.</p>

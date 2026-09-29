@@ -58,6 +58,8 @@ export function HiringNeeds() {
   const [filter, setFilter] = useState("Open");
   const [importOpen, setImportOpen] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [openDateConfirmationOpen, setOpenDateConfirmationOpen] =
+    useState(false);
   if (!state) return <LoadingSkeleton />;
   const reportPlan = planVacancyReportImport(state);
   const canImportReport =
@@ -69,6 +71,9 @@ export function HiringNeeds() {
     (n) => filter === "All" || n.status === filter,
   );
   const openNeeds = state.hiringNeeds.filter((n) => n.status === "Open");
+  const openDateAffected = state.hiringNeeds.filter(
+    (need) => need.openedAt?.slice(0, 10) !== DECLARED_VACANCY_DATE,
+  ).length;
   const vacancies = openNeeds.reduce(
     (total, need) => total + Math.max(0, need.slots - need.filled),
     0,
@@ -87,26 +92,25 @@ export function HiringNeeds() {
     0,
   );
   async function setDeclaredOpenDate() {
-    const affected = (state?.hiringNeeds || []).filter(
-      (need) => need.openedAt?.slice(0, 10) !== DECLARED_VACANCY_DATE,
-    ).length;
-    if (!affected) {
+    if (!openDateAffected) {
       notify("All hiring needs already use the September 20 vacancy date.");
+      setOpenDateConfirmationOpen(false);
       return;
     }
-    if (
-      !window.confirm(
-        `Set the declared vacancy date to September 20, 2026 for ${affected} hiring need${affected === 1 ? "" : "s"}? This changes only the date used for Days open.`,
-      )
-    )
-      return;
-    await update((workspace) => ({
+    const saved = await update((workspace) => ({
       ...workspace,
       hiringNeeds: workspace.hiringNeeds.map((need) => ({
         ...need,
         openedAt: `${DECLARED_VACANCY_DATE}T00:00:00.000Z`,
       })),
     }));
+    if (saved) {
+      setOpenDateConfirmationOpen(false);
+      notify(
+        `September 20, 2026 was saved as the open date for ${openDateAffected} hiring need${openDateAffected === 1 ? "" : "s"}.`,
+        "success",
+      );
+    }
   }
   async function save(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -211,7 +215,7 @@ export function HiringNeeds() {
               disabled={
                 !canManage(state.currentUser) || saving || dataset === "demo"
               }
-              onClick={() => void setDeclaredOpenDate()}
+              onClick={() => setOpenDateConfirmationOpen(true)}
               title="Use September 20, 2026 as the declared vacancy date for all current hiring needs."
             >
               Set Sep 20 open date
@@ -585,6 +589,35 @@ export function HiringNeeds() {
             </Button>
             <Button disabled={importing} onClick={importReport}>
               {importing ? "Adding…" : "Add verified rows"}
+            </Button>
+          </div>
+        </Modal>
+      )}
+      {openDateConfirmationOpen && (
+        <Modal
+          busy={saving}
+          title="Set declared vacancy date?"
+          onClose={() => setOpenDateConfirmationOpen(false)}
+        >
+          <p>
+            Set September 20, 2026 as the declared open date for{" "}
+            {openDateAffected} current hiring need
+            {openDateAffected === 1 ? "" : "s"}?
+          </p>
+          <p className="retention-inline">
+            This only updates the date used for the Days open indicator. It
+            does not change role details, staffing counts, or target dates.
+          </p>
+          <div className="modal-actions">
+            <Button
+              variant="secondary"
+              disabled={saving}
+              onClick={() => setOpenDateConfirmationOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button disabled={saving} onClick={() => void setDeclaredOpenDate()}>
+              {saving ? "Saving…" : "Confirm September 20"}
             </Button>
           </div>
         </Modal>

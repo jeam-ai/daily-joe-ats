@@ -9,6 +9,7 @@ import type {
 } from "@/types/operations";
 import { requestJson } from "@/lib/client-request";
 import { useApp } from "./provider";
+import { RichTextEditor } from "./rich-text";
 import {
   Badge,
   Button,
@@ -844,10 +845,11 @@ export function Diagnostics() {
                 {active(selected) && (
                   <>
                     <Field label="How did you verify the resolution?">
-                      <textarea
+                      <RichTextEditor
                         value={note}
                         maxLength={500}
-                        onChange={(e) => setNote(e.target.value)}
+                        onChange={setNote}
+                        rows={3}
                       />
                     </Field>
                     <Button

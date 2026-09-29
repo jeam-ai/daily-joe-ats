@@ -7,6 +7,7 @@ import { Sparkles } from "lucide-react";
 import { canManage } from "@/lib/data-policy";
 import { qualificationRulesForPosition } from "@/lib/screening";
 import { ScreeningControls } from "./screening-controls";
+import { RichTextEditor } from "./rich-text";
 import {
   Badge,
   Button,
@@ -552,7 +553,7 @@ export function ApplicantTools({
               <Input name="date" type="date" required />
             </Field>
             <Field label="HR notes">
-              <textarea name="notes" />
+              <RichTextEditor name="notes" rows={3} />
             </Field>
             <Button
               type="submit"

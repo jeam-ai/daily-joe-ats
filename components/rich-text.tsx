@@ -19,6 +19,7 @@ type EditorProps = {
   value?: string;
   defaultValue?: string;
   onChange?: (value: string) => void;
+  onBlur?: (value: string) => void;
   placeholder?: string;
   maxLength?: number;
   rows?: number;
@@ -43,6 +44,7 @@ export function RichTextEditor({
   value,
   defaultValue = "",
   onChange,
+  onBlur,
   placeholder,
   maxLength,
   rows = 4,
@@ -67,9 +69,10 @@ export function RichTextEditor({
   }, [content]);
   const update = () => {
     const next = root.current ? editorHtmlToRichText(root.current) : "";
-    if (maxLength && next.length > maxLength) return;
+    if (maxLength && next.length > maxLength) return content;
     setContent(next);
     onChange?.(next);
+    return next;
   };
   const command = (action: string) => {
     if (disabled || !root.current) return;
@@ -117,8 +120,8 @@ export function RichTextEditor({
         aria-required={required || undefined}
         data-placeholder={placeholder}
         style={{ minHeight: `${Math.max(2, rows) * 1.5}rem` }}
-        onInput={update}
-        onBlur={update}
+        onInput={() => void update()}
+        onBlur={() => onBlur?.(update())}
       />
       <small className="rich-text-hint">
         Formatting is saved with this note.

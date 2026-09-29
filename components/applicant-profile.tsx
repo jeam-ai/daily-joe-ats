@@ -146,7 +146,9 @@ export function Timeline({
               {event.user} ·{" "}
               {formatDate(event.timestamp, state?.preferences, true)}
             </p>
-            {event.metadata.note && <p>{event.metadata.note}</p>}
+            {event.metadata.note && (
+              <RichTextContent value={event.metadata.note} />
+            )}
             {event.metadata.emailId && (
               <ViewEmail
                 applicationId={application.id}
@@ -777,17 +779,17 @@ export function ApplicantProfile({ id }: { id: string }) {
                       </Select>
                     </Field>
                     <Field label="Interview notes">
-                      <textarea
+                      <RichTextEditor
                         disabled={!editable || workspaceSaving}
                         defaultValue={interview.notes}
                         key={interview.id}
-                        onBlur={(e) => {
-                          if (e.target.value !== interview.notes)
+                        onBlur={(value) => {
+                          if (value !== interview.notes)
                             change("Interview notes updated", (a) => ({
                               ...a,
                               interviews: a.interviews.map((i) =>
                                 i.id === interview.id
-                                  ? { ...i, notes: e.target.value }
+                                  ? { ...i, notes: value }
                                   : i,
                               ),
                             }));
@@ -1245,10 +1247,11 @@ export function ApplicantProfile({ id }: { id: string }) {
               </Field>
             )}
             <Field label="Decision notes">
-              <textarea
+              <RichTextEditor
                 value={decisionNote}
-                onChange={(e) => setDecisionNote(e.target.value)}
+                onChange={setDecisionNote}
                 placeholder="Add your reason or next steps"
+                rows={3}
               />
             </Field>
             <p className="fine-print">
