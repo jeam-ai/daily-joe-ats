@@ -3225,6 +3225,22 @@ progress {
 .home-stock-metrics .home-stock-on-hand b {
   color: var(--accent-strong);
 }
+.opening-date-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 18px;
+  border-color: color-mix(in srgb, var(--warning) 32%, var(--border));
+  background: color-mix(in srgb, var(--warning-bg) 62%, var(--surface));
+}
+.opening-date-notice h2 {
+  margin: 0;
+}
+.opening-date-notice p {
+  margin: 4px 0 0;
+  color: var(--text-secondary);
+}
 
 /* Shared formatted editor: used for messages and operational notes, while
    structured inputs remain deliberately plain and validation-friendly. */
@@ -3464,6 +3480,10 @@ progress {
     overflow-wrap: anywhere;
     white-space: normal;
   }
+  .opening-date-notice {
+    align-items: flex-start;
+    flex-direction: column;
+  }
   .settings-workspace-layout .settings-nav {
     padding: 6px;
     border-radius: 12px;
@@ -3474,6 +3494,18 @@ progress {
   .reports-summary .report-metric {
     min-height: 118px;
     padding: 15px;
+  }
+}
+
+@media (max-width: 420px) {
+  .home-stock-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .home-stock-metrics .home-stock-on-hand {
+    grid-column: 1 / -1;
+    padding: 8px 0 0;
+    border-top: 1px solid var(--border);
+    border-left: 0;
   }
 }
 

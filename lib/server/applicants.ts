@@ -541,7 +541,10 @@ export async function updateApplicant(id: string, input: unknown, user: User) {
       previous: before,
       next: application,
     });
-    await saveState(tx, state, { sync: !application.isDemo });
+    // A direct profile save is already committed transactionally and is
+    // picked up through the workspace revision poll. Do not make HR wait for
+    // a tracker/sync pass that is unrelated to the field they just edited.
+    await saveState(tx, state, { sync: false });
     return structuredClone(application);
   });
 }

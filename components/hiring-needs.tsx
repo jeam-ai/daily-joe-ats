@@ -34,6 +34,7 @@ import { QualificationEditor } from "./qualification-editor";
 import type { QualificationRule } from "@/types";
 import { canManage } from "@/lib/data-policy";
 import { RichTextEditor } from "./rich-text";
+import { requestJson } from "@/lib/client-request";
 
 function operationalUrgency(need: HiringNeed) {
   if (need.status !== "Open") return need.urgency;
@@ -46,13 +47,15 @@ function operationalUrgency(need: HiringNeed) {
   return need.urgency;
 }
 export function HiringNeeds() {
-  const { state, update, notify, saving, dataset } = useApp();
+  const { state, notify, patchState, dataset } = useApp();
   const params = useSearchParams();
   const [editing, setEditing] = useState<string | null>(
     params.get("new") ? "new" : params.get("edit"),
   );
   const [rules, setRules] = useState<QualificationRule[] | null>(null);
   const [filter, setFilter] = useState("Open");
+  const [savingNeed, setSavingNeed] = useState(false);
+  const [confirmOpeningDates, setConfirmOpeningDates] = useState(false);
   if (!state) return <LoadingSkeleton />;
   const existing = state.hiringNeeds.find((n) => n.id === editing);
   const rows = state.hiringNeeds.filter(
@@ -75,6 +78,10 @@ export function HiringNeeds() {
       total +
       (state.applicationSummary?.[dataset].activeByHiringNeed[need.id] || 0),
     0,
+  );
+  const needsOpeningDateStandardization = state.hiringNeeds.filter(
+    (need) =>
+      !need.isDemo && need.openedAt !== "2026-09-20T00:00:00.000Z",
   );
   async function save(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -102,16 +109,65 @@ export function HiringNeeds() {
       notify("Requested slots cannot be fewer than filled slots.");
       return;
     }
-    const saved = await update((s) => ({
-      ...s,
-      hiringNeeds: existing
-        ? s.hiringNeeds.map((n) => (n.id === need.id ? need : n))
-        : [...s.hiringNeeds, need],
-    }));
-    if (saved) {
+    setSavingNeed(true);
+    try {
+      const result = await requestJson<{ hiringNeed: HiringNeed }>(
+        "/api/hiring-needs",
+        {
+          method: existing ? "PATCH" : "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(need),
+        },
+      );
+      patchState((current) => ({
+        ...current,
+        hiringNeeds: current.hiringNeeds.some(
+          (item) => item.id === result.hiringNeed.id,
+        )
+          ? current.hiringNeeds.map((item) =>
+              item.id === result.hiringNeed.id ? result.hiringNeed : item,
+            )
+          : [...current.hiringNeeds, result.hiringNeed],
+      }));
       setEditing(null);
       setRules(null);
       notify("Hiring need saved and the staffing plan was refreshed.", "success");
+    } catch (error) {
+      notify((error as Error).message, "error");
+    } finally {
+      setSavingNeed(false);
+    }
+  }
+  async function standardizeOpeningDates() {
+    setSavingNeed(true);
+    try {
+      const result = await requestJson<{
+        updated: number;
+        hiringNeeds: HiringNeed[];
+      }>("/api/hiring-needs", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ openedAt: "2026-09-20", confirmed: true }),
+      });
+      const updated = new Map(result.hiringNeeds.map((need) => [need.id, need]));
+      if (updated.size)
+        patchState((current) => ({
+          ...current,
+          hiringNeeds: current.hiringNeeds.map(
+            (need) => updated.get(need.id) || need,
+          ),
+        }));
+      setConfirmOpeningDates(false);
+      notify(
+        result.updated
+          ? `Set the opening date to Sep 20, 2026 for ${result.updated} hiring need${result.updated === 1 ? "" : "s"}.`
+          : "All real hiring needs already use the Sep 20, 2026 opening date.",
+        "success",
+      );
+    } catch (error) {
+      notify((error as Error).message, "error");
+    } finally {
+      setSavingNeed(false);
     }
   }
   return (
@@ -129,7 +185,7 @@ export function HiringNeeds() {
           <div className="button-row">
             <Button
               disabled={
-                !canManage(state.currentUser) || saving || dataset === "demo"
+                !canManage(state.currentUser) || savingNeed || dataset === "demo"
               }
               title={
                 dataset === "demo"
@@ -151,6 +207,25 @@ export function HiringNeeds() {
         Define each opening once, then use the same requirements to guide
         applicant screening and HR decisions.
       </p>
+      {!!needsOpeningDateStandardization.length && dataset === "real" && (
+        <Card className="opening-date-notice">
+          <div>
+            <h2>Confirm opening dates</h2>
+            <p>
+              {needsOpeningDateStandardization.length} real hiring request
+              {needsOpeningDateStandardization.length === 1 ? " is" : "s are"} not
+              yet recorded as opened on Sep 20, 2026.
+            </p>
+          </div>
+          <Button
+            variant="secondary"
+            disabled={!canManage(state.currentUser) || savingNeed}
+            onClick={() => setConfirmOpeningDates(true)}
+          >
+            Set Sep 20 opening date
+          </Button>
+        </Card>
+      )}
       <div
         className="metrics-grid vacancy-metrics hiring-needs-summary"
         aria-label="Vacancy report"
@@ -327,7 +402,7 @@ export function HiringNeeds() {
               )}
               <Button
                 variant="secondary"
-                disabled={!canManage(state.currentUser) || saving}
+                disabled={!canManage(state.currentUser) || savingNeed}
                 onClick={() => {
                   setRules(n.criteria || []);
                   setEditing(n.id);
@@ -356,7 +431,7 @@ export function HiringNeeds() {
       )}
       {editing && (
         <Modal
-          busy={saving}
+          busy={savingNeed}
           title={existing ? "Edit hiring need" : "New hiring need"}
           onClose={() => setEditing(null)}
         >
@@ -483,12 +558,45 @@ export function HiringNeeds() {
               </Button>
               <Button
                 type="submit"
-                disabled={saving || !canManage(state.currentUser)}
+                disabled={savingNeed || !canManage(state.currentUser)}
               >
-                {saving ? "Saving…" : "Save hiring need"}
+                {savingNeed ? "Saving…" : "Save hiring need"}
               </Button>
             </div>
           </form>
+        </Modal>
+      )}
+      {confirmOpeningDates && (
+        <Modal
+          busy={savingNeed}
+          title="Confirm opening dates"
+          onClose={() => setConfirmOpeningDates(false)}
+        >
+          <div className="form-stack">
+            <p>
+              Set the opened-on date to <strong>Sep 20, 2026</strong> for all
+              real hiring needs. This changes only the days-open reference;
+              roles, locations, vacancies, qualifications, and target dates
+              stay unchanged.
+            </p>
+            <div className="modal-actions">
+              <Button
+                variant="secondary"
+                type="button"
+                disabled={savingNeed}
+                onClick={() => setConfirmOpeningDates(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                disabled={savingNeed}
+                onClick={() => void standardizeOpeningDates()}
+              >
+                {savingNeed ? "Saving…" : "Confirm date update"}
+              </Button>
+            </div>
+          </div>
         </Modal>
       )}
     </div>
