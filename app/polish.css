@@ -331,13 +331,20 @@ input[type="radio"] {
   align-items: center;
   gap: 7px;
   width: fit-content;
-  margin: 18px 10px -10px;
-  padding: 5px 0;
+  min-height: 32px;
+  margin: 16px 10px -8px;
+  padding: 6px 9px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  background: var(--surface-subtle);
   color: var(--text-secondary);
   font-size: 11px;
   font-weight: 650;
+  transition: background 160ms ease, border-color 160ms ease, color 160ms ease, transform 160ms ease;
 }
 .sidebar-collapse-toggle:hover {
+  border-color: var(--border);
+  background: var(--surface-hover);
   color: var(--info);
 }
 .sidebar-collapsed {
@@ -350,7 +357,6 @@ input[type="radio"] {
   margin-left: 76px;
   width: calc(100% - 76px);
 }
-.sidebar-collapsed .sidebar-collapse-toggle,
 .sidebar-collapsed .brand-careers,
 .sidebar-collapsed .workspace-label,
 .sidebar-collapsed .sidebar-nav-group-label,
@@ -370,6 +376,24 @@ input[type="radio"] {
 }
 .sidebar-collapsed .brand {
   padding: 0 5px;
+}
+.sidebar-collapsed .sidebar-collapse-toggle {
+  width: 44px;
+  height: 44px;
+  min-height: 44px;
+  margin: 14px 0 -8px;
+  padding: 0;
+  justify-content: center;
+  border-color: var(--border);
+  border-radius: 11px;
+}
+.sidebar-collapsed .sidebar-collapse-toggle .sidebar-collapse-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
 }
 .sidebar-collapsed nav {
   margin-top: 44px;
@@ -405,7 +429,6 @@ input[type="radio"] {
   padding-inline: 20px;
   box-shadow: 8px 0 26px #19375418;
 }
-.sidebar-collapsed:hover .sidebar-collapse-toggle,
 .sidebar-collapsed:hover .brand-careers,
 .sidebar-collapsed:hover .workspace-label,
 .sidebar-collapsed:hover .sidebar-nav-group-label,
@@ -422,6 +445,22 @@ input[type="radio"] {
 }
 .sidebar-collapsed:hover .brand {
   padding: 0 10px;
+}
+.sidebar-collapsed:hover .sidebar-collapse-toggle {
+  width: auto;
+  height: 32px;
+  min-height: 32px;
+  margin: 16px 10px -8px;
+  padding: 6px 9px;
+  justify-content: flex-start;
+}
+.sidebar-collapsed:hover .sidebar-collapse-toggle .sidebar-collapse-label {
+  position: static;
+  width: auto;
+  height: auto;
+  overflow: visible;
+  clip: auto;
+  white-space: normal;
 }
 .sidebar-collapsed:hover nav {
   margin-top: 0;

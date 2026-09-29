@@ -96,6 +96,11 @@ export async function saveState(
   state: AppState,
   options: { sync?: boolean; trackerWorkbook?: boolean } = {},
 ) {
+  // Keep the relational projection incremental. A typical workspace edit
+  // changes one record, while the workspace snapshot can contain hundreds of
+  // applications. Replaying every related row holds the shared write lock long
+  // enough to make unrelated saves and page loads appear stalled.
+  const previous = await readRecord<AppState>(tx, "workspace", "main");
   delete state.currentUser;
   delete state.demoAvailable;
   state.revision = (state.revision || 0) + 1;
@@ -137,24 +142,50 @@ export async function saveState(
     },
   };
   // Relational entities and the bounded workspace read model commit together.
-  for (const [collection, records] of Object.entries({
-    hiring_needs: state.hiringNeeds,
-    qualification_templates: state.qualifications,
-    email_templates: state.emailTemplates,
-    requirements: state.requirementTemplates,
-    locations: state.locations || [],
-    notifications: state.notifications,
-    employee_issuance: state.issuance || [],
-    issuance_inventory: state.issuanceInventory || [],
-    issuance_catalog: state.issuanceItems || [],
-  })) {
-    for (const record of records)
+  for (const [collection, records, beforeRecords] of [
+    ["hiring_needs", state.hiringNeeds, previous?.hiringNeeds || []],
+    [
+      "qualification_templates",
+      state.qualifications,
+      previous?.qualifications || [],
+    ],
+    ["email_templates", state.emailTemplates, previous?.emailTemplates || []],
+    [
+      "requirements",
+      state.requirementTemplates,
+      previous?.requirementTemplates || [],
+    ],
+    ["locations", state.locations || [], previous?.locations || []],
+    ["notifications", state.notifications, previous?.notifications || []],
+    ["employee_issuance", state.issuance || [], previous?.issuance || []],
+    [
+      "issuance_inventory",
+      state.issuanceInventory || [],
+      previous?.issuanceInventory || [],
+    ],
+    [
+      "issuance_catalog",
+      state.issuanceItems || [],
+      previous?.issuanceItems || [],
+    ],
+  ] as const) {
+    const beforeById = new Map(beforeRecords.map((record) => [record.id, record]));
+    const currentIds = new Set(records.map((record) => record.id));
+    for (const record of records) {
+      if (!changed(beforeById.get(record.id), record))
+        continue;
       await queue.query(
         `INSERT INTO ${collection}(id,payload) VALUES($1,$2) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload`,
         [record.id, JSON.stringify(record)],
       );
+    }
+    for (const record of beforeRecords)
+      if (!currentIds.has(record.id))
+        await queue.query(`DELETE FROM ${collection} WHERE id=$1`, [record.id]);
   }
-  for (const user of state.users || [])
+  const beforeUsers = new Map((previous?.users || []).map((user) => [user.id, user]));
+  for (const user of state.users || []) {
+    if (!changed(beforeUsers.get(user.id), user)) continue;
     await queue.query(
       "INSERT INTO users(id,email,role,active,payload) VALUES($1,$2,$3,$4,$5) ON CONFLICT(id) DO UPDATE SET email=excluded.email,role=excluded.role,active=excluded.active,payload=excluded.payload",
       [
@@ -165,11 +196,19 @@ export async function saveState(
         JSON.stringify(user),
       ],
     );
+  }
+  const previousApplications = new Map(
+    (previous?.applications || []).map((application) => [application.id, application]),
+  );
+  const applicationsChanged = !previous || changed(previous.applications, state.applications);
   for (const a of state.applications) {
-    await queue.query(
-      "INSERT INTO applicants(id,email,payload) VALUES($1,$2,$3) ON CONFLICT(id) DO UPDATE SET email=excluded.email,payload=excluded.payload",
-      [a.applicant.id, a.applicant.email, JSON.stringify(a.applicant)],
-    );
+    const beforeApplication = previousApplications.get(a.id);
+    if (!changed(beforeApplication, a)) continue;
+    if (changed(beforeApplication?.applicant, a.applicant))
+      await queue.query(
+        "INSERT INTO applicants(id,email,payload) VALUES($1,$2,$3) ON CONFLICT(id) DO UPDATE SET email=excluded.email,payload=excluded.payload",
+        [a.applicant.id, a.applicant.email, JSON.stringify(a.applicant)],
+      );
     await queue.query(
       "INSERT INTO applications(id,applicant_id,hiring_need_id,resume_id,gmail_message_id,gmail_thread_id,stage,status,payload) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT(id) DO UPDATE SET hiring_need_id=excluded.hiring_need_id,resume_id=excluded.resume_id,gmail_message_id=excluded.gmail_message_id,gmail_thread_id=excluded.gmail_thread_id,stage=excluded.stage,status=excluded.status,payload=excluded.payload",
       [
@@ -188,30 +227,45 @@ export async function saveState(
       "INSERT INTO intake_window(application_id,state,received_at) VALUES($1,$2,$3) ON CONFLICT(application_id) DO UPDATE SET state=excluded.state,received_at=excluded.received_at",
       [a.id, a.isDemo ? "Demo" : a.queueState || "Closed", a.appliedAt],
     );
-    for (const i of a.interviews)
-      await queue.query(
-        "INSERT INTO interviews(id,application_id,payload) VALUES($1,$2,$3) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload",
-        [i.id, a.id, JSON.stringify(i)],
-      );
-    for (const r of a.requirements)
-      await queue.query(
-        "INSERT INTO application_requirements(id,application_id,payload) VALUES($1,$2,$3) ON CONFLICT(id,application_id) DO UPDATE SET payload=excluded.payload",
-        [r.id, a.id, JSON.stringify(r)],
-      );
-    await queue.query(
-      "INSERT INTO screening_results(application_id,payload) VALUES($1,$2) ON CONFLICT(application_id) DO UPDATE SET payload=excluded.payload",
-      [a.id, JSON.stringify(a.screening)],
+    const previousInterviews = new Map(
+      (beforeApplication?.interviews || []).map((interview) => [interview.id, interview]),
     );
-    if (a.hiredAt)
+    for (const interview of a.interviews)
+      if (changed(previousInterviews.get(interview.id), interview))
+        await queue.query(
+          "INSERT INTO interviews(id,application_id,payload) VALUES($1,$2,$3) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload",
+          [interview.id, a.id, JSON.stringify(interview)],
+        );
+    const previousRequirements = new Map(
+      (beforeApplication?.requirements || []).map((requirement) => [requirement.id, requirement]),
+    );
+    for (const requirement of a.requirements)
+      if (changed(previousRequirements.get(requirement.id), requirement))
+        await queue.query(
+          "INSERT INTO application_requirements(id,application_id,payload) VALUES($1,$2,$3) ON CONFLICT(id,application_id) DO UPDATE SET payload=excluded.payload",
+          [requirement.id, a.id, JSON.stringify(requirement)],
+        );
+    if (changed(beforeApplication?.screening, a.screening))
       await queue.query(
-        "INSERT INTO employment_records(application_id,hired_at,payload) VALUES($1,$2,$3) ON CONFLICT(application_id) DO UPDATE SET payload=excluded.payload",
+        "INSERT INTO screening_results(application_id,payload) VALUES($1,$2) ON CONFLICT(application_id) DO UPDATE SET payload=excluded.payload",
+        [a.id, JSON.stringify(a.screening)],
+      );
+    if (
+      a.hiredAt &&
+      (beforeApplication?.hiredAt !== a.hiredAt ||
+        changed(beforeApplication?.employment, a.employment))
+    )
+      await queue.query(
+        "INSERT INTO employment_records(application_id,hired_at,payload) VALUES($1,$2,$3) ON CONFLICT(application_id) DO UPDATE SET hired_at=excluded.hired_at,payload=excluded.payload",
         [a.id, a.hiredAt, JSON.stringify(a.employment)],
       );
+    const priorEventIds = new Set((beforeApplication?.timeline || []).map((event) => event.id));
     for (const e of a.timeline)
-      await queue.query(
-        "INSERT INTO application_events(id,application_id,occurred_at,actor,payload) VALUES($1,$2,$3,$4,$5) ON CONFLICT(id) DO NOTHING",
-        [e.id, a.id, e.timestamp, e.user, JSON.stringify(e)],
-      );
+      if (!priorEventIds.has(e.id))
+        await queue.query(
+          "INSERT INTO application_events(id,application_id,occurred_at,actor,payload) VALUES($1,$2,$3,$4,$5) ON CONFLICT(id) DO NOTHING",
+          [e.id, a.id, e.timestamp, e.user, JSON.stringify(e)],
+        );
   }
   // Group identical upserts into portable multi-row statements. This avoids
   // hundreds of network round trips for one workspace save.
@@ -254,7 +308,8 @@ export async function saveState(
   // The 500-item queue is balanced above, so create or cancel its retention
   // grace dates in this same save transaction. Cleanup remains a separate,
   // explicitly controlled process; this only records the clock immediately.
-  await syncOutsideQueueGraceDates(tx, state.applications);
+  if (applicationsChanged)
+    await syncOutsideQueueGraceDates(tx, state.applications);
   // Talent Pool membership is a person-level lifecycle, separate from any
   // individual application. Keep its normalized row in sync with active pool
   // applications without resetting an HR-retained expiry on ordinary edits.
@@ -273,16 +328,16 @@ export async function saveState(
       )
         activeTalent.set(a.applicant.id, startedAt);
     }
-  const memberships = await tx.query(
-    "SELECT applicant_id FROM talent_pool_memberships",
-  );
+  const memberships = applicationsChanged
+    ? await tx.query("SELECT applicant_id FROM talent_pool_memberships")
+    : [];
   for (const row of memberships)
     if (!activeTalent.has(String(row.applicant_id)))
       await tx.query(
         "DELETE FROM talent_pool_memberships WHERE applicant_id=$1",
         [row.applicant_id],
       );
-  if (activeTalent.size) {
+  if (applicationsChanged && activeTalent.size) {
     const configured = await tx.query(
       "SELECT name,days FROM retention_policies WHERE name IN ('talent_pool_days','talent_pool_grace_days')",
     );

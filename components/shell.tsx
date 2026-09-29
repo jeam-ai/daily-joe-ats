@@ -22,7 +22,8 @@ import {
   Clock3,
   PackageCheck,
   ContactRound,
-  PanelsTopLeft,
+  PanelLeftClose,
+  PanelLeftOpen,
   X,
   Mail,
   type LucideIcon,
@@ -49,7 +50,7 @@ const navigationGroups: ReadonlyArray<{
     label: "HR operations",
     items: [
       ["Timekeeping", "/timekeeping", Clock3],
-      ["Employee Records", "/people", ContactRound],
+      ["Onboarding", "/people", ContactRound],
       ["Employee Issuance", "/issuance", PackageCheck],
     ],
   },
@@ -184,8 +185,10 @@ function Frame({
           aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
           title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
         >
-          <PanelsTopLeft size={16} />
-          <span>{collapsed ? "Expand" : "Collapse"}</span>
+          {collapsed ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}
+          <span className="sidebar-collapse-label">
+            {collapsed ? "Expand" : "Collapse"}
+          </span>
         </button>
         <div className="workspace-label">YOUR WORKSPACE</div>
         <nav>
