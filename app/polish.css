@@ -3352,6 +3352,12 @@ progress {
   margin: 0;
   overflow-wrap: anywhere;
 }
+.timekeeping-checkpoint-note {
+  max-width: 680px;
+  margin: 7px 0 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
 .timekeeping-cutoff-heading .actions {
   justify-content: flex-end;
 }

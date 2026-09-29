@@ -38,6 +38,10 @@ import type { OdooBatch } from "@/lib/server/odoo";
 import { formatDate } from "@/lib/dates";
 import { attendanceTimestamp, defaultAttendanceRules } from "@/lib/timekeeping";
 import {
+  defaultTimekeepingCutoffGraceDays,
+  timekeepingRetentionLabel,
+} from "@/lib/timekeeping-retention";
+import {
   cutoffWorkflow,
   employeeAttendanceSummary,
   issueExplanation,
@@ -56,6 +60,8 @@ type BatchIndex = {
   id: string;
   period: OdooReports["period"];
   analyzedAt: string;
+  savedAt?: string;
+  retentionExpiresAt?: string;
 };
 const hours = (n: number | null) =>
   n === null
@@ -768,9 +774,10 @@ export function Timekeeping() {
         </Card>
         <Card className="padded spaced timekeeping-cutoff-card">
           <span className="eyebrow">CUTOFF HISTORY</span>
-          <h2>Open a saved analysis</h2>
+          <h2>Resume a saved cutoff</h2>
           <p className="muted">
-            Reopen a completed cutoff without uploading the Odoo exports again.
+            Continue an unfinished cutoff another day without uploading the Odoo
+            exports again.
           </p>
           <Field label="Saved cutoff analysis">
             <Select
@@ -785,7 +792,7 @@ export function Timekeeping() {
               {batches.map((b) => (
                 <option key={b.id} value={b.id}>
                   {date(b.period.start)} – {date(b.period.end)} ·{" "}
-                  {new Date(b.analyzedAt).toLocaleString("en", {
+                  {new Date(b.savedAt || b.analyzedAt).toLocaleString("en", {
                     month: "long",
                     day: "numeric",
                     hour: "numeric",
@@ -821,11 +828,52 @@ export function Timekeeping() {
                   ? " · Revised analysis; previous saved version replaced"
                   : ""}
               </p>
+              <p className="timekeeping-checkpoint-note">
+                Saved{" "}
+                {formatDate(
+                  batch.savedAt || batch.analyzedAt,
+                  state?.preferences,
+                  true,
+                )}
+                {batch.retentionExpiresAt
+                  ? ` · Cutoff data is permanently deleted after ${formatDate(batch.retentionExpiresAt, state?.preferences)}`
+                  : ` · ${timekeepingRetentionLabel(defaultTimekeepingCutoffGraceDays)}`}
+              </p>
             </div>
             <div className="actions">
               <Badge tone={reviewCount ? "orange" : "green"}>
                 {reviewCount ? `${reviewCount} for review` : "Review complete"}
               </Badge>
+              <Button
+                variant="secondary"
+                disabled={!!busy}
+                onClick={() =>
+                  void run("Saving cutoff checkpoint", async () => {
+                    const saved = await requestJson<{ batch: OdooBatch }>(
+                      "/api/timekeeping",
+                      json({
+                        action: "checkpoint",
+                        id: batch.id,
+                        revision: batch.revision,
+                      }),
+                    );
+                    setBatch(saved.batch);
+                    setBatches(
+                      (
+                        await requestJson<{ batches: BatchIndex[] }>(
+                          "/api/timekeeping",
+                        )
+                      ).batches,
+                    );
+                    notify(
+                      "Cutoff checkpoint saved. You can resume it from Saved cutoffs anytime before its retention deadline.",
+                    );
+                  })
+                }
+              >
+                <Save size={16} />
+                Save checkpoint
+              </Button>
               {["xlsx", "csv"].map((format) => (
                 <Button
                   key={format}

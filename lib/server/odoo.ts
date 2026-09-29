@@ -26,6 +26,10 @@ import {
 import { audit, getState, saveState } from "./repository";
 import { withDeadline } from "./deadline";
 import type { User } from "@/types";
+import {
+  defaultTimekeepingCutoffGraceDays,
+  timekeepingCutoffExpiresAt,
+} from "@/lib/timekeeping-retention";
 export const odooRulesSchema = z.object({
   timezone: z.enum(["Asia/Manila", "Asia/Singapore", "UTC"]),
   start: z.union([
@@ -50,6 +54,9 @@ export type OdooBatch = OdooAnalysis & {
   uploadedAt: string;
   analyzedAt: string;
   fingerprint: string;
+  savedAt?: string;
+  savedBy?: string;
+  retentionExpiresAt?: string;
   // Metadata only: the prior cutoff analysis itself is removed on replacement.
   previousBatchId?: string;
 };
@@ -213,6 +220,65 @@ export async function listOdooBatches(user: User) {
       .slice(0, 30);
   });
 }
+
+async function cutoffRetentionDeadline(tx: Transaction, periodEnd: string) {
+  const configured = await tx.query(
+    "SELECT days FROM retention_policies WHERE name='timekeeping_cutoff_grace_days'",
+  );
+  const grace = Number(configured[0]?.days);
+  return timekeepingCutoffExpiresAt(
+    periodEnd,
+    Number.isInteger(grace) && grace >= 0
+      ? grace
+      : defaultTimekeepingCutoffGraceDays,
+  );
+}
+
+export async function checkpointOdoo(
+  input: { id: string; revision: number },
+  user: User,
+) {
+  requireTimekeeping(user);
+  return transaction(async (tx) => {
+    const encrypted = await readRecord<string>(tx, "odoo_batches", input.id);
+    if (!encrypted) throw new SafeError("Analysis not found.", 404);
+    const batch = unseal<OdooBatch>(encrypted, config().encryptionKey);
+    if (batch.revision !== input.revision)
+      throw new SafeError(
+        "Another HR user updated this cutoff. Reload it before saving your checkpoint.",
+        409,
+      );
+    const now = new Date().toISOString();
+    batch.revision++;
+    batch.savedAt = now;
+    batch.savedBy = user.email;
+    batch.retentionExpiresAt =
+      (await cutoffRetentionDeadline(tx, batch.period.end)) || undefined;
+    await putRecord(
+      tx,
+      "odoo_batches",
+      batch.id,
+      seal(batch, config().encryptionKey),
+    );
+    const index = await readRecord<Record<string, unknown>>(
+      tx,
+      "odoo_index",
+      batch.id,
+    );
+    if (index)
+      await putRecord(tx, "odoo_index", batch.id, {
+        ...index,
+        savedAt: batch.savedAt,
+        retentionExpiresAt: batch.retentionExpiresAt,
+      });
+    await audit(tx, user.email, "timekeeping.checkpoint_saved", undefined, {
+      batchId: batch.id,
+      period: batch.period,
+      retentionExpiresAt: batch.retentionExpiresAt,
+    });
+    return batch;
+  });
+}
 export async function analyzeOdooUpload(
   id: string,
   input: unknown,
@@ -334,6 +400,10 @@ export async function analyzeOdooUpload(
         uploadedAt: upload.uploadedAt || now,
         analyzedAt: now,
         fingerprint,
+        savedAt: now,
+        savedBy: user.email,
+        retentionExpiresAt:
+          (await cutoffRetentionDeadline(tx, analysis.period.end)) || undefined,
         previousBatchId: previousBatchId || undefined,
       };
       await putRecord(
@@ -378,6 +448,8 @@ export async function analyzeOdooUpload(
         id: batch.id,
         period: batch.period,
         analyzedAt: now,
+        savedAt: batch.savedAt,
+        retentionExpiresAt: batch.retentionExpiresAt,
         employees: new Set(batch.records.map((r) => r.employeeId || r.employee))
           .size,
         records: batch.records.length,

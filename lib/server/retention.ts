@@ -6,6 +6,7 @@ import {
   type RetentionPolicies,
   type RetentionPolicyName,
 } from "@/lib/retention-policy";
+import { timekeepingCutoffExpiresAt } from "@/lib/timekeeping-retention";
 import { writeAudit } from "./audit";
 import { getState, saveState } from "./repository";
 import { transaction, type Transaction } from "./database";
@@ -96,6 +97,64 @@ async function deleteApplication(tx: Transaction, application: Application) {
     );
 }
 
+async function cleanExpiredTimekeepingCutoffs(
+  tx: Transaction,
+  now: string,
+  graceDays: number,
+  dryRun: boolean,
+) {
+  const cutoffs = await tx.query(
+    "SELECT id,payload FROM records WHERE collection='odoo_cutoffs'",
+  );
+  const expired = cutoffs.flatMap((row) => {
+    const cutoff = String(row.id);
+    const [, periodEnd] = cutoff.split(":");
+    const expiresAt = periodEnd
+      ? timekeepingCutoffExpiresAt(periodEnd, graceDays)
+      : null;
+    if (!expiresAt || expiresAt > now) return [];
+    try {
+      const batchId = JSON.parse(String(row.payload));
+      return typeof batchId === "string" ? [{ cutoff, batchId }] : [];
+    } catch {
+      return [];
+    }
+  });
+  if (dryRun) return expired.length;
+
+  for (const { cutoff, batchId } of expired) {
+    await tx.query(
+      "DELETE FROM records WHERE collection='odoo_cutoffs' AND id=$1",
+      [cutoff],
+    );
+    await tx.query(
+      "DELETE FROM records WHERE collection IN ('odoo_batches','odoo_sources','odoo_index') AND id=$1",
+      [batchId],
+    );
+    await tx.query(
+      "DELETE FROM records WHERE collection='odoo_exceptions' AND id LIKE $1",
+      [`${batchId}:%`],
+    );
+    await tx.query(
+      "DELETE FROM records WHERE collection='odoo_reviews' AND payload LIKE $1",
+      [`%\"batchId\":\"${batchId}\"%`],
+    );
+    await tx.query(
+      "DELETE FROM records WHERE collection='odoo_fingerprints' AND payload=$1",
+      [JSON.stringify(batchId)],
+    );
+    await tx.query(
+      "DELETE FROM records WHERE collection='timekeeping_jobs' AND payload LIKE $1",
+      [`%\"batchId\":\"${batchId}\"%`],
+    );
+    await tx.query(
+      "DELETE FROM audit_logs WHERE action LIKE 'timekeeping.%' AND (payload LIKE $1 OR payload LIKE $2)",
+      [`%${batchId}%`, `%${cutoff}%`],
+    );
+  }
+  return expired.length;
+}
+
 /**
  * Preserve the reporting contribution without retaining applicant data. This
  * row deliberately has no application ID, name, contact data, resume text, or
@@ -152,6 +211,12 @@ export async function runRetentionCleanup(options: RetentionRunOptions = {}) {
     const now = at(nowMs);
     const policy = await policies(tx);
     const state = await getState(tx);
+    const timekeepingCutoffs = await cleanExpiredTimekeepingCutoffs(
+      tx,
+      now,
+      policy.timekeeping_cutoff_grace_days,
+      dryRun,
+    );
     const originalApplications = [...state.applications];
     const live = state.applications
       .filter((a) => !isDemo(a) && !a.deletedAt && eligibleIntake(a))
@@ -491,6 +556,12 @@ export async function runRetentionCleanup(options: RetentionRunOptions = {}) {
         now,
       );
       await recordCleanupMetric(tx, "hiring_needs_expired", needIds.size, now);
+      await recordCleanupMetric(
+        tx,
+        "timekeeping_cutoffs_deleted",
+        timekeepingCutoffs,
+        now,
+      );
     }
     return {
       dryRun,
@@ -502,6 +573,8 @@ export async function runRetentionCleanup(options: RetentionRunOptions = {}) {
       deletedTalentPoolMemberships: dryRun ? 0 : wouldExpireTalentPool,
       deletedHiringNeeds: dryRun ? 0 : needIds.size,
       archivedAnonymousReportSnapshots: dryRun ? 0 : deletedApplications.length,
+      wouldDeleteTimekeepingCutoffs: timekeepingCutoffs,
+      deletedTimekeepingCutoffs: dryRun ? 0 : timekeepingCutoffs,
       liveQueue: Math.min(live.length, INTAKE_QUEUE_LIMIT),
     };
   });

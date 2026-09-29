@@ -41,6 +41,11 @@ const fields: { name: RetentionPolicyName; label: string; note: string }[] = [
     note: "Extending the target date recalculates the cleanup deadline.",
   },
   {
+    name: "timekeeping_cutoff_grace_days",
+    label: "Timekeeping cutoff payroll grace",
+    note: "Both monthly cutoff analyses remain through the next month's 5th payroll date plus this grace period (default deletion: the 10th).",
+  },
+  {
     name: "activity_log_days",
     label: "Activity history",
     note: "Only old audit events are cleaned; users and settings remain permanent.",

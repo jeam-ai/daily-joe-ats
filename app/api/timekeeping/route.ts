@@ -17,6 +17,7 @@ import {
 } from "@/lib/server/database";
 import {
   analyzeOdooUpload,
+  checkpointOdoo,
   exportOdoo,
   getOdooBatch,
   listOdooBatches,
@@ -135,6 +136,16 @@ export async function POST(request: Request) {
     }
     if (body.action === "review")
       return Response.json({ batch: await reviewOdoo(body, user) });
+    if (body.action === "checkpoint") {
+      const checkpoint = z
+        .object({ id: z.string(), revision: z.number().int().positive() })
+        .safeParse(body);
+      if (!checkpoint.success)
+        throw new SafeError("Choose a valid saved cutoff.");
+      return Response.json({
+        batch: await checkpointOdoo(checkpoint.data, user),
+      });
+    }
     if (body.action === "rules") {
       const rules = odooRulesSchema.safeParse(body.rules);
       if (!rules.success) throw new SafeError("Check the attendance rules.");

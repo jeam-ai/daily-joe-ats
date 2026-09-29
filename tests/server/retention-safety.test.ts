@@ -4,7 +4,11 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { Application } from "../../types";
-import { readTransaction, transaction } from "../../lib/server/database";
+import {
+  putRecord,
+  readTransaction,
+  transaction,
+} from "../../lib/server/database";
 import { getState, saveState } from "../../lib/server/repository";
 import { initialState } from "../../lib/server/initial-state";
 import { runRetentionCleanup } from "../../lib/server/retention";
@@ -266,4 +270,67 @@ test("confirmed queue cleanup bypasses grace only for queued unprotected applica
   assert.ok(
     saved.applications.some((item) => item.id === protectedApplicant.id),
   );
+});
+
+test("timekeeping cutoff cleanup removes both payroll-period analyses after the next 5th plus grace", async () => {
+  const cutoff = "2026-01-01:2026-01-15";
+  const batchId = "expired-timekeeping-cutoff";
+  await transaction(async (tx) => {
+    await putRecord(tx, "odoo_cutoffs", cutoff, batchId);
+    await putRecord(tx, "odoo_batches", batchId, { encrypted: true });
+    await putRecord(tx, "odoo_index", batchId, { id: batchId });
+    await putRecord(tx, "odoo_exceptions", `${batchId}:day-1`, {
+      batchId,
+    });
+    await putRecord(tx, "odoo_reviews", "expired-review", { batchId });
+    await putRecord(tx, "odoo_fingerprints", "expired-fingerprint", batchId);
+    await putRecord(tx, "timekeeping_jobs", "expired-job", {
+      result: { batchId },
+    });
+    await tx.query(
+      "INSERT INTO audit_logs(id,occurred_at,actor,action,payload) VALUES($1,$2,$3,$4,$5)",
+      [
+        "expired-timekeeping-audit",
+        "2026-01-16T00:00:00.000Z",
+        "System",
+        "timekeeping.reviewed",
+        JSON.stringify({ batchId, cutoff }),
+      ],
+    );
+  });
+  const preview = await runRetentionCleanup();
+  assert.equal(preview.wouldDeleteTimekeepingCutoffs, 1);
+  const before = await readTransaction((tx) =>
+    tx.query(
+      "SELECT id FROM records WHERE collection='odoo_cutoffs' AND id=$1",
+      [cutoff],
+    ),
+  );
+  assert.equal(before.length, 1);
+
+  const previousDryRun = process.env.DRY_RUN_RETENTION_CLEANUP;
+  const previousVerified = process.env.RETENTION_CLEANUP_VERIFIED;
+  process.env.DRY_RUN_RETENTION_CLEANUP = "false";
+  process.env.RETENTION_CLEANUP_VERIFIED = "true";
+  try {
+    const applied = await runRetentionCleanup({ dryRun: false });
+    assert.equal(applied.deletedTimekeepingCutoffs, 1);
+  } finally {
+    process.env.DRY_RUN_RETENTION_CLEANUP = previousDryRun;
+    process.env.RETENTION_CLEANUP_VERIFIED = previousVerified;
+  }
+  const remaining = await readTransaction((tx) =>
+    tx.query("SELECT collection,id FROM records WHERE id=$1 OR id LIKE $2", [
+      batchId,
+      `${batchId}:%`,
+    ]),
+  );
+  assert.deepEqual(remaining, []);
+  const reviews = await readTransaction((tx) =>
+    tx.query(
+      "SELECT id FROM records WHERE collection='odoo_reviews' AND payload LIKE $1",
+      [`%\"batchId\":\"${batchId}\"%`],
+    ),
+  );
+  assert.deepEqual(reviews, []);
 });
