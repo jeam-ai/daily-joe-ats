@@ -146,6 +146,15 @@ export function AppProvider({
         const data = await r.json();
         if (!r.ok) throw Error(data.error);
         if (request !== generation.current) return;
+        // A refresh may have begun a moment before an HR form opened. Do not
+        // apply that already-in-flight response over an active draft: doing so
+        // can remount a profile editor and discard text that has not been
+        // saved yet. Reconcile with the latest server state once the draft is
+        // deliberately closed instead.
+        if (activeDrafts.current && !options?.force) {
+          deferredRefresh.current = true;
+          return;
+        }
         if (options?.clearDetails) detailCache.current.clear();
         const merged = {
           ...data,

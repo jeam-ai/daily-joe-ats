@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useLayoutEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { Application } from "@/types";
 import { useApp } from "./provider";
@@ -25,7 +25,10 @@ export function ApplicantEditor({
     ? nameParts(application.applicant.name)
     : { firstName: "", middleName: "", lastName: "" };
   const [requestId] = useState(() => crypto.randomUUID());
-  useEffect(() => beginDraft(), [beginDraft]);
+  // Register the draft before the browser can paint the editor. This closes
+  // the small gap where a focus/sync response can otherwise arrive while HR
+  // has just opened the form but has not saved it yet.
+  useLayoutEffect(() => beginDraft(), [beginDraft]);
   if (!state) return null;
   const need = state.hiringNeeds.find((n) => n.id === needId);
   return (
