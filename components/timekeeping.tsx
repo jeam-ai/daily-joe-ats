@@ -1632,7 +1632,10 @@ export function Timekeeping() {
                   <Button
                     key={choice}
                     variant={
-                      classification === choice ? "primary" : "secondary"
+                      pendingClassification === choice ||
+                      (!pendingClassification && classification === choice)
+                        ? "primary"
+                        : "secondary"
                     }
                     onClick={() => setPendingClassification(choice)}
                   >
@@ -1658,6 +1661,21 @@ export function Timekeeping() {
                     Classify this record as{" "}
                     <strong>{pendingClassification}</strong>?
                   </p>
+                  {pendingClassification === "Other" && (
+                    <Field label="HR note (required for Other)">
+                      <textarea
+                        rows={2}
+                        maxLength={4000}
+                        value={note}
+                        onChange={(event) => setNote(event.target.value)}
+                        placeholder="Explain the classification for the cutoff audit trail."
+                      />
+                    </Field>
+                  )}
+                  <small className="muted">
+                    Confirming prepares this record as resolved. Save review to
+                    record it and update the active queue.
+                  </small>
                   <div className="button-row">
                     <Button
                       variant="secondary"
@@ -1666,12 +1684,16 @@ export function Timekeeping() {
                       Cancel
                     </Button>
                     <Button
+                      disabled={
+                        pendingClassification === "Other" && !note.trim()
+                      }
                       onClick={() => {
                         setClassification(pendingClassification);
                         setPendingClassification("");
+                        setReview("Resolved");
                       }}
                     >
-                      Confirm {pendingClassification}
+                      Confirm classification
                     </Button>
                   </div>
                 </div>
