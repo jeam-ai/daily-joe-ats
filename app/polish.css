@@ -2762,11 +2762,11 @@ progress {
 
 /* HR hub: employee records, onboarding, global search, and saved report views. */
 .people-help-note {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: 6px;
-  max-width: 360px;
-  line-height: 1.4;
+  max-width: 760px;
+  line-height: 1.55;
 }
 .people-summary {
   grid-template-columns: repeat(3, minmax(0, 1fr));

@@ -136,11 +136,21 @@ export async function saveState(
   state.notifications = deriveNotifications(state);
   await putRecord(tx, "workspace", "main", state);
   const statements: { sql: string; values: unknown[] }[] = [];
+  const collectionDeletes: { sql: string; values: unknown[] }[] = [];
+  const applicationDeletes: { sql: string; values: unknown[] }[] = [];
   const queue = {
     query: async (sql: string, values: unknown[]) => {
       statements.push({ sql, values });
     },
   };
+  // A workspace snapshot can outlive its relational projection during a
+  // migration or a recovery. Keep referenced needs projected before an
+  // application upsert relies on their foreign key.
+  const projectedNeedIds = new Set(
+    (await tx.query("SELECT id FROM hiring_needs")).map((row) =>
+      String(row.id),
+    ),
+  );
   // Relational entities and the bounded workspace read model commit together.
   for (const [collection, records, beforeRecords] of [
     ["hiring_needs", state.hiringNeeds, previous?.hiringNeeds || []],
@@ -172,7 +182,10 @@ export async function saveState(
     const beforeById = new Map(beforeRecords.map((record) => [record.id, record]));
     const currentIds = new Set(records.map((record) => record.id));
     for (const record of records) {
-      if (!changed(beforeById.get(record.id), record))
+      if (
+        !changed(beforeById.get(record.id), record) &&
+        (collection !== "hiring_needs" || projectedNeedIds.has(record.id))
+      )
         continue;
       await queue.query(
         `INSERT INTO ${collection}(id,payload) VALUES($1,$2) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload`,
@@ -181,7 +194,10 @@ export async function saveState(
     }
     for (const record of beforeRecords)
       if (!currentIds.has(record.id))
-        await queue.query(`DELETE FROM ${collection} WHERE id=$1`, [record.id]);
+        collectionDeletes.push({
+          sql: `DELETE FROM ${collection} WHERE id=$1`,
+          values: [record.id],
+        });
   }
   const beforeUsers = new Map((previous?.users || []).map((user) => [user.id, user]));
   for (const user of state.users || []) {
@@ -201,6 +217,9 @@ export async function saveState(
     (previous?.applications || []).map((application) => [application.id, application]),
   );
   const applicationsChanged = !previous || changed(previous.applications, state.applications);
+  const currentApplicationIds = new Set(
+    state.applications.map((application) => application.id),
+  );
   for (const a of state.applications) {
     const beforeApplication = previousApplications.get(a.id);
     if (!changed(beforeApplication, a)) continue;
@@ -267,6 +286,45 @@ export async function saveState(
           [e.id, a.id, e.timestamp, e.user, JSON.stringify(e)],
         );
   }
+  for (const previousApplication of previous?.applications || []) {
+    if (currentApplicationIds.has(previousApplication.id)) continue;
+    // Permanent cleanup and demo teardown remove the relational projection in
+    // child-to-parent order. Soft-deleted applications remain in the snapshot
+    // and never enter this path.
+    for (const table of [
+      "gmail_thread_events",
+      "application_events",
+      "application_requirements",
+      "interviews",
+      "screening_results",
+      "employment_records",
+      "intake_window",
+      "application_retention",
+    ])
+      applicationDeletes.push({
+        sql: `DELETE FROM ${table} WHERE application_id=$1`,
+        values: [previousApplication.id],
+      });
+    applicationDeletes.push({
+      sql: "DELETE FROM applications WHERE id=$1",
+      values: [previousApplication.id],
+    });
+    if (
+      !state.applications.some(
+        (application) =>
+          application.applicant.id === previousApplication.applicant.id,
+      )
+    ) {
+      applicationDeletes.push({
+        sql: "DELETE FROM talent_pool_memberships WHERE applicant_id=$1",
+        values: [previousApplication.applicant.id],
+      });
+      applicationDeletes.push({
+        sql: "DELETE FROM applicants WHERE id=$1",
+        values: [previousApplication.applicant.id],
+      });
+    }
+  }
   // Group identical upserts into portable multi-row statements. This avoids
   // hundreds of network round trips for one workspace save.
   const groups = new Map<string, Map<string, unknown[]>>();
@@ -284,7 +342,16 @@ export async function saveState(
       : String(statement.values[0]);
     records.set(key, statement.values);
   }
-  for (const [sql, grouped] of groups) {
+  const projectionRank = (sql: string) => {
+    if (sql.startsWith("INSERT INTO hiring_needs")) return 0;
+    if (sql.startsWith("INSERT INTO applicants")) return 10;
+    if (sql.startsWith("INSERT INTO applications")) return 20;
+    if (sql.startsWith("INSERT INTO intake_window")) return 30;
+    return 40;
+  };
+  for (const [sql, grouped] of [...groups].sort(
+    ([left], [right]) => projectionRank(left) - projectionRank(right),
+  )) {
     const records = [...grouped.values()];
     const marker = /VALUES\([^)]*\)/.exec(sql);
     if (!marker) throw new DomainError("Invalid internal upsert statement");
@@ -305,6 +372,10 @@ export async function saveState(
       );
     }
   }
+  for (const statement of applicationDeletes)
+    await tx.query(statement.sql, statement.values);
+  for (const statement of collectionDeletes)
+    await tx.query(statement.sql, statement.values);
   // The 500-item queue is balanced above, so create or cancel its retention
   // grace dates in this same save transaction. Cleanup remains a separate,
   // explicitly controlled process; this only records the clock immediately.
