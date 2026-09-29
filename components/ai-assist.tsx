@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { Info, Sparkles } from "lucide-react";
 import type { AiProfile } from "@/types/operations";
 import { requestJson } from "@/lib/client-request";
-import { Button, Card, Badge, Modal } from "./ui";
+import { Button, Card, Badge, HelpTip, Modal } from "./ui";
 import Link from "next/link";
 const explanation =
   "AI Assist provides an additional interpretation of the applicant’s submitted information. It does not replace System Analysis, make hiring decisions, rank applicants, or automatically advance an application.";
@@ -100,10 +100,9 @@ export function AiAssist({ id }: { id: string }) {
             />
             {data?.enabled ? "ON" : "OFF"}
           </label>
-          <span className="info-tooltip" tabIndex={0} aria-label={explanation}>
-            <Info size={18} />
-            <span role="tooltip">{explanation}</span>
-          </span>
+          <HelpTip label={explanation} icon={<Info size={18} aria-hidden />}>
+            {explanation}
+          </HelpTip>
         </div>
       </div>
       <div className="padded form-stack">

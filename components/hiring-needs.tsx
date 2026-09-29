@@ -28,6 +28,7 @@ import {
   LoadingSkeleton,
   EmptyState,
   MetricCard,
+  HelpTip,
 } from "./ui";
 import Link from "next/link";
 import { QualificationEditor } from "./qualification-editor";
@@ -310,17 +311,13 @@ export function HiringNeeds() {
                         : "Opened today";
                     })()
                   : "Open date not recorded"}
-                <span
-                  className="info-tooltip"
-                  tabIndex={0}
-                  aria-label="Days open explanation"
+                <HelpTip
+                  label="Days open explanation"
+                  icon={<CircleHelp size={13} aria-hidden />}
                 >
-                  <CircleHelp size={13} />
-                  <span role="tooltip">
-                    Days open is counted from the date HR declared this
-                    vacancy open, not from a later edit.
-                  </span>
-                </span>
+                  Days open is counted from the date HR declared this vacancy
+                  open, not from a later edit.
+                </HelpTip>
               </p>
             )}
             <div className="need-numbers">
@@ -497,18 +494,14 @@ export function HiringNeeds() {
                   name="openedAt"
                   defaultValue={existing?.openedAt?.slice(0, 10) || ""}
                 />
-                <span
-                  className="info-tooltip field-info"
-                  tabIndex={0}
-                  aria-label="Opened on explanation"
+                <HelpTip
+                  className="field-info"
+                  label="Opened on explanation"
+                  icon={<CircleHelp size={15} aria-hidden />}
                 >
-                  <CircleHelp size={15} />
-                  <span role="tooltip">
-                    This is the date the vacancy was declared open. It drives
-                    the Days open badge and is not the date HR last edited the
-                    request.
-                  </span>
-                </span>
+                  This is the date the vacancy was declared open. It drives the
+                  Days open badge and is not the date HR last edited the request.
+                </HelpTip>
               </Field>
               <Field label="Status">
                 <Select name="status" defaultValue={existing?.status || "Open"}>

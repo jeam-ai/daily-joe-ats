@@ -10,11 +10,49 @@ import {
   ArrowRight,
 } from "lucide-react";
 
+/** Keeps a help bubble within the visible viewport before it is shown. */
+function positionHelpTip(event: React.SyntheticEvent<HTMLSpanElement>) {
+  const trigger = event.currentTarget;
+  const viewportWidth = window.visualViewport?.width ?? window.innerWidth;
+  const tooltipWidth = Math.min(320, viewportWidth * 0.75, viewportWidth - 32);
+  const triggerBox = trigger.getBoundingClientRect();
+  const triggerCenter = triggerBox.left + triggerBox.width / 2;
+  const tooltipLeft = Math.min(
+    Math.max(triggerCenter - tooltipWidth / 2, 16),
+    viewportWidth - tooltipWidth - 16,
+  );
+
+  trigger.style.setProperty(
+    "--tooltip-translate-x",
+    `${Math.round(tooltipLeft - triggerCenter)}px`,
+  );
+}
+
 /** Small, keyboard-accessible help for a term or calculation that needs context. */
-export function HelpTip({ children }: { children: React.ReactNode }) {
+export function HelpTip({
+  children,
+  label = "More information",
+  className = "",
+  icon,
+}: {
+  children: React.ReactNode;
+  label?: string;
+  className?: string;
+  icon?: React.ReactNode;
+}) {
   return (
-    <span className="info-tooltip help-tip" tabIndex={0} aria-label="More information">
-      <Info size={15} aria-hidden />
+    <span
+      className={`info-tooltip help-tip ${className}`}
+      tabIndex={0}
+      aria-label={label}
+      onFocus={positionHelpTip}
+      onMouseEnter={positionHelpTip}
+      onClick={(event) => {
+        positionHelpTip(event);
+        event.currentTarget.focus();
+      }}
+    >
+      {icon || <Info size={15} aria-hidden />}
       <span role="tooltip">{children}</span>
     </span>
   );

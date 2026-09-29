@@ -2070,7 +2070,7 @@ td > small.muted {
   position: absolute;
   left: 50%;
   top: 28px;
-  transform: translateX(-50%);
+  transform: translateX(var(--tooltip-translate-x, -50%));
   width: min(320px, 75vw);
   max-width: calc(100vw - 32px);
   padding: 12px;
@@ -2170,14 +2170,6 @@ th,
 .profile-coverage strong {
   display: block;
   font-size: 12px;
-}
-.profile-coverage .help-tip > [role="tooltip"] {
-  right: 0;
-  left: auto;
-  transform: none;
-  width: min(280px, calc(100vw - 40px));
-  font-weight: 400;
-  overflow-wrap: anywhere;
 }
 .profile-coverage p,
 .profile-coverage-note {
