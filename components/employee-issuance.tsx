@@ -533,7 +533,7 @@ export function EmployeeIssuance() {
       <Card className="issuance-workspace">
         <div className="issuance-history-heading">
           <div>
-            <span className="section-kicker">Employee records</span>
+            <span className="section-kicker">ISSUANCE HISTORY</span>
             <h2>Employee issuance history</h2>
             <p className="muted">
               One row per employee release, receipt, and acknowledgment.

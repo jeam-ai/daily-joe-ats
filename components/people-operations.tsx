@@ -48,17 +48,23 @@ export function PeopleOperations() {
     `/people?view=${encodeURIComponent(next)}`;
 
   return (
-    <div className="workspace-page people-operations-page">
+    <div className="workspace-page people-operations-page onboarding-page">
       <div className="page-heading workspace-page-heading">
         <div>
-          <div className="eyebrow">PEOPLE OPERATIONS</div>
-          <h1>Employee records</h1>
-          <p>Monitor hired employees, document requirements, and onboarding readiness.</p>
+          <div className="eyebrow">HR OPERATIONS</div>
+          <h1>Onboarding</h1>
+          <p>
+            Keep new hires, requirements, and issuance readiness together from
+            confirmed hire through handover.
+          </p>
         </div>
         <div className="workspace-heading-side">
-          <span className="workspace-heading-context">Hired employees only</span>
+          <span className="workspace-heading-context">
+            Confirmed hires and HR handover
+          </span>
           <span className="workspace-heading-note people-help-note">
-            This view uses confirmed hiring data; it does not create an employee record from an applicant automatically.
+            This workspace uses confirmed hiring data; it does not create an
+            employee record from an applicant automatically.
             <HelpTip>
               An employee appears here only after HR marks the applicant as Hired or records a hire date.
             </HelpTip>
@@ -67,22 +73,25 @@ export function PeopleOperations() {
       </div>
       <div className="metrics-grid people-summary">
         <MetricCard
-          label="Employees"
+          label="New hires"
           value={employees.length}
-          note="Confirmed hires in the workspace"
+          note="Confirmed hires ready for HR handover"
           icon={<UsersRound size={20} />}
+          tone="featured"
         />
         <MetricCard
           label="Requirements pending"
           value={pending.length}
           note="Submitted requirements not yet complete"
           icon={<ClipboardList size={20} />}
+          tone="metric-review"
         />
         <MetricCard
           label="Onboarding complete"
           value={employees.filter((employee) => employee.onboardingStatus === "Completed").length}
           note="HR recorded onboarding as complete"
           icon={<CheckCircle2 size={20} />}
+          tone="hired"
         />
       </div>
       <Card className="people-workspace">
