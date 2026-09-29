@@ -469,11 +469,25 @@ export function Dashboard() {
               </div>
               <div className="home-stock-list">
                 {issuanceStock.map((stock) => (
-                  <div key={stock.category}>
-                    <strong>{stock.category}</strong>
-                    <span>Beginning {stock.beginning}</span>
-                    <span>Out {stock.issued}</span>
-                    <b>{stock.onHand} on hand</b>
+                  <div className="home-stock-row" key={stock.category}>
+                    <div className="home-stock-item">
+                      <strong>{stock.category}</strong>
+                      <span>Issuance inventory</span>
+                    </div>
+                    <div className="home-stock-metrics" aria-label={`${stock.category} stock summary`}>
+                      <span>
+                        <small>Beginning</small>
+                        <b>{stock.beginning}</b>
+                      </span>
+                      <span>
+                        <small>Issued</small>
+                        <b>{stock.issued}</b>
+                      </span>
+                      <span className="home-stock-on-hand">
+                        <small>On hand</small>
+                        <b>{stock.onHand}</b>
+                      </span>
+                    </div>
                   </div>
                 ))}
               </div>
