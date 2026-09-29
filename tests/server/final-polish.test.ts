@@ -6,8 +6,10 @@ import path from "node:path";
 import { transaction, putRecord, readRecord } from "../../lib/server/database";
 import { initialState } from "../../lib/server/initial-state";
 import {
+  findUser,
   getState,
   publicState,
+  saveState,
   updateState,
 } from "../../lib/server/repository";
 import { launchDemo, clearDemo } from "../../lib/server/demo";
@@ -34,6 +36,20 @@ const user: User = {
   active: true,
   title: "HR",
 };
+test("configured workspace owner recovers administrator access from a legacy role", async () => {
+  await transaction(async (tx) => {
+    const state = initialState();
+    state.users![0] = {
+      ...state.users![0],
+      role: "HR Generalist",
+      title: "HR Associate",
+    };
+    await saveState(tx, state, { sync: false });
+  });
+  const recovered = await findUser("admin@example.invalid");
+  assert.equal(recovered?.role, "Admin");
+  assert.equal(recovered?.title, "Workspace Administrator");
+});
 test("demo lifecycle, soft deletion, restoration, audit, and production isolation", async () => {
   await transaction((tx) => putRecord(tx, "workspace", "main", initialState()));
   const values = {

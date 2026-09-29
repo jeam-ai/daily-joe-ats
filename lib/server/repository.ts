@@ -478,18 +478,27 @@ export async function findUser(email: string) {
         ) || null
       : null;
   });
-  const careersEmail = (
-    process.env.OFFICIAL_CAREERS_EMAIL || "careers@daily-joe.com"
-  ).toLowerCase();
-  if (!user || user.email.toLowerCase() !== careersEmail || user.role === "Admin")
+  const administratorEmails = new Set(
+    [
+      process.env.GOOGLE_ALLOWED_EMAIL,
+      process.env.OFFICIAL_CAREERS_EMAIL || "careers@daily-joe.com",
+    ]
+      .filter((candidate): candidate is string => !!candidate)
+      .map((candidate) => candidate.toLowerCase()),
+  );
+  if (
+    !user ||
+    !administratorEmails.has(user.email.toLowerCase()) ||
+    user.role === "Admin"
+  )
     return user;
-  // The official Careers mailbox is the workspace owner account. Ensure it
-  // remains an active administrator after legacy role configuration so it can
-  // view every HR module and administer access from any signed-in device.
+  // The configured workspace owner and official Careers mailbox are trusted
+  // administrator identities. Repair a legacy stored role on sign-in so the
+  // owner cannot be locked out of health, recovery, and access controls.
   return transaction(async (tx) => {
     const state = await getState(tx);
     const account = state.users?.find(
-      (candidate) => candidate.email.toLowerCase() === careersEmail,
+      (candidate) => candidate.email.toLowerCase() === user.email.toLowerCase(),
     );
     if (!account) return user;
     account.role = "Admin";

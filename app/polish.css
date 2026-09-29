@@ -677,7 +677,7 @@ input[type="radio"] {
   font-size: 12px;
   line-height: 1.5;
   padding: 3px 8px;
-  font-weight: 600;
+  font-weight: 500;
   border-radius: 6px;
   white-space: nowrap;
 }
@@ -2156,9 +2156,19 @@ th,
   border-top: 1px solid var(--border);
   color: var(--text-primary);
 }
+.profile-coverage > div {
+  min-width: 0;
+}
 .profile-coverage strong {
   display: block;
   font-size: 12px;
+}
+.profile-coverage .help-tip > [role="tooltip"] {
+  right: 0;
+  left: auto;
+  width: min(280px, calc(100vw - 40px));
+  font-weight: 400;
+  overflow-wrap: anywhere;
 }
 .profile-coverage p,
 .profile-coverage-note {
@@ -3845,6 +3855,15 @@ progress {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  max-width: 100%;
+}
+.timekeeping-status-with-help .badge {
+  max-width: min(100%, 340px);
+  align-items: baseline;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  text-wrap: pretty;
+  white-space: normal;
 }
 .review-next-facts {
   display: grid;
