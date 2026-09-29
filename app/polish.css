@@ -3227,6 +3227,7 @@ progress {
 /* Shared formatted editor: used for messages and operational notes, while
    structured inputs remain deliberately plain and validation-friendly. */
 .rich-text-editor {
+  position: relative;
   overflow: hidden;
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -3242,12 +3243,18 @@ progress {
   background: var(--surface-subtle);
 }
 .rich-text-toolbar {
+  position: absolute;
+  z-index: 4;
   display: flex;
   flex-wrap: wrap;
   gap: 2px;
-  padding: 6px;
-  border-bottom: 1px solid var(--border);
-  background: var(--surface-subtle);
+  width: max-content;
+  max-width: calc(100% - 16px);
+  padding: 5px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 8px 22px rgb(15 42 68 / 0.18);
 }
 .rich-text-toolbar button {
   display: inline-grid;

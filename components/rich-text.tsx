@@ -1,6 +1,12 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import {
   Bold,
   Italic,
@@ -53,7 +59,12 @@ export function RichTextEditor({
   "aria-label": ariaLabel,
 }: EditorProps) {
   const root = useRef<HTMLDivElement>(null);
+  const selectionRange = useRef<Range | null>(null);
   const [content, setContent] = useState(value ?? defaultValue);
+  const [toolbarPosition, setToolbarPosition] = useState<{
+    left: number;
+    top: number;
+  } | null>(null);
   const controlled = value !== undefined;
   useEffect(() => {
     if (controlled && value !== content && document.activeElement !== root.current)
@@ -74,41 +85,50 @@ export function RichTextEditor({
     onChange?.(next);
     return next;
   };
+  const captureSelection = useCallback(() => {
+    const element = root.current;
+    const selection = window.getSelection();
+    if (
+      !element ||
+      !selection ||
+      !selection.rangeCount ||
+      selection.isCollapsed ||
+      !element.contains(selection.getRangeAt(0).commonAncestorContainer)
+    ) {
+      selectionRange.current = null;
+      setToolbarPosition(null);
+      return;
+    }
+    const range = selection.getRangeAt(0).cloneRange();
+    const selectionRect = range.getBoundingClientRect();
+    const editorRect = element.getBoundingClientRect();
+    if (!selectionRect.width && !selectionRect.height) return;
+    selectionRange.current = range;
+    setToolbarPosition({
+      left: Math.max(8, Math.min(selectionRect.left - editorRect.left, editorRect.width - 282)),
+      top: Math.max(8, selectionRect.top - editorRect.top - 44),
+    });
+  }, []);
+  useEffect(() => {
+    document.addEventListener("selectionchange", captureSelection);
+    return () => document.removeEventListener("selectionchange", captureSelection);
+  }, [captureSelection]);
   const command = (action: string) => {
     if (disabled || !root.current) return;
+    const selection = window.getSelection();
+    if (selectionRange.current && selection) {
+      selection.removeAllRanges();
+      selection.addRange(selectionRange.current);
+    }
     root.current.focus();
     if (action === "quote") document.execCommand("formatBlock", false, "blockquote");
     else document.execCommand(action, false);
     update();
+    captureSelection();
   };
   return (
     <div className={`rich-text-editor${disabled ? " is-disabled" : ""}`}>
       {name && <input type="hidden" name={name} value={content} />}
-      <div className="rich-text-toolbar" role="toolbar" aria-label="Text formatting">
-        {actions.map(([action, Icon, label]) => (
-          <button
-            type="button"
-            key={action}
-            title={label}
-            aria-label={label}
-            disabled={disabled}
-            onMouseDown={(event) => event.preventDefault()}
-            onClick={() => command(action)}
-          >
-            <Icon size={15} />
-          </button>
-        ))}
-        <button
-          type="button"
-          title="Quote"
-          aria-label="Quote"
-          disabled={disabled}
-          onMouseDown={(event) => event.preventDefault()}
-          onClick={() => command("quote")}
-        >
-          <Quote size={15} />
-        </button>
-      </div>
       <div
         ref={root}
         className="rich-text-surface"
@@ -122,9 +142,43 @@ export function RichTextEditor({
         style={{ minHeight: `${Math.max(2, rows) * 1.5}rem` }}
         onInput={() => void update()}
         onBlur={() => onBlur?.(update())}
+        onMouseUp={captureSelection}
+        onKeyUp={captureSelection}
       />
+      {toolbarPosition && (
+        <div
+          className="rich-text-toolbar rich-text-selection-toolbar"
+          role="toolbar"
+          aria-label="Selected text formatting"
+          style={toolbarPosition}
+        >
+          {actions.map(([action, Icon, label]) => (
+            <button
+              type="button"
+              key={action}
+              title={label}
+              aria-label={label}
+              disabled={disabled}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => command(action)}
+            >
+              <Icon size={15} />
+            </button>
+          ))}
+          <button
+            type="button"
+            title="Quote"
+            aria-label="Quote"
+            disabled={disabled}
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => command("quote")}
+          >
+            <Quote size={15} />
+          </button>
+        </div>
+      )}
       <small className="rich-text-hint">
-        Formatting is saved with this note.
+        Select text to format it. Formatting is saved with this note.
       </small>
     </div>
   );

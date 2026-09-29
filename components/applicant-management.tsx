@@ -1,5 +1,5 @@
 "use client";
-import { useLayoutEffect, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { Application } from "@/types";
 import { useApp } from "./provider";
@@ -18,9 +18,22 @@ export function ApplicantEditor({
 }) {
   const { state, refresh, notify, patchState, beginDraft } = useApp();
   const router = useRouter();
+  const formRef = useRef<HTMLFormElement>(null);
+  const draftKey = application ? `djc-applicant-draft:${application.id}` : null;
+  const [draft] = useState<Record<string, string>>(() => {
+    if (!draftKey || typeof window === "undefined") return {};
+    try {
+      const saved = JSON.parse(sessionStorage.getItem(draftKey) || "{}");
+      return saved && typeof saved === "object" ? saved : {};
+    } catch {
+      return {};
+    }
+  });
   const [busy, setBusy] = useState(false),
     [error, setError] = useState("");
-  const [needId, setNeedId] = useState(application?.hiringNeedId || "");
+  const [needId, setNeedId] = useState(
+    draft.hiringNeedId ?? application?.hiringNeedId ?? "",
+  );
   const [createdId, setCreatedId] = useState<string>();
   const parts = application
     ? nameParts(application.applicant.name)
@@ -29,17 +42,54 @@ export function ApplicantEditor({
   // Register the draft before the browser can paint the editor. This closes
   // the small gap where a focus/sync response can otherwise arrive while HR
   // has just opened the form but has not saved it yet.
-  useLayoutEffect(() => beginDraft(), [beginDraft]);
+  useLayoutEffect(() => {
+    const release = beginDraft();
+    const form = formRef.current;
+    if (form) {
+      for (const [name, value] of Object.entries(draft)) {
+        const field = form.elements.namedItem(name);
+        if (
+          field instanceof HTMLInputElement ||
+          field instanceof HTMLTextAreaElement ||
+          field instanceof HTMLSelectElement
+        ) {
+          if (field.type !== "file") field.value = value;
+        }
+      }
+    }
+    return release;
+  }, [beginDraft, draft]);
+  const persistDraft = (form: HTMLFormElement) => {
+    if (!draftKey) return;
+    const values = Object.fromEntries(
+      [...new FormData(form).entries()].flatMap(([key, value]) =>
+        typeof value === "string" ? [[key, value]] : [],
+      ),
+    );
+    values.hiringNeedId = needId;
+    try {
+      sessionStorage.setItem(draftKey, JSON.stringify(values));
+    } catch {}
+  };
+  const close = () => {
+    if (draftKey)
+      try {
+        sessionStorage.removeItem(draftKey);
+      } catch {}
+    onClose();
+  };
   if (!state) return null;
   const need = state.hiringNeeds.find((n) => n.id === needId);
   return (
     <Modal
       title={application ? "Edit Applicant" : "Add Applicant"}
-      onClose={onClose}
+      onClose={close}
       busy={busy}
     >
       <form
+        ref={formRef}
         className="form-stack"
+        onInput={(event) => persistDraft(event.currentTarget)}
         onSubmit={async (event) => {
           event.preventDefault();
           setBusy(true);
@@ -136,7 +186,7 @@ export function ApplicantEditor({
               notify("Applicant created successfully.");
               router.push(`/applications/${result.id}`);
             }
-            onClose();
+            close();
           } catch (e) {
             setError((e as Error).message);
           } finally {
@@ -247,8 +297,12 @@ export function ApplicantEditor({
           </Field>
           <Field label="Hiring need">
             <Select
+              name="hiringNeedId"
               value={needId}
-              onChange={(e) => setNeedId(e.target.value)}
+              onChange={(e) => {
+                setNeedId(e.target.value);
+                persistDraft(e.currentTarget.form!);
+              }}
               disabled={!canManage(state.currentUser)}
             >
               <option value="">Unassigned</option>
@@ -353,6 +407,7 @@ export function ApplicantEditor({
         <Field label="Add an HR note">
           <RichTextEditor
             name="notes"
+            defaultValue={draft.notes || ""}
             maxLength={10000}
             rows={3}
             placeholder="Add context; earlier notes remain in the audit history."
@@ -371,7 +426,7 @@ export function ApplicantEditor({
           </div>
         )}
         <div className="modal-actions">
-          <Button variant="secondary" disabled={busy} onClick={onClose}>
+          <Button variant="secondary" disabled={busy} onClick={close}>
             Cancel
           </Button>
           <Button type="submit" disabled={busy}>
