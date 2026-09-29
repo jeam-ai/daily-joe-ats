@@ -2685,6 +2685,8 @@ progress {
   text-align: right;
 }
 .workspace-heading-note {
+  width: min(100%, 800px);
+  box-sizing: border-box;
   max-width: 800px;
   margin: -10px 0 1px;
   padding-left: 12px;
@@ -3329,6 +3331,9 @@ progress {
 
 /* Settings */
 .settings-workspace-layout {
+  width: 100%;
+  max-width: 1130px;
+  min-width: 0;
   align-items: start;
   gap: 24px;
 }
@@ -3485,6 +3490,10 @@ progress {
     flex-direction: column;
   }
   .settings-workspace-layout .settings-nav {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
     padding: 6px;
     border-radius: 12px;
   }
