@@ -556,11 +556,11 @@ export function Timekeeping() {
       )}
       <div className="timekeeping-setup-grid">
         <Card className="padded spaced timekeeping-import-card">
-          <details open={!batch}>
+          <details open={!batch} className="timekeeping-upload-disclosure">
             <summary className="odoo-upload-heading">
               Combined Odoo reports
             </summary>
-            <p className="muted">
+            <p className="muted timekeeping-import-copy">
               Upload both original exports for the same cutoff. Source files
               remain unchanged.
             </p>
@@ -589,6 +589,7 @@ export function Timekeeping() {
               </Field>
             </div>
             <Button
+              className="timekeeping-read-reports"
               disabled={!attendance || !pivot || !!busy}
               onClick={() =>
                 void run("Reading both reports", async () => {
@@ -659,7 +660,7 @@ export function Timekeeping() {
                   history.
                 </p>
                 {preview.aliases.length > 0 && (
-                  <details>
+                  <details className="timekeeping-disclosure">
                     <summary>
                       Confirm employee identities ({preview.aliases.length}{" "}
                       possible matches)
@@ -688,7 +689,7 @@ export function Timekeeping() {
                     ))}
                   </details>
                 )}
-                <details>
+                <details className="timekeeping-disclosure">
                   <summary>
                     Attendance rules and reconciliation tolerance
                   </summary>

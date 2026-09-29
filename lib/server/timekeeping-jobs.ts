@@ -18,12 +18,31 @@ import {
   odooRulesSchema,
 } from "./odoo";
 import { recordIssue, resolveIssue } from "./diagnostics";
+import { isDatabaseFailure } from "./diagnostic-buffer";
 import { withDeadline } from "./deadline";
 // These transactions only coordinate attendance jobs and append their audit
 // metadata; they never mutate the recruitment workspace. A separate lock keeps
 // long recruitment updates from blocking job claims and progress writes.
-const jobTransaction = <T>(fn: (tx: Transaction) => Promise<T>) =>
-  transaction(fn, { lockKey: 812902 });
+const jobTransaction = async <T>(fn: (tx: Transaction) => Promise<T>) => {
+  // Job creation is safe to replay until its transaction commits. A short
+  // Aiven connection interruption should not make HR re-upload valid reports.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      return await transaction(fn, { lockKey: 812902 });
+    } catch (error) {
+      if (!isDatabaseFailure(error) || attempt === 2) {
+        if (isDatabaseFailure(error))
+          throw new SafeError(
+            "The ATS database is temporarily unavailable. No attendance data was changed; wait a moment and retry.",
+            503,
+          );
+        throw error;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 200 * 2 ** attempt));
+    }
+  }
+  throw new SafeError("The ATS database is temporarily unavailable.", 503);
+};
 type Input =
   | {
       kind: "upload";

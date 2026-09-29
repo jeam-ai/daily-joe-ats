@@ -21,11 +21,12 @@ export function safeError(error: unknown) {
   }
   return NextResponse.json(
     {
-      error:
-        error instanceof SafeError &&
-        !/Missing server configuration|DATABASE_URL|security keys|OAuth URLs|HTTPS is required|Google OAuth must/.test(
-          error.message,
-        )
+      error: isDatabaseFailure(error)
+        ? "The ATS database is temporarily unavailable. No changes were saved. Wait a moment and retry."
+        : error instanceof SafeError &&
+            !/Missing server configuration|DATABASE_URL|security keys|OAuth URLs|HTTPS is required|Google OAuth must/.test(
+              error.message,
+            )
           ? error.message
           : error instanceof SafeError && error.status === 504
             ? "This operation took too long. Refresh to check its status, then try again."

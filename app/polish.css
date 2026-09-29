@@ -3278,6 +3278,34 @@ progress {
   color: var(--text-primary);
   font-weight: 650;
 }
+.timekeeping-import-card .timekeeping-import-copy {
+  margin: 10px 0 15px;
+}
+.timekeeping-import-card .timekeeping-read-reports {
+  margin-top: 12px;
+}
+.timekeeping-disclosure > summary,
+.timekeeping-upload-disclosure > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.timekeeping-disclosure > summary::after,
+.timekeeping-upload-disclosure > summary::after {
+  width: 7px;
+  height: 7px;
+  margin-right: 3px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  content: "";
+  transform: rotate(45deg) translateY(-2px);
+  transition: transform 160ms ease;
+}
+.timekeeping-disclosure[open] > summary::after,
+.timekeeping-upload-disclosure[open] > summary::after {
+  transform: rotate(225deg) translate(-2px, -1px);
+}
 .timekeeping-cutoff-card {
   padding: 20px;
   border-color: color-mix(in srgb, var(--accent) 20%, var(--border));
