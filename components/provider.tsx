@@ -26,6 +26,7 @@ type Context = {
   ensureApplication: (id: string) => Promise<void>;
   notify: (message: string, tone?: "success" | "error" | "info") => void;
   refresh: (options?: { clearDetails?: boolean }) => Promise<void>;
+  patchState: (fn: (state: AppState) => AppState) => void;
   saving: boolean;
   dataset: "real" | "demo";
   setDataset: (value: "real" | "demo") => void;
@@ -101,6 +102,22 @@ export function AppProvider({
     (message: string, tone: "success" | "error" | "info" = "success") =>
       setToast({ message, tone }),
     [],
+  );
+  const patchState = useCallback(
+    (fn: (state: AppState) => AppState) => {
+      if (!ref.current) return;
+      const next = fn(structuredClone(ref.current));
+      ref.current = next;
+      setState(next);
+      if (cacheKey)
+        try {
+          sessionStorage.setItem(
+            cacheKey,
+            JSON.stringify({ savedAt: Date.now(), state: next }),
+          );
+        } catch {}
+    },
+    [cacheKey],
   );
   const refresh = useCallback(
     async (options?: { clearDetails?: boolean }) => {
@@ -339,6 +356,7 @@ export function AppProvider({
         ensureApplication,
         notify,
         refresh,
+        patchState,
         saving,
         dataset,
         setDataset: switchDataset,

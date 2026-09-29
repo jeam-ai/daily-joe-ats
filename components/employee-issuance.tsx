@@ -52,7 +52,7 @@ function employeeCount(records: IssuanceRecord[]) {
 }
 
 export function EmployeeIssuance() {
-  const { state, notify, refresh, dataset } = useApp();
+  const { state, notify, refresh, patchState, dataset } = useApp();
   const [view, setView] = useState("All issuance");
   const [statusFilter, setStatusFilter] = useState<"All" | IssuanceStatus>(
     "All",
@@ -157,7 +157,7 @@ export function EmployeeIssuance() {
       const result = await response.json();
       if (!response.ok)
         throw Error(result.error || "The workbook could not be imported.");
-      await refresh();
+      void refresh();
       notify(
         `${result.created} issuance record${result.created === 1 ? "" : "s"} imported${result.inventoryUpdated ? `; ${result.inventoryUpdated} on-hand stock item${result.inventoryUpdated === 1 ? "" : "s"} refreshed` : ""}${result.acknowledgmentsMarked ? `; ${result.acknowledgmentsMarked} historic acknowledgment${result.acknowledgmentsMarked === 1 ? "" : "s"} recorded` : ""}${result.skipped ? `; ${result.skipped} duplicate${result.skipped === 1 ? "" : "s"} skipped` : ""}.`,
       );
@@ -199,9 +199,14 @@ export function EmployeeIssuance() {
       const result = await response.json();
       if (!response.ok)
         throw Error(result.error || "The issuance record could not be saved.");
-      await refresh();
+      const record = result.record as IssuanceRecord;
+      patchState((current) => ({
+        ...current,
+        issuance: [...(current.issuance || []), record],
+      }));
       setAdding(false);
-      notify("Issuance record saved and the employee issuance list was refreshed.");
+      notify("Issuance record saved.");
+      void refresh();
     } catch (error) {
       notify((error as Error).message, "error");
     } finally {
@@ -243,9 +248,16 @@ export function EmployeeIssuance() {
         throw Error(
           result.error || "The issuance record could not be updated.",
         );
-      await refresh();
+      const record = result.record as IssuanceRecord;
+      patchState((current) => ({
+        ...current,
+        issuance: (current.issuance || []).map((item) =>
+          item.id === record.id ? record : item,
+        ),
+      }));
       setEditing(null);
-      notify("Issuance update saved and the employee issuance list was refreshed.");
+      notify("Issuance update saved.");
+      void refresh();
     } catch (error) {
       notify((error as Error).message, "error");
     } finally {
@@ -278,9 +290,20 @@ export function EmployeeIssuance() {
       const result = await response.json();
       if (!response.ok)
         throw Error(result.error || "The stock item could not be saved.");
-      await refresh();
+      const record = result.record as IssuanceInventory;
+      patchState((current) => ({
+        ...current,
+        issuanceInventory: (current.issuanceInventory || []).some(
+          (item) => item.id === record.id,
+        )
+          ? (current.issuanceInventory || []).map((item) =>
+              item.id === record.id ? record : item,
+            )
+          : [...(current.issuanceInventory || []), record],
+      }));
       setEditingStock(null);
       notify("Stock saved and the on-hand totals were refreshed.");
+      void refresh();
     } catch (error) {
       notify((error as Error).message, "error");
     } finally {
