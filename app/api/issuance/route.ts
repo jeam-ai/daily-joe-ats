@@ -163,7 +163,7 @@ export async function importIssuanceWorkbook(file: File, actor: string) {
   );
   if (!issuanceSheets.length && !onHandSheet)
     throw new SafeError(
-      "No supported issuance sheets were found. Use ON-HAND, UPDATED MONITORING (UNIFORM), or UPDATED MONITORING (WELCOME KIT).",
+      "No supported issuance sheets were found. Use On Hand, UPDATED MONITORING (UNIFORM), or UPDATED MONITORING (WELCOME KIT).",
     );
   const now = new Date().toISOString();
   const records: IssuanceRecord[] = [];
@@ -257,7 +257,7 @@ export async function importIssuanceWorkbook(file: File, actor: string) {
         onHand < 0
       )
         throw new SafeError(
-          `ON-HAND, row ${rowNumber} needs whole Beginning, Out, and Ending values.`,
+          `On Hand, row ${rowNumber} needs whole Beginning, Out, and Ending values.`,
         );
       const record = {
         category,

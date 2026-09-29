@@ -429,7 +429,7 @@ export function EmployeeIssuance() {
           <div>
             <h2>Stock dashboard</h2>
             <p className="muted">
-              Beginning, Out, and On hand follow the editable ON-HAND register.
+              Beginning, Out, and On hand follow the editable On Hand register.
             </p>
           </div>
           <Badge>{inventory.length} stock lines</Badge>
@@ -459,7 +459,7 @@ export function EmployeeIssuance() {
               <span className="section-kicker">Stock control</span>
               <h2>Stock register</h2>
               <p className="muted">
-                Physical count from the ON-HAND sheet. This is inventory
+                Physical count from the On Hand sheet. This is inventory
                 control, not employee release history.
               </p>
             </div>
@@ -543,7 +543,7 @@ export function EmployeeIssuance() {
           </Table>
         ) : (
           <p className="empty-inline">
-            Import the ON-HAND sheet to show current stock levels.
+            Import the On Hand sheet to show current stock levels.
           </p>
         )}
       </Card>

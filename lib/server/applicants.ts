@@ -302,11 +302,25 @@ export async function updateApplicantWorkflow(
       previous: before,
       next,
     });
-    // Profile/workflow edits are already committed to the shared ATS database
-    // and picked up by the workspace revision poll. Rebuilding the full
-    // tracker snapshot for every note or field edit was the main avoidable
-    // source of the 10–20 second save delay.
-    await saveState(tx, state, { sync: false });
+    // A note, assignee, or ordinary profile correction only needs the edited
+    // applicant projection. Replaying all application relationships under the
+    // shared workspace lock was making a small manual save wait behind a full
+    // tracker reconciliation. Keep the comprehensive path for changes that
+    // really alter cross-module relationships.
+    const needsFullWorkspaceReconciliation = fields.some((field) =>
+      [
+        "hiringNeedId",
+        "status",
+        "stage",
+        "hiredAt",
+        "employment",
+        "requirements",
+        "interviews",
+      ].includes(field),
+    );
+    if (needsFullWorkspaceReconciliation)
+      await saveState(tx, state, { sync: false });
+    else await persistProfilePatch(tx, state, before, next);
     return structuredClone(next);
   });
 }

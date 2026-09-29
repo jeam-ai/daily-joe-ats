@@ -461,7 +461,7 @@ export function Dashboard() {
                   <h2>
                     <PackageCheck size={18} /> Employee issuance stock
                   </h2>
-                  <p>Current counts from the editable ON-HAND register.</p>
+                  <p>Current counts from the editable On Hand register.</p>
                 </div>
                 <Link className="text-link" href="/issuance">
                   Open stock <ArrowUpRight size={16} />
