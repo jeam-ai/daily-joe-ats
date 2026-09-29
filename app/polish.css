@@ -3295,12 +3295,13 @@ progress {
 .timekeeping-import-card details > summary {
   display: flex;
   align-items: center;
-  min-height: 22px;
+  min-height: 18px;
+  padding: 0;
   color: var(--text-primary);
   font-weight: 650;
 }
 .timekeeping-import-card .timekeeping-import-copy {
-  margin: 5px 0 10px;
+  margin: 3px 0 10px;
 }
 .timekeeping-import-card .timekeeping-read-reports {
   margin-top: 12px;

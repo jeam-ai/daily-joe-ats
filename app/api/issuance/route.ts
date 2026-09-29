@@ -2,9 +2,10 @@ import ExcelJS from "exceljs";
 import { requireOrigin, requireUser } from "@/lib/auth/session";
 import { SafeError } from "@/lib/server/config";
 import { safeError } from "@/lib/server/response";
-import { transaction } from "@/lib/server/database";
-import { audit, getState, saveState } from "@/lib/server/repository";
+import { putRecord, transaction, type Transaction } from "@/lib/server/database";
+import { audit, getState } from "@/lib/server/repository";
 import type {
+  IssuanceCatalogItem,
   IssuanceCategory,
   IssuanceInventory,
   IssuanceRecord,
@@ -29,6 +30,40 @@ const categories = new Set<IssuanceCategory>([
 
 function canManageIssuance(role: string) {
   return ["Admin", "Talent Acquisition", "HR Generalist"].includes(role);
+}
+
+/**
+ * Issuance is a small, self-contained operational register. Persist it without
+ * replaying every application, interview, and applicant row in the workspace;
+ * that full write can exceed a serverless request while an HR user is simply
+ * correcting a branch or acknowledgement on one release record.
+ */
+async function saveIssuanceWorkspace(
+  tx: Transaction,
+  state: Awaited<ReturnType<typeof getState>>,
+  changes: {
+    issuance?: IssuanceRecord[];
+    inventory?: IssuanceInventory[];
+    catalog?: IssuanceCatalogItem[];
+  },
+) {
+  delete state.currentUser;
+  delete state.demoAvailable;
+  state.revision = (state.revision || 0) + 1;
+  await putRecord(tx, "workspace", "main", state);
+
+  const upsert = async (collection: string, id: string, payload: unknown) => {
+    await tx.query(
+      `INSERT INTO ${collection}(id,payload) VALUES($1,$2) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload`,
+      [id, JSON.stringify(payload)],
+    );
+  };
+  for (const record of changes.issuance || [])
+    await upsert("employee_issuance", record.id, record);
+  for (const record of changes.inventory || [])
+    await upsert("issuance_inventory", record.id, record);
+  for (const record of changes.catalog || [])
+    await upsert("issuance_catalog", record.id, record);
 }
 function text(value: unknown, limit = 250) {
   return String(value || "")
@@ -309,7 +344,11 @@ export async function importIssuanceWorkbook(file: File, actor: string) {
       state.issuance = [...issuance, ...unique];
       state.issuanceInventory = [...currentInventory.values()];
       state.issuanceItems = catalog;
-      await saveState(tx, state, { sync: false });
+      await saveIssuanceWorkspace(tx, state, {
+        issuance: state.issuance,
+        inventory: state.issuanceInventory,
+        catalog: state.issuanceItems,
+      });
     }
     await audit(tx, actor, "issuance.workbook_imported", undefined, {
       file: file.name,
@@ -392,7 +431,7 @@ export async function POST(request: Request) {
         await transaction(async (tx) => {
           const state = await getState(tx);
           state.issuance = [...(state.issuance || []), record];
-          await saveState(tx, state, { sync: false });
+          await saveIssuanceWorkspace(tx, state, { issuance: [record] });
           await audit(tx, user.email, "issuance.created", undefined, {
             issuanceId: record.id,
             category: record.category,
@@ -465,7 +504,7 @@ export async function POST(request: Request) {
           state.issuanceInventory = existing
             ? inventory.map((item) => (item.id === existing.id ? record : item))
             : [...inventory, record];
-          await saveState(tx, state, { sync: false });
+          await saveIssuanceWorkspace(tx, state, { inventory: [record] });
           await audit(
             tx,
             user.email,
@@ -540,7 +579,7 @@ export async function POST(request: Request) {
           record.returnedAt = text(body.returnedAt, 20) || undefined;
           record.remarks = text(body.remarks, 2000) || undefined;
           record.updatedAt = new Date().toISOString();
-          await saveState(tx, state, { sync: false });
+          await saveIssuanceWorkspace(tx, state, { issuance: [record] });
           await audit(tx, user.email, "issuance.updated", undefined, {
             issuanceId: record.id,
             previous,
