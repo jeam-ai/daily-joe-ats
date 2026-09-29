@@ -3,7 +3,7 @@ import { formalName } from "@/lib/names";
 import { z } from "zod";
 import type { Application, ScreeningCriterion, User } from "@/types";
 import { canEdit, canManage } from "@/lib/data-policy";
-import { transaction, readRecord, putRecord } from "./database";
+import { transaction, readRecord, putRecord, type Transaction } from "./database";
 import { getState, saveState, audit } from "./repository";
 import { config, SafeError } from "./config";
 import { purgeDemoApplication } from "./demo";
@@ -54,6 +54,74 @@ const updateSchema = createSchema.omit({ requestId: true });
  * Keep applicant workflow edits small and authoritative instead.
  */
 const workflowUpdateSchema = z.object({ application: applicationSchema });
+
+/**
+ * A profile form changes one applicant, not the whole recruiting system.
+ * Persist its authoritative snapshot and only the projections that this form
+ * can affect. Full workspace reconciliation remains available to workflows
+ * that actually change stages, retention, or bulk records.
+ */
+async function persistProfilePatch(
+  tx: Transaction,
+  state: Awaited<ReturnType<typeof getState>>,
+  before: Application,
+  application: Application,
+) {
+  delete state.currentUser;
+  delete state.demoAvailable;
+  state.revision = (state.revision || 0) + 1;
+  await putRecord(tx, "workspace", "main", state);
+  if (changed(before.applicant, application.applicant))
+    await tx.query(
+      "INSERT INTO applicants(id,email,payload) VALUES($1,$2,$3) ON CONFLICT(id) DO UPDATE SET email=excluded.email,payload=excluded.payload",
+      [
+        application.applicant.id,
+        application.applicant.email,
+        JSON.stringify(application.applicant),
+      ],
+    );
+  await tx.query(
+    "INSERT INTO applications(id,applicant_id,hiring_need_id,resume_id,gmail_message_id,gmail_thread_id,stage,status,payload) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT(id) DO UPDATE SET hiring_need_id=excluded.hiring_need_id,resume_id=excluded.resume_id,gmail_message_id=excluded.gmail_message_id,gmail_thread_id=excluded.gmail_thread_id,stage=excluded.stage,status=excluded.status,payload=excluded.payload",
+    [
+      application.id,
+      application.applicant.id,
+      application.hiringNeedId || null,
+      application.resumeId || null,
+      application.gmailMessageId || null,
+      application.gmailThreadId || null,
+      application.stage,
+      application.status,
+      JSON.stringify(application),
+    ],
+  );
+  await tx.query(
+    "INSERT INTO intake_window(application_id,state,received_at) VALUES($1,$2,$3) ON CONFLICT(application_id) DO UPDATE SET state=excluded.state,received_at=excluded.received_at",
+    [
+      application.id,
+      application.isDemo ? "Demo" : application.queueState || "Closed",
+      application.appliedAt,
+    ],
+  );
+  if (changed(before.screening, application.screening))
+    await tx.query(
+      "INSERT INTO screening_results(application_id,payload) VALUES($1,$2) ON CONFLICT(application_id) DO UPDATE SET payload=excluded.payload",
+      [application.id, JSON.stringify(application.screening)],
+    );
+  const priorEventIds = new Set(before.timeline.map((event) => event.id));
+  for (const event of application.timeline)
+    if (!priorEventIds.has(event.id))
+      await tx.query(
+        "INSERT INTO application_events(id,application_id,occurred_at,actor,payload) VALUES($1,$2,$3,$4,$5) ON CONFLICT(id) DO NOTHING",
+        [
+          event.id,
+          application.id,
+          event.timestamp,
+          event.user,
+          JSON.stringify(event),
+        ],
+      );
+  await putRecord(tx, "sync", "pending", { revision: state.revision });
+}
 
 export async function updateApplicantWorkflow(
   id: string,
@@ -541,10 +609,7 @@ export async function updateApplicant(id: string, input: unknown, user: User) {
       previous: before,
       next: application,
     });
-    // A direct profile save is already committed transactionally and is
-    // picked up through the workspace revision poll. Do not make HR wait for
-    // a tracker/sync pass that is unrelated to the field they just edited.
-    await saveState(tx, state, { sync: false });
+    await persistProfilePatch(tx, state, before, application);
     return structuredClone(application);
   });
 }

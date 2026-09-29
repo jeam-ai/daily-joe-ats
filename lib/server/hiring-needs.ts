@@ -5,8 +5,8 @@ import type { Application, HiringNeed, User } from "@/types";
 import { canManage } from "@/lib/data-policy";
 import { changed, ruleSchema } from "@/lib/domain";
 import { SafeError } from "@/lib/server/config";
-import { transaction } from "@/lib/server/database";
-import { audit, getState, saveState } from "@/lib/server/repository";
+import { putRecord, transaction, type Transaction } from "@/lib/server/database";
+import { audit, getState } from "@/lib/server/repository";
 
 const needSchema = z.object({
   id: z.string().min(1).max(254).optional(),
@@ -69,6 +69,67 @@ function resetScreeningForCriteriaChange(
 }
 
 /**
+ * Do not replay the complete applicant, interview, retention, and issuance
+ * projection for a small staffing-plan change. The workspace snapshot remains
+ * atomic, while only the hiring need and any deliberately reset screenings
+ * are projected. This is the difference between an immediate save and a
+ * 10–20 second save on a mature workspace.
+ */
+async function persistHiringNeedChanges(
+  tx: Transaction,
+  state: Awaited<ReturnType<typeof getState>>,
+  needs: HiringNeed[],
+  applications: Application[] = [],
+) {
+  delete state.currentUser;
+  delete state.demoAvailable;
+  state.revision = (state.revision || 0) + 1;
+  await putRecord(tx, "workspace", "main", state);
+
+  for (const need of needs)
+    await tx.query(
+      "INSERT INTO hiring_needs(id,payload) VALUES($1,$2) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload",
+      [need.id, JSON.stringify(need)],
+    );
+  for (const application of applications) {
+    await tx.query(
+      "INSERT INTO applications(id,applicant_id,hiring_need_id,resume_id,gmail_message_id,gmail_thread_id,stage,status,payload) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT(id) DO UPDATE SET hiring_need_id=excluded.hiring_need_id,resume_id=excluded.resume_id,gmail_message_id=excluded.gmail_message_id,gmail_thread_id=excluded.gmail_thread_id,stage=excluded.stage,status=excluded.status,payload=excluded.payload",
+      [
+        application.id,
+        application.applicant.id,
+        application.hiringNeedId || null,
+        application.resumeId || null,
+        application.gmailMessageId || null,
+        application.gmailThreadId || null,
+        application.stage,
+        application.status,
+        JSON.stringify(application),
+      ],
+    );
+    await tx.query(
+      "INSERT INTO screening_results(application_id,payload) VALUES($1,$2) ON CONFLICT(application_id) DO UPDATE SET payload=excluded.payload",
+      [application.id, JSON.stringify(application.screening)],
+    );
+    const event = application.timeline[application.timeline.length - 1];
+    if (event)
+      await tx.query(
+        "INSERT INTO application_events(id,application_id,occurred_at,actor,payload) VALUES($1,$2,$3,$4,$5) ON CONFLICT(id) DO NOTHING",
+        [
+          event.id,
+          application.id,
+          event.timestamp,
+          event.user,
+          JSON.stringify(event),
+        ],
+      );
+  }
+  // Cross-device clients poll the workspace revision. This marker also keeps
+  // any configured background integration aware of the latest committed edit
+  // without waiting for it during the HR action.
+  await putRecord(tx, "sync", "pending", { revision: state.revision });
+}
+
+/**
  * Hiring needs are operational records, so they are saved as a small,
  * authoritative payload instead of asking the browser to re-submit its entire
  * bounded workspace snapshot. This keeps a stale application elsewhere in the
@@ -116,6 +177,7 @@ export async function saveHiringNeed(input: unknown, user: User) {
     if (index >= 0) state.hiringNeeds[index] = next;
     else state.hiringNeeds.push(next);
 
+    const resetApplications: Application[] = [];
     if (!before || changed(before.criteria, next.criteria)) {
       for (const application of state.applications.filter(
         (item) =>
@@ -132,6 +194,7 @@ export async function saveHiringNeed(input: unknown, user: User) {
           previous: previousScreening,
           next: application.screening,
         });
+        resetApplications.push(application);
       }
     }
     await audit(
@@ -141,10 +204,7 @@ export async function saveHiringNeed(input: unknown, user: User) {
       undefined,
       { entityType: "hiringNeeds", entityId: next.id, previous: before, next },
     );
-    // Database state and the revision poll are the shared source of truth.
-    // Rebuilding optional tracker artifacts here made ordinary staffing edits
-    // wait behind unrelated recruitment data.
-    await saveState(tx, state, { sync: false });
+    await persistHiringNeedChanges(tx, state, [next], resetApplications);
     return structuredClone(next);
   });
 }
@@ -169,7 +229,7 @@ export async function setRealHiringNeedsOpeningDate(input: unknown, user: User) 
       count: affected.length,
       needIds: affected.map((need) => need.id),
     });
-    await saveState(tx, state, { sync: false });
+    await persistHiringNeedChanges(tx, state, affected);
     return { updated: affected.length, hiringNeeds: structuredClone(affected) };
   });
 }
