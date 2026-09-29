@@ -28,7 +28,7 @@ export async function GET(request: Request) {
     const verifier = createState();
     const nonce = createState();
     const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
-    url.search = new URLSearchParams({
+    const parameters = new URLSearchParams({
       client_id: c.clientId,
       redirect_uri: c.redirectUri,
       response_type: "code",
@@ -46,10 +46,14 @@ export async function GET(request: Request) {
       include_granted_scopes: storage ? "false" : "true",
       access_type: gmail ? "offline" : "online",
       prompt: gmail ? "consent" : "select_account",
-      login_hint: ["intake", "official", "sheets", "storage"].includes(kind)
-        ? c.officialEmail
-        : user?.email || c.allowedEmail,
-    }).toString();
+    });
+    // The workspace login must never force the browser's last HR account.
+    // Google shows its account chooser for `select_account`, so Careers staff
+    // can deliberately choose the official account or another authorized one.
+    // Integration connections remain explicitly bound to the official mailbox.
+    if (["intake", "official", "sheets", "storage"].includes(kind))
+      parameters.set("login_hint", c.officialEmail);
+    url.search = parameters.toString();
     const response = NextResponse.redirect(url);
     response.cookies.set(
       "dj_oauth",
