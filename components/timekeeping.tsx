@@ -282,6 +282,13 @@ export function Timekeeping() {
     );
     setPendingClassification("");
   }
+  function beginClassification(
+    record: OdooDay,
+    choice: AttendanceClassification,
+  ) {
+    openRecord(record);
+    setPendingClassification(choice);
+  }
   const permitted =
     dataset !== "demo" &&
     !!state?.currentUser &&
@@ -1382,14 +1389,39 @@ export function Timekeeping() {
                           </Badge>
                         </td>
                         <td>
-                          <Button
-                            variant="ghost"
-                            onClick={() => {
-                              openRecord(r);
-                            }}
-                          >
-                            Review <ChevronRight size={15} />
-                          </Button>
+                          <div className="timekeeping-table-actions">
+                            {classificationsFor(r).length > 0 &&
+                              !r.review.classification && (
+                                <label className="timekeeping-inline-classification">
+                                  <span>Possible classification</span>
+                                  <Select
+                                    aria-label={`Choose a possible classification for ${r.employee} on ${date(r.date)}`}
+                                    value=""
+                                    onChange={(event) => {
+                                      const choice = event.target
+                                        .value as AttendanceClassification;
+                                      if (choice)
+                                        beginClassification(r, choice);
+                                    }}
+                                  >
+                                    <option value="">Choose…</option>
+                                    {classificationsFor(r).map((choice) => (
+                                      <option key={choice} value={choice}>
+                                        {choice}
+                                      </option>
+                                    ))}
+                                  </Select>
+                                </label>
+                              )}
+                            <Button
+                              variant="ghost"
+                              onClick={() => {
+                                openRecord(r);
+                              }}
+                            >
+                              Review <ChevronRight size={15} />
+                            </Button>
+                          </div>
                         </td>
                       </tr>
                     ))}

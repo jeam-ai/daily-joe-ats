@@ -1915,6 +1915,24 @@ summary {
   color: var(--text-secondary);
   font-size: 13px;
 }
+.timekeeping-table-actions {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+}
+.timekeeping-inline-classification {
+  display: grid;
+  gap: 4px;
+  min-width: 172px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+.timekeeping-inline-classification .select {
+  min-height: 34px;
+  padding-block: 5px;
+  font-size: 13px;
+}
 
 .odoo-upload-heading {
   font-size: 16px;
