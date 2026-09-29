@@ -75,6 +75,9 @@ export const attendanceClassifications = [
   "Early Out",
   "Absent",
   "Day Off",
+  "Leave",
+  "System / Data Issue",
+  "Other",
 ] as const;
 export type AttendanceClassification =
   (typeof attendanceClassifications)[number];
@@ -85,6 +88,10 @@ export type OdooReview = {
   classification?: AttendanceClassification;
   correctedInOdoo?: boolean;
   correctionNote?: string;
+  duplicateResolution?: {
+    retainedSourceRows: number[];
+    disregardedSourceRows: number[];
+  };
   note: string;
   reviewer: string;
   reviewedAt: string;

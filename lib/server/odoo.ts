@@ -420,6 +420,12 @@ export async function reviewOdoo(input: unknown, user: User) {
       classification: z.enum(attendanceClassifications).optional(),
       correctedInOdoo: z.boolean().optional(),
       correctionNote: z.string().max(4000).optional(),
+      duplicateResolution: z
+        .object({
+          retainedSourceRows: z.array(z.number().int().positive()).max(100),
+          disregardedSourceRows: z.array(z.number().int().positive()).max(100),
+        })
+        .optional(),
     })
     .safeParse(input);
   if (!parsed.success)
@@ -440,10 +446,31 @@ export async function reviewOdoo(input: unknown, user: User) {
       );
     const row = batch.records.find((r) => r.id === body.recordId);
     if (!row) throw new SafeError("Attendance record not found.", 404);
+    if (body.duplicateResolution) {
+      if (!row.results.includes("Multiple Entries"))
+        throw new SafeError(
+          "A duplicate source selection is only available for multiple attendance entries.",
+          409,
+        );
+      const sourceRows = new Set(row.raw.map((source) => source.row));
+      const chosen = [
+        ...body.duplicateResolution.retainedSourceRows,
+        ...body.duplicateResolution.disregardedSourceRows,
+      ];
+      if (
+        !body.duplicateResolution.retainedSourceRows.length ||
+        chosen.some((sourceRow) => !sourceRows.has(sourceRow)) ||
+        new Set(chosen).size !== chosen.length
+      )
+        throw new SafeError(
+          "Choose at least one valid source row to retain; a source row cannot be both retained and disregarded.",
+          409,
+        );
+    }
     const permittedClassifications = row.results.includes("Negative Attendance")
       ? ["Late", "Undertime", "Early Out"]
       : row.results.includes("No Attendance")
-        ? ["Absent", "Day Off"]
+        ? ["Absent", "Day Off", "Leave", "System / Data Issue", "Other"]
         : [];
     if (
       body.classification &&
@@ -472,6 +499,8 @@ export async function reviewOdoo(input: unknown, user: User) {
       correctedInOdoo:
         body.correctedInOdoo ?? row.review.correctedInOdoo ?? false,
       correctionNote: body.correctionNote || row.review.correctionNote || "",
+      duplicateResolution:
+        body.duplicateResolution || row.review.duplicateResolution,
       reviewer: user.email,
       reviewedAt: now,
       history: [
@@ -495,6 +524,7 @@ export async function reviewOdoo(input: unknown, user: User) {
       previous,
       status: body.status,
       note: body.note,
+      duplicateResolution: body.duplicateResolution,
       reviewer: user.email,
       createdAt: now,
     });

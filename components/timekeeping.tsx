@@ -1,6 +1,15 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
-import { Download, Upload, Save, ArrowLeft, ChevronRight } from "lucide-react";
+import {
+  Download,
+  Upload,
+  Save,
+  ArrowLeft,
+  ChevronRight,
+  CheckCircle2,
+  CircleAlert,
+  ClipboardCheck,
+} from "lucide-react";
 import { useApp } from "./provider";
 import {
   Badge,
@@ -12,6 +21,7 @@ import {
   Select,
   Table,
   Modal,
+  HelpTip,
 } from "./ui";
 import { requestJson, downloadFile } from "@/lib/client-request";
 import {
@@ -27,6 +37,12 @@ import type { TimekeepingJob } from "@/lib/server/timekeeping-jobs";
 import type { OdooBatch } from "@/lib/server/odoo";
 import { formatDate } from "@/lib/dates";
 import { attendanceTimestamp, defaultAttendanceRules } from "@/lib/timekeeping";
+import {
+  cutoffWorkflow,
+  employeeAttendanceSummary,
+  issueExplanation,
+  queueGroupFilter,
+} from "@/lib/timekeeping-workflow";
 type Preview = Pick<
   OdooReports,
   "period" | "sources" | "aliases" | "warnings"
@@ -67,7 +83,7 @@ const classificationsFor = (record: OdooDay): AttendanceClassification[] =>
   record.results.includes("Negative Attendance")
     ? ["Late", "Undertime", "Early Out"]
     : record.results.includes("No Attendance")
-      ? ["Absent", "Day Off"]
+      ? ["Day Off", "Leave", "Absent", "System / Data Issue", "Other"]
       : [];
 const clockTime = (
   value: string,
@@ -250,7 +266,9 @@ export function Timekeeping() {
     AttendanceClassification | ""
   >("");
   const [correctedInOdoo, setCorrectedInOdoo] = useState(false),
-    [correctionNote, setCorrectionNote] = useState("");
+    [correctionNote, setCorrectionNote] = useState(""),
+    [retainedSourceRows, setRetainedSourceRows] = useState<number[]>([]),
+    [reviewNext, setReviewNext] = useState(false);
   function openRecord(record: OdooDay) {
     setDetail(record.id);
     setReview(record.review.status);
@@ -258,6 +276,10 @@ export function Timekeeping() {
     setClassification(record.review.classification || "");
     setCorrectedInOdoo(!!record.review.correctedInOdoo);
     setCorrectionNote(record.review.correctionNote || "");
+    setRetainedSourceRows(
+      record.review.duplicateResolution?.retainedSourceRows ||
+        record.raw.map((source) => source.row),
+    );
     setPendingClassification("");
   }
   const permitted =
@@ -381,6 +403,24 @@ export function Timekeeping() {
     (record) => record.review.status === "For Review",
   ).length;
   const resolvedCount = records.length - reviewCount;
+  const workflow = useMemo(() => cutoffWorkflow(records), [records]);
+  const allEmployeeRows = useMemo(() => {
+    const groups = new Map<string, OdooDay[]>();
+    for (const record of records)
+      groups.set(key(record), [...(groups.get(key(record)) || []), record]);
+    return groups;
+  }, [records]);
+  const openQueueRecord = (record: OdooDay) => {
+    setReviewNext(true);
+    openRecord(record);
+  };
+  const openQueueGroup = (result: string) => {
+    setEmployee("");
+    setPage(1);
+    setReviewFilter("For Review");
+    setReviewedOnly(false);
+    setResultFilter(result);
+  };
   const activeDashboardMetric = reviewFilter
     ? reviewFilter === "For Review"
       ? "review"
@@ -801,6 +841,196 @@ export function Timekeeping() {
             </div>
           </div>
           <section
+            className="cutoff-readiness-card"
+            aria-label="Cutoff readiness"
+          >
+            <div className="cutoff-readiness-heading">
+              <div>
+                <span className="eyebrow">CUTOFF READINESS</span>
+                <h2>
+                  {workflow.remaining
+                    ? `${workflow.remaining} item${workflow.remaining === 1 ? "" : "s"} remaining`
+                    : "Ready for final cutoff review"}
+                </h2>
+                <p>
+                  {workflow.progress}% processed · {records.length} employee-day
+                  {records.length === 1 ? "" : "s"} analyzed across{" "}
+                  {new Set(records.map(key)).size} employee
+                  {new Set(records.map(key)).size === 1 ? "" : "s"}.
+                </p>
+              </div>
+              <div className="cutoff-readiness-progress">
+                <strong>{workflow.progress}%</strong>
+                <progress
+                  max={100}
+                  value={workflow.progress}
+                  aria-label={`${workflow.progress}% of the cutoff processed`}
+                />
+              </div>
+            </div>
+            <div className="cutoff-readiness-metrics">
+              {[
+                ["Completed", workflow.completed.length, "green"],
+                ["Action required", workflow.actionRequired.length, "orange"],
+                [
+                  "Awaiting verification",
+                  workflow.awaitingVerification.length,
+                  "amber",
+                ],
+                [
+                  "Automatically cleared",
+                  workflow.automaticallyCleared.length,
+                  "blue",
+                ],
+              ].map(([label, value, tone]) => (
+                <div className="cutoff-readiness-metric" key={String(label)}>
+                  <Badge tone={tone as "green" | "orange" | "amber" | "blue"}>
+                    {label}
+                  </Badge>
+                  <strong>{value}</strong>
+                </div>
+              ))}
+            </div>
+            <details className="cutoff-checklist" open>
+              <summary>Cutoff checklist</summary>
+              <div>
+                {[
+                  ["Overview Attendance imported", batch.sources.length > 0, 0],
+                  ["Pivot Working Hours imported", batch.sources.length > 1, 0],
+                  ["Data validation completed", true, 0],
+                  ["Employee/date coverage completed", records.length > 0, 0],
+                  [
+                    "Exceptions requiring HR action",
+                    workflow.actionRequired.length === 0,
+                    workflow.actionRequired.length,
+                  ],
+                  [
+                    "Corrections verified",
+                    workflow.awaitingVerification.length === 0,
+                    workflow.awaitingVerification.length,
+                  ],
+                  [
+                    "Final cutoff review",
+                    workflow.remaining === 0,
+                    workflow.remaining,
+                  ],
+                ].map(([label, complete, remaining]) => (
+                  <button
+                    key={String(label)}
+                    type="button"
+                    className="cutoff-checklist-item"
+                    onClick={() => {
+                      if (Number(remaining) > 0) {
+                        setReviewFilter("For Review");
+                        setReviewedOnly(false);
+                        setResultFilter("");
+                        setPage(1);
+                      }
+                    }}
+                  >
+                    {complete ? (
+                      <CheckCircle2 size={16} />
+                    ) : (
+                      <CircleAlert size={16} />
+                    )}
+                    <span>{label}</span>
+                    {!complete && <strong>{remaining} remaining</strong>}
+                  </button>
+                ))}
+              </div>
+            </details>
+          </section>
+          <section
+            className="timekeeping-work-queue"
+            aria-label="Timekeeping work queue"
+          >
+            <div className="timekeeping-work-queue-heading">
+              <div>
+                <span className="eyebrow">ATTENTION NEEDED</span>
+                <h2>Timekeeping work queue</h2>
+                <p>
+                  Only unresolved employee-days appear here. Completed reviews
+                  remain in the audit trail.
+                </p>
+              </div>
+              <Button
+                disabled={!workflow.actionRequired.length || !!busy}
+                onClick={() => openQueueRecord(workflow.actionRequired[0])}
+              >
+                <ClipboardCheck size={16} />
+                Review next
+              </Button>
+            </div>
+            <div className="timekeeping-work-queue-summary">
+              <span>
+                <strong>{workflow.actionRequired.length}</strong> action
+                required
+              </span>
+              <span>
+                <strong>{workflow.awaitingVerification.length}</strong> awaiting
+                verification
+              </span>
+              <span>
+                <strong>{workflow.automaticallyCleared.length}</strong>{" "}
+                automatically cleared
+              </span>
+            </div>
+            <div className="timekeeping-work-queue-groups">
+              {workflow.groups
+                .filter((group) => group.records.length > 0)
+                .map((group) => (
+                  <details
+                    key={group.id}
+                    className="timekeeping-work-queue-group"
+                  >
+                    <summary>
+                      <span>
+                        <Badge tone="orange">{group.records.length}</Badge>
+                        <strong>{group.label}</strong>
+                      </span>
+                      <span className="muted">View records</span>
+                    </summary>
+                    <p>{group.description}</p>
+                    <div className="timekeeping-work-queue-records">
+                      {group.records.slice(0, 5).map((record) => (
+                        <button
+                          key={record.id}
+                          type="button"
+                          onClick={() => openQueueRecord(record)}
+                        >
+                          <span>
+                            <strong>{record.employee}</strong>
+                            <small>
+                              {date(record.date)} ·{" "}
+                              {record.location ||
+                                record.department ||
+                                "Odoo source"}
+                            </small>
+                          </span>
+                          <ChevronRight size={16} />
+                        </button>
+                      ))}
+                    </div>
+                    <Button
+                      variant="ghost"
+                      onClick={() => openQueueGroup(queueGroupFilter(group.id))}
+                    >
+                      View all {group.records.length}
+                    </Button>
+                  </details>
+                ))}
+              {!workflow.actionRequired.length && (
+                <div className="timekeeping-work-queue-empty">
+                  <CheckCircle2 size={18} />
+                  <span>
+                    No active HR decisions remain. Complete any verification,
+                    then perform final cutoff review.
+                  </span>
+                </div>
+              )}
+            </div>
+          </section>
+          <section
             className="timekeeping-dashboard"
             aria-label="Cutoff overview"
           >
@@ -1185,63 +1415,83 @@ export function Timekeeping() {
                   <tbody>
                     {employees
                       .slice((currentPage - 1) * 20, currentPage * 20)
-                      .map(([id, rows]) => (
-                        <tr key={id}>
-                          <td>
-                            <strong>{rows[0].employee}</strong>
-                            <small className="muted">
-                              {rows[0].employeeId || "Matched by source name"}
-                            </small>
-                          </td>
-                          <td>{rows.length}</td>
-                          <td>
-                            {hours(
-                              rows.reduce((sum, r) => sum + (r.worked ?? 0), 0),
-                            )}
-                          </td>
-                          <td>
-                            {rows.some((r) => r.expected !== null)
-                              ? hours(
-                                  rows.reduce(
-                                    (sum, r) => sum + (r.expected ?? 0),
-                                    0,
-                                  ),
-                                )
-                              : "—"}
-                            {rows.some((r) => r.expected === null) && (
+                      .map(([id, rows]) => {
+                        const summary = employeeAttendanceSummary(
+                          allEmployeeRows.get(id) || rows,
+                        );
+                        return (
+                          <tr key={id}>
+                            <td>
+                              <strong>{rows[0].employee}</strong>
                               <small className="muted">
-                                {rows.filter((r) => r.expected === null).length}{" "}
-                                dates unavailable
+                                {rows[0].employeeId || "Matched by source name"}
                               </small>
-                            )}
-                          </td>
-                          <td>
-                            <Badge
-                              tone={
-                                rows.some(
-                                  (r) => r.review.status === "For Review",
-                                )
-                                  ? "orange"
-                                  : "green"
-                              }
-                            >
-                              {
-                                rows.filter(
-                                  (r) => r.review.status === "For Review",
-                                ).length
-                              }
-                            </Badge>
-                          </td>
-                          <td>
-                            <Button
-                              variant="ghost"
-                              onClick={() => setEmployee(id)}
-                            >
-                              View days <ChevronRight size={15} />
-                            </Button>
-                          </td>
-                        </tr>
-                      ))}
+                            </td>
+                            <td>
+                              <strong>{summary.cutoffDays} cutoff days</strong>
+                              <small className="muted">
+                                {summary.recordedDays} recorded ·{" "}
+                                {summary.normalDays} normal
+                              </small>
+                            </td>
+                            <td>
+                              {hours(
+                                rows.reduce(
+                                  (sum, r) => sum + (r.worked ?? 0),
+                                  0,
+                                ),
+                              )}
+                            </td>
+                            <td>
+                              {rows.some((r) => r.expected !== null)
+                                ? hours(
+                                    rows.reduce(
+                                      (sum, r) => sum + (r.expected ?? 0),
+                                      0,
+                                    ),
+                                  )
+                                : "—"}
+                              {rows.some((r) => r.expected === null) && (
+                                <small className="muted">
+                                  {
+                                    rows.filter((r) => r.expected === null)
+                                      .length
+                                  }{" "}
+                                  dates unavailable
+                                </small>
+                              )}
+                            </td>
+                            <td>
+                              <Badge
+                                tone={
+                                  rows.some(
+                                    (r) => r.review.status === "For Review",
+                                  )
+                                    ? "orange"
+                                    : "green"
+                                }
+                              >
+                                {summary.unresolved} remaining
+                              </Badge>
+                              {(summary.resolved > 0 ||
+                                summary.clarification > 0) && (
+                                <small className="muted">
+                                  {summary.resolved} resolved ·{" "}
+                                  {summary.clarification} need classification
+                                </small>
+                              )}
+                            </td>
+                            <td>
+                              <Button
+                                variant="ghost"
+                                onClick={() => setEmployee(id)}
+                              >
+                                View days <ChevronRight size={15} />
+                              </Button>
+                            </td>
+                          </tr>
+                        );
+                      })}
                   </tbody>
                 </Table>
                 {!employees.length && (
@@ -1278,8 +1528,20 @@ export function Timekeeping() {
         <Modal
           title={`${selected.employee} · ${date(selected.date)}`}
           busy={!!busy}
-          onClose={() => setDetail("")}
+          onClose={() => {
+            setDetail("");
+            setReviewNext(false);
+          }}
         >
+          {reviewNext && (
+            <div className="review-next-card-heading">
+              <ClipboardCheck size={17} />
+              <span>
+                Review next · {workflow.actionRequired.length} active item
+                {workflow.actionRequired.length === 1 ? "" : "s"} in queue
+              </span>
+            </div>
+          )}
           <p className="muted">
             Odoo remains the source attendance record. Classification,
             resolution, and correction are recorded separately; source
@@ -1287,10 +1549,48 @@ export function Timekeeping() {
           </p>
           <div className="actions">
             {selected.results.map((s) => (
-              <Badge key={s} tone="amber">
-                {s}
-              </Badge>
+              <span className="timekeeping-status-with-help" key={s}>
+                <Badge tone="amber">{s}</Badge>
+                {!/[Nn]ormal|Rest Day/.test(s) && (
+                  <HelpTip>
+                    {issueExplanation(
+                      selected,
+                      batch.rules.excessiveWorkedHours ?? 14,
+                    )}
+                  </HelpTip>
+                )}
+              </span>
             ))}
+          </div>
+          <div className="review-next-facts">
+            <span>
+              <strong>Employee ID</strong>
+              {selected.employeeId || "Not supplied"}
+            </span>
+            <span>
+              <strong>Branch</strong>
+              {selected.location || "Not supplied"}
+            </span>
+            <span>
+              <strong>Expected schedule</strong>
+              {batch.rules.start && batch.rules.end
+                ? `${batch.rules.start}–${batch.rules.end}`
+                : "Not configured"}
+            </span>
+            <span>
+              <strong>Time in / out</strong>
+              {clockTime(
+                selected.checkIn,
+                batch.rules.timezone,
+                selected.date,
+              )}{" "}
+              →{" "}
+              {clockTime(
+                selected.checkOut,
+                batch.rules.timezone,
+                selected.date,
+              )}
+            </span>
           </div>
           <div className="odoo-comparison">
             {(
@@ -1378,30 +1678,61 @@ export function Timekeeping() {
             </section>
           )}
           <details open>
-            <summary>Attendance source records ({selected.raw.length})</summary>
+            <summary>
+              Attendance source records ({selected.raw.length})
+              {selected.raw.length > 1
+                ? " · duplicate comparison required"
+                : ""}
+            </summary>
             {selected.raw.length ? (
-              <Table>
-                <thead>
-                  <tr>
-                    <th>Row / source name</th>
-                    <th>Check In</th>
-                    <th>Check Out</th>
-                    <th>Worked</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {selected.raw.map((r) => (
-                    <tr key={r.row}>
-                      <td>
-                        {r.row} · {r.employee}
-                      </td>
-                      <td>{r.checkIn || "Missing"}</td>
-                      <td>{r.checkOut || "Missing"}</td>
-                      <td>{hours(r.worked)}</td>
+              <>
+                {selected.raw.length > 1 && (
+                  <p className="muted">
+                    Select every source row that should remain active. Unchecked
+                    rows are recorded as disregarded for this cutoff review; the
+                    original source is kept in the audit trail.
+                  </p>
+                )}
+                <Table>
+                  <thead>
+                    <tr>
+                      {selected.raw.length > 1 && <th>Keep</th>}
+                      <th>Row / source name</th>
+                      <th>Check In</th>
+                      <th>Check Out</th>
+                      <th>Worked</th>
                     </tr>
-                  ))}
-                </tbody>
-              </Table>
+                  </thead>
+                  <tbody>
+                    {selected.raw.map((r) => (
+                      <tr key={r.row}>
+                        {selected.raw.length > 1 && (
+                          <td>
+                            <input
+                              type="checkbox"
+                              aria-label={`Keep attendance source row ${r.row}`}
+                              checked={retainedSourceRows.includes(r.row)}
+                              onChange={(event) =>
+                                setRetainedSourceRows((current) =>
+                                  event.target.checked
+                                    ? [...current, r.row]
+                                    : current.filter((row) => row !== r.row),
+                                )
+                              }
+                            />
+                          </td>
+                        )}
+                        <td>
+                          {r.row} · {r.employee}
+                        </td>
+                        <td>{r.checkIn || "Missing"}</td>
+                        <td>{r.checkOut || "Missing"}</td>
+                        <td>{hours(r.worked)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </Table>
+              </>
             ) : (
               <p>No raw Attendance entry for this employee/date.</p>
             )}
@@ -1471,11 +1802,33 @@ export function Timekeeping() {
                     classification: classification || undefined,
                     correctedInOdoo,
                     correctionNote,
+                    duplicateResolution:
+                      selected.raw.length > 1
+                        ? {
+                            retainedSourceRows,
+                            disregardedSourceRows: selected.raw
+                              .map((source) => source.row)
+                              .filter(
+                                (row) => !retainedSourceRows.includes(row),
+                              ),
+                          }
+                        : undefined,
                   }),
                 );
                 setBatch(r.batch);
-                notify("Attendance review saved.");
-                setDetail("");
+                const next = cutoffWorkflow(
+                  r.batch.records,
+                ).actionRequired.find((record) => record.id !== selected.id);
+                notify(
+                  next && reviewNext
+                    ? "Review saved. Loading the next unresolved record."
+                    : "Attendance review saved.",
+                );
+                if (next && reviewNext) openRecord(next);
+                else {
+                  setDetail("");
+                  setReviewNext(false);
+                }
               })
             }
           >
