@@ -14,6 +14,7 @@ import {
 import { useApp } from "./provider";
 import { clientFetch } from "@/lib/client-request";
 import { formatDate } from "@/lib/dates";
+import { releasedForStock } from "@/lib/issuance-stock";
 import type {
   IssuanceCategory,
   IssuanceInventory,
@@ -65,6 +66,11 @@ export function EmployeeIssuance() {
   const [stockCategory, setStockCategory] =
     useState<IssuanceCategory>("Uniform");
   const [stockItem, setStockItem] = useState("");
+  const [stockBeginning, setStockBeginning] = useState(0);
+  const [manualStockCountOverride, setManualStockCountOverride] =
+    useState(false);
+  const [manualStockIssued, setManualStockIssued] = useState(0);
+  const [manualStockOnHand, setManualStockOnHand] = useState(0);
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<IssuanceRecord | null>(null);
   const [editingStock, setEditingStock] = useState<
@@ -74,6 +80,10 @@ export function EmployeeIssuance() {
   const file = useRef<HTMLInputElement>(null);
   const records = state?.issuance || [];
   const inventory = state?.issuanceInventory || [];
+  const automaticStockOut =
+    editingStock && editingStock !== "new"
+      ? releasedForStock(editingStock, records)
+      : 0;
   const catalog = useMemo(() => {
     const configured = (state?.issuanceItems || []).filter(
       (item) => item.active,
@@ -220,10 +230,12 @@ export function EmployeeIssuance() {
       patchState((current) => ({
         ...current,
         issuance: [...(current.issuance || []), record],
+        issuanceInventory:
+          (result.inventory as IssuanceInventory[] | undefined) ||
+          current.issuanceInventory,
       }));
       setAdding(false);
       notify("Issuance record saved.");
-      void refresh();
     } catch (error) {
       notify((error as Error).message, "error");
     } finally {
@@ -271,10 +283,12 @@ export function EmployeeIssuance() {
         issuance: (current.issuance || []).map((item) =>
           item.id === record.id ? record : item,
         ),
+        issuanceInventory:
+          (result.inventory as IssuanceInventory[] | undefined) ||
+          current.issuanceInventory,
       }));
       setEditing(null);
       notify("Issuance update saved.");
-      void refresh();
     } catch (error) {
       notify((error as Error).message, "error");
     } finally {
@@ -298,9 +312,10 @@ export function EmployeeIssuance() {
           role: form.get("role"),
           item: form.get("item"),
           size: form.get("size"),
-          beginning: Number(form.get("beginning")),
-          issued: Number(form.get("issued")),
-          onHand: Number(form.get("onHand")),
+          beginning: stockBeginning,
+          issued: manualStockCountOverride ? manualStockIssued : 0,
+          onHand: manualStockCountOverride ? manualStockOnHand : 0,
+          manualCountOverride: manualStockCountOverride,
           updatedAt: form.get("updatedAt"),
         }),
       });
@@ -320,7 +335,6 @@ export function EmployeeIssuance() {
       }));
       setEditingStock(null);
       notify("Stock saved and the on-hand totals were refreshed.");
-      void refresh();
     } catch (error) {
       notify((error as Error).message, "error");
     } finally {
@@ -429,7 +443,8 @@ export function EmployeeIssuance() {
           <div>
             <h2>Stock dashboard</h2>
             <p className="muted">
-              Beginning, Out, and On hand follow the editable On Hand register.
+              Beginning is editable. Released / out and On hand automatically
+              reconcile with issuance history.
             </p>
           </div>
           <Badge>{inventory.length} stock lines</Badge>
@@ -472,6 +487,10 @@ export function EmployeeIssuance() {
               onClick={() => {
                 setStockCategory("Uniform");
                 setStockItem("");
+                setStockBeginning(0);
+                setManualStockCountOverride(false);
+                setManualStockIssued(0);
+                setManualStockOnHand(0);
                 setEditingStock("new");
               }}
             >
@@ -531,6 +550,12 @@ export function EmployeeIssuance() {
                         onClick={() => {
                           setStockCategory(stock.category);
                           setStockItem(stock.item);
+                          setStockBeginning(stock.beginning);
+                          setManualStockCountOverride(
+                            !!stock.manualCountOverride,
+                          );
+                          setManualStockIssued(stock.issued);
+                          setManualStockOnHand(stock.onHand);
                           setEditingStock(stock);
                         }}
                       >
@@ -1019,33 +1044,61 @@ export function EmployeeIssuance() {
                   type="number"
                   min="0"
                   required
-                  defaultValue={
-                    editingStock === "new" ? 0 : editingStock.beginning
+                  value={stockBeginning}
+                  onChange={(event) =>
+                    setStockBeginning(Math.max(0, Number(event.target.value)))
                   }
                 />
               </Field>
-              <Field label="Out">
-                <Input
-                  name="issued"
-                  type="number"
-                  min="0"
-                  required
-                  defaultValue={
-                    editingStock === "new" ? 0 : editingStock.issued
-                  }
-                />
-              </Field>
-              <Field label="On hand">
-                <Input
-                  name="onHand"
-                  type="number"
-                  min="0"
-                  required
-                  defaultValue={
-                    editingStock === "new" ? 0 : editingStock.onHand
-                  }
-                />
-              </Field>
+              {manualStockCountOverride ? (
+                <>
+                  <Field label="Released / out (manual override)">
+                    <Input
+                      name="issued"
+                      type="number"
+                      min="0"
+                      required
+                      value={manualStockIssued}
+                      onChange={(event) =>
+                        setManualStockIssued(
+                          Math.max(0, Number(event.target.value)),
+                        )
+                      }
+                    />
+                  </Field>
+                  <Field label="Current on hand (manual override)">
+                    <Input
+                      name="onHand"
+                      type="number"
+                      min="0"
+                      required
+                      value={manualStockOnHand}
+                      onChange={(event) =>
+                        setManualStockOnHand(
+                          Math.max(0, Number(event.target.value)),
+                        )
+                      }
+                    />
+                  </Field>
+                </>
+              ) : (
+                <>
+                  <Field label="Released / out">
+                    <Input
+                      name="automaticIssued"
+                      value={automaticStockOut}
+                      readOnly
+                    />
+                  </Field>
+                  <Field label="Current on hand">
+                    <Input
+                      name="automaticOnHand"
+                      value={Math.max(0, stockBeginning - automaticStockOut)}
+                      readOnly
+                    />
+                  </Field>
+                </>
+              )}
               <Field label="Updated on">
                 <Input
                   name="updatedAt"
@@ -1058,9 +1111,21 @@ export function EmployeeIssuance() {
                 />
               </Field>
             </div>
+            <label className="checkbox-row">
+              <input
+                type="checkbox"
+                checked={manualStockCountOverride}
+                onChange={(event) =>
+                  setManualStockCountOverride(event.target.checked)
+                }
+              />
+              Use a verified physical-count override for this stock line
+            </label>
             <p className="fine-print">
-              On hand is stored separately so HR can preserve a verified
-              physical count when adjustments do not equal Beginning minus Out.
+              Automatic is the default: Released / out follows active issuance
+              history and Current on hand is Beginning minus Released / out.
+              Use an override only to retain a documented physical-count
+              correction.
             </p>
             <div className="modal-actions">
               <Button

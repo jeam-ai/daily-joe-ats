@@ -4,6 +4,7 @@ import { SafeError } from "@/lib/server/config";
 import { safeError } from "@/lib/server/response";
 import { putRecord, transaction, type Transaction } from "@/lib/server/database";
 import { audit, getState } from "@/lib/server/repository";
+import { reconcileInventory } from "@/lib/issuance-stock";
 import type {
   IssuanceCatalogItem,
   IssuanceCategory,
@@ -342,7 +343,10 @@ export async function importIssuanceWorkbook(file: File, actor: string) {
       catalogAdded
     ) {
       state.issuance = [...issuance, ...unique];
-      state.issuanceInventory = [...currentInventory.values()];
+      state.issuanceInventory = reconcileInventory(
+        [...currentInventory.values()],
+        state.issuance,
+      );
       state.issuanceItems = catalog;
       await saveIssuanceWorkspace(tx, state, {
         issuance: state.issuance,
@@ -431,13 +435,20 @@ export async function POST(request: Request) {
         await transaction(async (tx) => {
           const state = await getState(tx);
           state.issuance = [...(state.issuance || []), record];
-          await saveIssuanceWorkspace(tx, state, { issuance: [record] });
+          state.issuanceInventory = reconcileInventory(
+            state.issuanceInventory || [],
+            state.issuance,
+          );
+          await saveIssuanceWorkspace(tx, state, {
+            issuance: [record],
+            inventory: state.issuanceInventory,
+          });
           await audit(tx, user.email, "issuance.created", undefined, {
             issuanceId: record.id,
             category: record.category,
             item: record.item,
           });
-          return { record };
+          return { record, inventory: state.issuanceInventory };
         }),
       );
     }
@@ -452,6 +463,7 @@ export async function POST(request: Request) {
       const beginning = Number(body.beginning);
       const issued = Number(body.issued);
       const onHand = Number(body.onHand);
+      const manualCountOverride = body.manualCountOverride === true;
       const updatedDate = text(body.updatedAt, 20);
       if (!categories.has(category) || !item)
         throw new SafeError("Choose a valid stock category and item.");
@@ -473,6 +485,7 @@ export async function POST(request: Request) {
         beginning,
         issued,
         onHand,
+        manualCountOverride,
         updatedAt: updatedDate
           ? new Date(`${updatedDate}T00:00:00.000Z`).toISOString()
           : new Date().toISOString(),
@@ -496,15 +509,25 @@ export async function POST(request: Request) {
             throw new SafeError(
               "A matching stock item already exists. Update that row instead.",
             );
-          const record: IssuanceInventory = {
+          const candidateRecord: IssuanceInventory = {
             ...candidate,
             id: existing?.id || stockId(candidate),
             source: existing?.source || "HR inventory entry",
           };
-          state.issuanceInventory = existing
-            ? inventory.map((item) => (item.id === existing.id ? record : item))
-            : [...inventory, record];
-          await saveIssuanceWorkspace(tx, state, { inventory: [record] });
+          state.issuanceInventory = reconcileInventory(
+            existing
+              ? inventory.map((item) =>
+                  item.id === existing.id ? candidateRecord : item,
+                )
+              : [...inventory, candidateRecord],
+            state.issuance || [],
+          );
+          const record = state.issuanceInventory.find(
+            (item) => item.id === candidateRecord.id,
+          )!;
+          await saveIssuanceWorkspace(tx, state, {
+            inventory: state.issuanceInventory,
+          });
           await audit(
             tx,
             user.email,
@@ -579,7 +602,14 @@ export async function POST(request: Request) {
           record.returnedAt = text(body.returnedAt, 20) || undefined;
           record.remarks = text(body.remarks, 2000) || undefined;
           record.updatedAt = new Date().toISOString();
-          await saveIssuanceWorkspace(tx, state, { issuance: [record] });
+          state.issuanceInventory = reconcileInventory(
+            state.issuanceInventory || [],
+            state.issuance || [],
+          );
+          await saveIssuanceWorkspace(tx, state, {
+            issuance: [record],
+            inventory: state.issuanceInventory,
+          });
           await audit(tx, user.email, "issuance.updated", undefined, {
             issuanceId: record.id,
             previous,
@@ -600,7 +630,7 @@ export async function POST(request: Request) {
               signed: record.signed,
             },
           });
-          return { record };
+          return { record, inventory: state.issuanceInventory };
         }),
       );
     }

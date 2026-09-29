@@ -46,6 +46,7 @@ export const issuanceInventorySchema = z.object({
   beginning: z.number().int().min(0).max(1000000),
   issued: z.number().int().min(0).max(1000000),
   onHand: z.number().int().min(0).max(1000000),
+  manualCountOverride: z.boolean().optional(),
   updatedAt: z.iso.datetime(),
   source: text.optional(),
 });

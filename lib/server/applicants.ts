@@ -168,7 +168,13 @@ export async function updateApplicantWorkflow(
       : undefined;
     if (submitted.hiringNeedId && !assignedNeed)
       throw new SafeError("Choose a hiring need from the same workspace.", 409);
+    // Historical Gmail imports may already contain duplicate addresses. An HR
+    // correction that keeps this applicant's email unchanged must remain
+    // possible; only reject an edit that tries to *change* it to another
+    // applicant's address.
     if (
+      before.applicant.email.toLowerCase() !==
+        submitted.applicant.email.toLowerCase() &&
       state.applications.some(
         (application) =>
           application.id !== before.id &&
@@ -494,7 +500,12 @@ export async function updateApplicant(id: string, input: unknown, user: User) {
       throw new SafeError(
         "Choose an open hiring need from the same workspace.",
       );
+    // Historical Gmail imports may already contain duplicate addresses. An HR
+    // correction that keeps this applicant's email unchanged must remain
+    // possible; only reject an edit that tries to *change* it to another
+    // applicant's address.
     if (
+      application.applicant.email.toLowerCase() !== values.email.toLowerCase() &&
       state.applications.some(
         (item) =>
           item.id !== application.id &&

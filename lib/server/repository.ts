@@ -22,6 +22,7 @@ import {
   type Transaction,
 } from "./database";
 import { defaultIssuanceItems, initialState } from "./initial-state";
+import { reconcileInventory } from "@/lib/issuance-stock";
 import {
   DomainError,
   assertEditor,
@@ -521,6 +522,14 @@ export async function workspaceRevision() {
 export async function publicState(user: User) {
   return readTransaction(async (tx) => {
     const s = await getState(tx);
+    // Keep every read surface (dashboard, issuance register, and reports)
+    // aligned with the current release history, including stock rows imported
+    // before automatic reconciliation was introduced. Writes persist the same
+    // calculation whenever issuance or stock is changed.
+    s.issuanceInventory = reconcileInventory(
+      s.issuanceInventory || [],
+      s.issuance || [],
+    );
     const retention = await tx.query(
       "SELECT application_id,category,started_at,expires_at,reason FROM application_retention",
     );
@@ -1045,12 +1054,14 @@ export async function updateState(
           );
         if (
           !a.applicant.name.trim() ||
-          next.applications.some(
-            (v) =>
-              v.id !== a.id &&
-              v.applicant.email.toLowerCase() ===
-                a.applicant.email.toLowerCase(),
-          )
+          (a.applicant.email.toLowerCase() !==
+            b.applicant.email.toLowerCase() &&
+            next.applications.some(
+              (v) =>
+                v.id !== a.id &&
+                v.applicant.email.toLowerCase() ===
+                  a.applicant.email.toLowerCase(),
+            ))
         )
           throw new DomainError("Enter a name and a unique applicant email.");
         const interviewOwner = ["HR Queen", "HR Jeam", "HR Ellaine"].includes(

@@ -244,6 +244,51 @@ test("profile edits do not fail because an unrelated imported record is malforme
     "Naga City, Camarines Sur",
   );
 });
+test("HR can correct a legacy duplicate-email applicant without changing its email", async () => {
+  await transaction((tx) => putRecord(tx, "workspace", "main", initialState()));
+  const base = {
+    phone: "",
+    position: "Barista",
+    location: "Naga City",
+    notes: "",
+  };
+  const first = await createApplicant(
+    {
+      ...base,
+      requestId: crypto.randomUUID(),
+      name: "First legacy import",
+      email: "first@example.invalid",
+    },
+    user,
+  );
+  const second = await createApplicant(
+    {
+      ...base,
+      requestId: crypto.randomUUID(),
+      name: "Second legacy import",
+      email: "second@example.invalid",
+    },
+    user,
+  );
+  await transaction(async (tx) => {
+    const state = await getState(tx);
+    state.applications.find((item) => item.id === second.id)!.applicant.email =
+      "first@example.invalid";
+    await putRecord(tx, "workspace", "main", state);
+  });
+  const edited = await updateApplicant(
+    second.id,
+    {
+      ...base,
+      name: "Corrected legacy import",
+      email: "first@example.invalid",
+      residence: "Naga City",
+    },
+    user,
+  );
+  assert.equal(edited.applicant.name, "Corrected Legacy Import");
+  assert.equal(first.id !== edited.id, true);
+});
 test("HR qualification checklist saves only the applicant being reviewed", async () => {
   await transaction((tx) => putRecord(tx, "workspace", "main", initialState()));
   const base = {

@@ -228,6 +228,8 @@ export interface IssuanceInventory {
   beginning: number;
   issued: number;
   onHand: number;
+  /** An explicit physical-count exception; automatic history totals are default. */
+  manualCountOverride?: boolean;
   updatedAt: string;
   source?: string;
 }
