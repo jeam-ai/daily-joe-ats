@@ -23,7 +23,7 @@ type Context = {
     fn: (a: Application) => Application,
     confirmed?: boolean,
   ) => Promise<boolean>;
-  ensureApplication: (id: string) => Promise<void>;
+  ensureApplication: (id: string, force?: boolean) => Promise<void>;
   notify: (message: string, tone?: "success" | "error" | "info") => void;
   refresh: (options?: {
     clearDetails?: boolean;
@@ -155,7 +155,15 @@ export function AppProvider({
           deferredRefresh.current = true;
           return;
         }
-        if (options?.clearDetails) detailCache.current.clear();
+        // The workspace response is intentionally bounded. An open applicant
+        // outside the live queue lives in detailCache; clearing it here made a
+        // background intake/processing refresh temporarily remove the profile
+        // from the route and unmount its edit dialog. Only discard a cached
+        // detail when this response itself contains a newer authoritative row.
+        if (options?.clearDetails)
+          for (const id of detailCache.current.keys())
+            if (data.applications.some((application: Application) => application.id === id))
+              detailCache.current.delete(id);
         const merged = {
           ...data,
           applications: [
@@ -394,10 +402,10 @@ export function AppProvider({
     },
     [notify, refresh],
   );
-  const ensureApplication = useCallback(async (id: string) => {
-    if (ref.current?.applications.some((item) => item.id === id)) return;
+  const ensureApplication = useCallback(async (id: string, force = false) => {
+    if (!force && ref.current?.applications.some((item) => item.id === id)) return;
     const cached = detailCache.current.get(id);
-    if (cached) {
+    if (cached && !force) {
       const next = ref.current;
       if (next && !next.applications.some((item) => item.id === id)) {
         const merged = {
@@ -419,10 +427,12 @@ export function AppProvider({
     if (!response.ok) throw Error(application.error || "Applicant not found.");
     detailCache.current.set(id, application as Application);
     const next = ref.current;
-    if (next && !next.applications.some((item) => item.id === id)) {
+    if (next) {
       const merged = {
         ...next,
-        applications: [...next.applications, application],
+        applications: next.applications.some((item) => item.id === id)
+          ? next.applications.map((item) => (item.id === id ? application : item))
+          : [...next.applications, application],
       };
       ref.current = merged;
       setState(merged);

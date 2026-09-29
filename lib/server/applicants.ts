@@ -234,7 +234,11 @@ export async function updateApplicantWorkflow(
       previous: before,
       next,
     });
-    await saveState(tx, state, { sync: !next.isDemo });
+    // Profile/workflow edits are already committed to the shared ATS database
+    // and picked up by the workspace revision poll. Rebuilding the full
+    // tracker snapshot for every note or field edit was the main avoidable
+    // source of the 10–20 second save delay.
+    await saveState(tx, state, { sync: false });
     return structuredClone(next);
   });
 }
@@ -364,7 +368,10 @@ export async function createApplicant(input: unknown, user: User) {
       ],
     };
     state.applications.push(a);
-    await saveState(tx, state);
+    // A direct profile patch must not rebuild the entire export/tracker
+    // snapshot. The transactional ATS record and workspace revision are the
+    // cross-device source of truth.
+    await saveState(tx, state, { sync: false });
     await audit(tx, user.email, "applicant.created", id, { source: "Manual" });
     await putRecord(tx, "manual_requests", `${user.id}:${values.requestId}`, {
       id,

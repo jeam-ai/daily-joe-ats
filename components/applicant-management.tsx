@@ -16,7 +16,7 @@ export function ApplicantEditor({
   application?: Application;
   onClose: () => void;
 }) {
-  const { state, refresh, notify, patchState, beginDraft } = useApp();
+  const { state, ensureApplication, refresh, notify, patchState, beginDraft } = useApp();
   const router = useRouter();
   const formRef = useRef<HTMLFormElement>(null);
   const draftKey = application ? `djc-applicant-draft:${application.id}` : null;
@@ -149,12 +149,12 @@ export function ApplicantEditor({
                   method: "POST",
                   body: payload,
                 });
-                void refresh({ clearDetails: true });
+                void ensureApplication(application.id, true);
               } else if (removePhoto && application.applicantPhotoId) {
                 await requestJson(`/api/applicants/${application.id}/photo`, {
                   method: "DELETE",
                 });
-                void refresh({ clearDetails: true });
+                void ensureApplication(application.id, true);
               }
               notify("Applicant profile saved.");
             } else {

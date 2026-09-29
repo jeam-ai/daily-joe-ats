@@ -229,7 +229,7 @@ export function ApplicantProfile({ id }: { id: string }) {
       body: JSON.stringify({ refreshStoredEvidence: true }),
     })
       .then((result) => {
-        if (result.updated) return refresh({ clearDetails: true });
+        if (result.updated) return ensureApplication(id, true);
       })
       .catch(() => {
         // Normal profile loading remains available; the scheduled evidence
@@ -240,7 +240,7 @@ export function ApplicantProfile({ id }: { id: string }) {
     state?.revision,
     state?.applications.length,
     state?.currentUser,
-    refresh,
+    ensureApplication,
   ]);
   if (!state) return <LoadingSkeleton />;
   const a = state.applications.find((a) => a.id === id);
