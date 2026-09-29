@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { intakeEvidence } from "../lib/intake-evidence";
+import { evidenceInformation } from "../lib/applicant-information";
 test("applied position and branch do not depend on a configured hiring need", () => {
   const r = intakeEvidence({
     subject: "Barista application — Naga City",
@@ -68,6 +69,16 @@ test("email subject and conversational body remain usable when a resume is unava
   assert.equal(body.position, "Barista");
   const subject = intakeEvidence({ subject: "Jennifer Mendoza - Resume" });
   assert.equal(subject.name, "Jennifer Mendoza");
+});
+test("a flattened resume header recovers a name without confusing contact data for profile data", () => {
+  const result = intakeEvidence({
+    subject: "Application for Barista",
+    resume:
+      "MARIA DELA CRUZ | 0917 123 4567 | maria@example.invalid | Naga City\nWORK EXPERIENCE\nBarista",
+  });
+  assert.equal(result.name, "Maria Dela Cruz");
+  assert.equal(result.phone, "0917 123 4567");
+  assert.equal(evidenceInformation(result).fields.name.confidence, "Uncertain");
 });
 test("resume evidence wins before email fallback and richer section headings are recognized", () => {
   const resumeFirst = intakeEvidence({

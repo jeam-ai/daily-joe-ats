@@ -147,6 +147,10 @@ test("a configured location in a residence auto-assigns only an empty branch", (
     application.information?.fields.assignedBranch?.source,
     "Residence match",
   );
+  assert.equal(
+    application.information?.fields.assignedBranch?.confidence,
+    "Uncertain",
+  );
   assert.equal(application.location, "Naga City");
   application.assignedBranch = "Santa Rosa, Laguna";
   applyRecoveredResumeEvidence(application, evidence);
