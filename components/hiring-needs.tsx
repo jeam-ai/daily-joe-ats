@@ -33,10 +33,6 @@ import Link from "next/link";
 import { QualificationEditor } from "./qualification-editor";
 import type { QualificationRule } from "@/types";
 import { canManage } from "@/lib/data-policy";
-import { planVacancyReportImport } from "@/lib/vacancy-report";
-import { clientFetch } from "@/lib/client-request";
-
-const DECLARED_VACANCY_DATE = "2026-09-20";
 
 function operationalUrgency(need: HiringNeed) {
   if (need.status !== "Open") return need.urgency;
@@ -49,31 +45,19 @@ function operationalUrgency(need: HiringNeed) {
   return need.urgency;
 }
 export function HiringNeeds() {
-  const { state, update, notify, refresh, saving, dataset } = useApp();
+  const { state, update, notify, saving, dataset } = useApp();
   const params = useSearchParams();
   const [editing, setEditing] = useState<string | null>(
     params.get("new") ? "new" : params.get("edit"),
   );
   const [rules, setRules] = useState<QualificationRule[] | null>(null);
   const [filter, setFilter] = useState("Open");
-  const [importOpen, setImportOpen] = useState(false);
-  const [importing, setImporting] = useState(false);
-  const [openDateConfirmationOpen, setOpenDateConfirmationOpen] =
-    useState(false);
   if (!state) return <LoadingSkeleton />;
-  const reportPlan = planVacancyReportImport(state);
-  const canImportReport =
-    dataset === "real" &&
-    state.currentUser?.role === "Admin" &&
-    reportPlan.needs.length > 0;
   const existing = state.hiringNeeds.find((n) => n.id === editing);
   const rows = state.hiringNeeds.filter(
     (n) => filter === "All" || n.status === filter,
   );
   const openNeeds = state.hiringNeeds.filter((n) => n.status === "Open");
-  const openDateAffected = state.hiringNeeds.filter(
-    (need) => need.openedAt?.slice(0, 10) !== DECLARED_VACANCY_DATE,
-  ).length;
   const vacancies = openNeeds.reduce(
     (total, need) => total + Math.max(0, need.slots - need.filled),
     0,
@@ -91,27 +75,6 @@ export function HiringNeeds() {
       (state.applicationSummary?.[dataset].activeByHiringNeed[need.id] || 0),
     0,
   );
-  async function setDeclaredOpenDate() {
-    if (!openDateAffected) {
-      notify("All hiring needs already use the September 20 vacancy date.");
-      setOpenDateConfirmationOpen(false);
-      return;
-    }
-    const saved = await update((workspace) => ({
-      ...workspace,
-      hiringNeeds: workspace.hiringNeeds.map((need) => ({
-        ...need,
-        openedAt: `${DECLARED_VACANCY_DATE}T00:00:00.000Z`,
-      })),
-    }));
-    if (saved) {
-      setOpenDateConfirmationOpen(false);
-      notify(
-        `September 20, 2026 was saved as the open date for ${openDateAffected} hiring need${openDateAffected === 1 ? "" : "s"}.`,
-        "success",
-      );
-    }
-  }
   async function save(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const data = new FormData(e.currentTarget);
@@ -150,27 +113,6 @@ export function HiringNeeds() {
       notify("Hiring need saved and the staffing plan was refreshed.", "success");
     }
   }
-  async function importReport() {
-    setImporting(true);
-    try {
-      const response = await clientFetch("/api/hiring-needs/report-import", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ confirmed: true }),
-      });
-      const result = await response.json();
-      if (!response.ok) throw Error(result.error || "Vacancy import failed.");
-      await refresh();
-      setImportOpen(false);
-      notify(
-        `${result.createdNeeds} hiring needs added (${result.createdSlots} slots).`,
-      );
-    } catch (error) {
-      notify((error as Error).message, "error");
-    } finally {
-      setImporting(false);
-    }
-  }
   return (
     <div className="workspace-page hiring-needs-page">
       <div className="page-heading workspace-page-heading">
@@ -184,15 +126,6 @@ export function HiringNeeds() {
             Staffing plan &amp; role requirements
           </span>
           <div className="button-row">
-            {canImportReport && (
-              <Button
-                variant="secondary"
-                disabled={saving || importing}
-                onClick={() => setImportOpen(true)}
-              >
-                Add Sep 21 vacancies
-              </Button>
-            )}
             <Button
               disabled={
                 !canManage(state.currentUser) || saving || dataset === "demo"
@@ -209,16 +142,6 @@ export function HiringNeeds() {
             >
               <Plus size={17} />
               New Hiring Need
-            </Button>
-            <Button
-              variant="secondary"
-              disabled={
-                !canManage(state.currentUser) || saving || dataset === "demo"
-              }
-              onClick={() => setOpenDateConfirmationOpen(true)}
-              title="Use September 20, 2026 as the declared vacancy date for all current hiring needs."
-            >
-              Set Sep 20 open date
             </Button>
           </div>
         </div>
@@ -560,66 +483,6 @@ export function HiringNeeds() {
               </Button>
             </div>
           </form>
-        </Modal>
-      )}
-      {importOpen && (
-        <Modal
-          busy={importing}
-          title="Add September 21 vacancies"
-          onClose={() => setImportOpen(false)}
-        >
-          <p>
-            Add {reportPlan.needs.length} itemized hiring requests (
-            {reportPlan.needs.reduce((total, need) => total + need.slots, 0)}{" "}
-            slots) with an October 15, 2026 target date. Role criteria are
-            editable suggestions, not requirements stated in the report.
-          </p>
-          <p className="retention-inline">
-            The report prints 19 Operations slots, but its itemized rows total
-            18. Only the 18 identifiable Operations slots and 2 Head Office
-            slots will be added. The unexplained slot will not be invented.
-          </p>
-          <div className="modal-actions">
-            <Button
-              variant="secondary"
-              disabled={importing}
-              onClick={() => setImportOpen(false)}
-            >
-              Cancel
-            </Button>
-            <Button disabled={importing} onClick={importReport}>
-              {importing ? "Adding…" : "Add verified rows"}
-            </Button>
-          </div>
-        </Modal>
-      )}
-      {openDateConfirmationOpen && (
-        <Modal
-          busy={saving}
-          title="Set declared vacancy date?"
-          onClose={() => setOpenDateConfirmationOpen(false)}
-        >
-          <p>
-            Set September 20, 2026 as the declared open date for{" "}
-            {openDateAffected} current hiring need
-            {openDateAffected === 1 ? "" : "s"}?
-          </p>
-          <p className="retention-inline">
-            This only updates the date used for the Days open indicator. It
-            does not change role details, staffing counts, or target dates.
-          </p>
-          <div className="modal-actions">
-            <Button
-              variant="secondary"
-              disabled={saving}
-              onClick={() => setOpenDateConfirmationOpen(false)}
-            >
-              Cancel
-            </Button>
-            <Button disabled={saving} onClick={() => void setDeclaredOpenDate()}>
-              {saving ? "Saving…" : "Confirm September 20"}
-            </Button>
-          </div>
         </Modal>
       )}
     </div>
