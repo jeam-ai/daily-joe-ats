@@ -485,16 +485,56 @@ export async function POST(request: Request) {
     }
     if (body.action === "update") {
       const id = text(body.id);
+      const category = text(body.category) as IssuanceCategory;
       const status = text(body.status) as IssuanceStatus;
-      if (!id || !statuses.has(status))
-        throw new SafeError("Choose a valid issuance record and status.");
+      const employeeName = text(body.employeeName);
+      const item = text(body.item);
+      const quantity = Number(body.quantity);
+      if (
+        !id ||
+        !categories.has(category) ||
+        !statuses.has(status) ||
+        !employeeName ||
+        !item ||
+        !Number.isInteger(quantity) ||
+        quantity < 1
+      )
+        throw new SafeError(
+          "Enter a valid employee, item, category, quantity, and status.",
+        );
       return Response.json(
         await transaction(async (tx) => {
           const state = await getState(tx);
           const record = state.issuance?.find((item) => item.id === id);
           if (!record)
             throw new SafeError("That issuance record no longer exists.", 404);
+          const previous = {
+            category: record.category,
+            employeeName: record.employeeName,
+            employeeId: record.employeeId,
+            position: record.position,
+            branch: record.branch,
+            item: record.item,
+            size: record.size,
+            quantity: record.quantity,
+            condition: record.condition,
+            status: record.status,
+            issuedAt: record.issuedAt,
+            receivedAt: record.receivedAt,
+            returnedAt: record.returnedAt,
+            signed: record.signed,
+          };
+          record.category = category;
+          record.employeeName = employeeName;
+          record.employeeId = text(body.employeeId) || undefined;
+          record.position = text(body.position) || undefined;
+          record.branch = text(body.branch) || undefined;
+          record.item = item;
+          record.size = text(body.size) || undefined;
+          record.quantity = quantity;
+          record.condition = text(body.condition) || undefined;
           record.status = status;
+          record.issuedAt = text(body.issuedAt, 20) || undefined;
           record.signed = body.signed === true;
           record.receivedAt = text(body.receivedAt, 20) || undefined;
           record.returnedAt = text(body.returnedAt, 20) || undefined;
@@ -503,7 +543,23 @@ export async function POST(request: Request) {
           await saveState(tx, state, { sync: false });
           await audit(tx, user.email, "issuance.updated", undefined, {
             issuanceId: record.id,
-            status: record.status,
+            previous,
+            current: {
+              category: record.category,
+              employeeName: record.employeeName,
+              employeeId: record.employeeId,
+              position: record.position,
+              branch: record.branch,
+              item: record.item,
+              size: record.size,
+              quantity: record.quantity,
+              condition: record.condition,
+              status: record.status,
+              issuedAt: record.issuedAt,
+              receivedAt: record.receivedAt,
+              returnedAt: record.returnedAt,
+              signed: record.signed,
+            },
           });
           return { record };
         }),

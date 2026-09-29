@@ -54,6 +54,9 @@ function employeeCount(records: IssuanceRecord[]) {
 export function EmployeeIssuance() {
   const { state, notify, refresh, dataset } = useApp();
   const [view, setView] = useState("All issuance");
+  const [statusFilter, setStatusFilter] = useState<"All" | IssuanceStatus>(
+    "All",
+  );
   const [query, setQuery] = useState("");
   const [newCategory, setNewCategory] = useState<IssuanceCategory>("Uniform");
   const [stockCategory, setStockCategory] =
@@ -119,6 +122,9 @@ export function EmployeeIssuance() {
           (view === "Welcome kits" && record.category === "Welcome Kit"),
       )
       .filter(
+        (record) => statusFilter === "All" || record.status === statusFilter,
+      )
+      .filter(
         (record) =>
           !needle ||
           [
@@ -131,7 +137,7 @@ export function EmployeeIssuance() {
           ].some((value) => value?.toLowerCase().includes(needle)),
       )
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-  }, [query, records, view]);
+  }, [query, records, statusFilter, view]);
   const editable =
     dataset === "real" &&
     ["Admin", "Talent Acquisition", "HR Generalist"].includes(
@@ -214,7 +220,17 @@ export function EmployeeIssuance() {
         body: JSON.stringify({
           action: "update",
           id: editing.id,
+          category: form.get("category"),
+          employeeName: form.get("employeeName"),
+          employeeId: form.get("employeeId"),
+          position: form.get("position"),
+          branch: form.get("branch"),
+          item: form.get("item"),
+          size: form.get("size"),
+          quantity: Number(form.get("quantity")),
+          condition: form.get("condition"),
           status: form.get("status"),
+          issuedAt: form.get("issuedAt"),
           signed: form.get("signed") === "on",
           receivedAt: form.get("receivedAt"),
           returnedAt: form.get("returnedAt"),
@@ -507,6 +523,21 @@ export function EmployeeIssuance() {
             value={view}
             onChange={setView}
           />
+          <Select
+            aria-label="Filter issuance status"
+            className="issuance-status-filter"
+            value={statusFilter}
+            onChange={(event) =>
+              setStatusFilter(event.target.value as "All" | IssuanceStatus)
+            }
+          >
+            <option value="All">All statuses</option>
+            {statuses.map((status) => (
+              <option key={status} value={status}>
+                {status}
+              </option>
+            ))}
+          </Select>
           <div className="search-field issuance-search">
             <Search size={17} />
             <Input
@@ -708,7 +739,7 @@ export function EmployeeIssuance() {
       )}
       {editing && (
         <Modal
-          title="Update issuance status"
+          title="Edit employee issuance"
           busy={!!busy}
           onClose={() => setEditing(null)}
         >
@@ -723,12 +754,106 @@ export function EmployeeIssuance() {
               </span>
             </div>
             <div className="form-grid">
+              <Field label="Category">
+                <Select
+                  name="category"
+                  value={editing.category}
+                  onChange={(event) => {
+                    const category = event.target.value as IssuanceCategory;
+                    const replacement = catalog.find(
+                      (item) => item.category === category,
+                    )?.name;
+                    setEditing({
+                      ...editing,
+                      category,
+                      item: replacement || editing.item,
+                    });
+                  }}
+                >
+                  {categories.map((category) => (
+                    <option key={category}>{category}</option>
+                  ))}
+                </Select>
+              </Field>
+              <Field label="Employee name">
+                <Input
+                  name="employeeName"
+                  required
+                  defaultValue={editing.employeeName}
+                />
+              </Field>
+              <Field label="Employee ID">
+                <Input
+                  name="employeeId"
+                  defaultValue={editing.employeeId || ""}
+                />
+              </Field>
+              <Field label="Position">
+                <Input
+                  name="position"
+                  defaultValue={editing.position || ""}
+                />
+              </Field>
+              <Field label="Branch / location">
+                <Input
+                  name="branch"
+                  defaultValue={editing.branch || ""}
+                />
+              </Field>
+              <Field label="Item">
+                <Select
+                  name="item"
+                  value={editing.item}
+                  required
+                  onChange={(event) =>
+                    setEditing({ ...editing, item: event.target.value })
+                  }
+                >
+                  {!catalog.some(
+                    (item) =>
+                      item.category === editing.category &&
+                      item.name === editing.item,
+                  ) && <option value={editing.item}>{editing.item}</option>}
+                  {catalog
+                    .filter(
+                      (item) =>
+                        item.category === editing.category,
+                    )
+                    .map((item) => (
+                      <option key={item.id} value={item.name}>
+                        {item.name}
+                      </option>
+                    ))}
+                </Select>
+              </Field>
+              <Field label="Size">
+                <Input name="size" defaultValue={editing.size || ""} />
+              </Field>
+              <Field label="Quantity">
+                <Input
+                  name="quantity"
+                  type="number"
+                  min="1"
+                  required
+                  defaultValue={editing.quantity}
+                />
+              </Field>
+              <Field label="Condition">
+                <Input name="condition" defaultValue={editing.condition || ""} />
+              </Field>
               <Field label="Status">
                 <Select name="status" defaultValue={editing.status}>
                   {statuses.map((status) => (
                     <option key={status}>{status}</option>
                   ))}
                 </Select>
+              </Field>
+              <Field label="Date issued">
+                <Input
+                  name="issuedAt"
+                  type="date"
+                  defaultValue={editing.issuedAt || ""}
+                />
               </Field>
               <Field label="Date received">
                 <Input

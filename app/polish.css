@@ -3007,6 +3007,9 @@ progress {
   border-bottom: 1px solid var(--border);
   background: var(--surface);
 }
+.issuance-status-filter {
+  min-width: 156px;
+}
 .issuance-toolbar .tabs {
   min-width: 0;
 }
