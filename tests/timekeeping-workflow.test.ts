@@ -4,6 +4,7 @@ import type { OdooDay } from "../lib/odoo";
 import {
   cutoffWorkflow,
   employeeAttendanceSummary,
+  isNormalOvertimeForSeparateMonitoring,
   issueExplanation,
   queueGroups,
 } from "../lib/timekeeping-workflow";
@@ -96,4 +97,26 @@ test("excessive overtime remains an HR verification issue, not an automatic appr
   const excessive = record("05", ["Excessive Overtime"]);
   assert.match(issueExplanation(excessive), /14\+ hours/i);
   assert.equal(cutoffWorkflow([excessive]).actionRequired.length, 1);
+});
+
+test("only clean normal overtime can be completed through separate overtime monitoring", () => {
+  const normalOvertime = record("06", ["Overtime"]);
+  normalOvertime.issues = [];
+  const overtimeWithoutSchedule = record("06b", ["Overtime"]);
+  overtimeWithoutSchedule.issues = [
+    "Schedule information unavailable — late and early-out results require HR schedule configuration.",
+  ];
+  const excessive = record("07", ["Excessive Overtime"]);
+  const overtimeWithSourceIssue = record("08", ["Overtime"]);
+
+  assert.equal(isNormalOvertimeForSeparateMonitoring(normalOvertime), true);
+  assert.equal(
+    isNormalOvertimeForSeparateMonitoring(overtimeWithoutSchedule),
+    true,
+  );
+  assert.equal(isNormalOvertimeForSeparateMonitoring(excessive), false);
+  assert.equal(
+    isNormalOvertimeForSeparateMonitoring(overtimeWithSourceIssue),
+    false,
+  );
 });

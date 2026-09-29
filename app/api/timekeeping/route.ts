@@ -18,6 +18,7 @@ import {
 import {
   analyzeOdooUpload,
   checkpointOdoo,
+  completeNormalOvertimeForEmployee,
   exportOdoo,
   getOdooBatch,
   listOdooBatches,
@@ -136,6 +137,10 @@ export async function POST(request: Request) {
     }
     if (body.action === "review")
       return Response.json({ batch: await reviewOdoo(body, user) });
+    if (body.action === "complete-normal-overtime")
+      return Response.json({
+        batch: await completeNormalOvertimeForEmployee(body, user),
+      });
     if (body.action === "checkpoint") {
       const checkpoint = z
         .object({ id: z.string(), revision: z.number().int().positive() })

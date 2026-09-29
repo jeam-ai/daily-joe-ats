@@ -69,11 +69,10 @@ export function EmployeeIssuance() {
   >(null);
   const [busy, setBusy] = useState("");
   const file = useRef<HTMLInputElement>(null);
-  if (!state) return <LoadingSkeleton />;
-  const records = state.issuance || [];
-  const inventory = state.issuanceInventory || [];
+  const records = state?.issuance || [];
+  const inventory = state?.issuanceInventory || [];
   const catalog = useMemo(() => {
-    const configured = (state.issuanceItems || []).filter(
+    const configured = (state?.issuanceItems || []).filter(
       (item) => item.active,
     );
     const seen = new Set(
@@ -95,7 +94,7 @@ export function EmployeeIssuance() {
         ? a.name.localeCompare(b.name)
         : a.category.localeCompare(b.category),
     );
-  }, [inventory, records, state.issuanceItems]);
+  }, [inventory, records, state?.issuanceItems]);
   const stockSummary = categories
     .map((category) => {
       const rows = inventory.filter((item) => item.category === category);
@@ -141,8 +140,10 @@ export function EmployeeIssuance() {
   const editable =
     dataset === "real" &&
     ["Admin", "Talent Acquisition", "HR Generalist"].includes(
-      state.currentUser?.role || "",
+      state?.currentUser?.role || "",
     );
+
+  if (!state) return <LoadingSkeleton />;
 
   async function importWorkbook(selected: File) {
     setBusy("Importing issuance workbook");

@@ -44,6 +44,7 @@ import {
 import {
   cutoffWorkflow,
   employeeAttendanceSummary,
+  isNormalOvertimeForSeparateMonitoring,
   issueExplanation,
   queueGroupFilter,
 } from "@/lib/timekeeping-workflow";
@@ -274,7 +275,11 @@ export function Timekeeping() {
   const [correctedInOdoo, setCorrectedInOdoo] = useState(false),
     [correctionNote, setCorrectionNote] = useState(""),
     [retainedSourceRows, setRetainedSourceRows] = useState<number[]>([]),
-    [reviewNext, setReviewNext] = useState(false);
+    [reviewNext, setReviewNext] = useState(false),
+    [selectedOvertimeIds, setSelectedOvertimeIds] = useState<string[]>([]),
+    [confirmOvertimeCompletion, setConfirmOvertimeCompletion] =
+      useState(false),
+    [overtimeCompletionNote, setOvertimeCompletionNote] = useState("");
   function openRecord(record: OdooDay) {
     setDetail(record.id);
     setReview(record.review.status);
@@ -345,6 +350,7 @@ export function Timekeeping() {
     setEmployee("");
     setDetail("");
     setPage(1);
+    setSelectedOvertimeIds([]);
   }
   function showPreview(value: Preview) {
     setPreview(value);
@@ -423,6 +429,11 @@ export function Timekeeping() {
       groups.set(key(record), [...(groups.get(key(record)) || []), record]);
     return groups;
   }, [records]);
+  const selectedNormalOvertime = employeeRows.filter(
+    (record) =>
+      selectedOvertimeIds.includes(record.id) &&
+      isNormalOvertimeForSeparateMonitoring(record),
+  );
   const openQueueRecord = (record: OdooDay) => {
     setReviewNext(true);
     openRecord(record);
@@ -1357,6 +1368,28 @@ export function Timekeeping() {
                   {date(batch.period.start)} – {date(batch.period.end)} ·{" "}
                   {batch.rules.timezone}
                 </p>
+                <div className="timekeeping-employee-bulk-action">
+                  <div>
+                    <strong>Normal overtime completion</strong>
+                    <p className="muted">
+                      Tick clean 9–13 hour overtime only. Approval remains in
+                      the separate overtime-monitoring process.
+                    </p>
+                  </div>
+                  <Button
+                    variant="secondary"
+                    disabled={!selectedNormalOvertime.length || !!busy}
+                    onClick={() => {
+                      setOvertimeCompletionNote(
+                        "Normal overtime reviewed; approval is tracked in the separate overtime-monitoring process.",
+                      );
+                      setConfirmOvertimeCompletion(true);
+                    }}
+                  >
+                    <CheckCircle2 size={16} />
+                    Complete selected ({selectedNormalOvertime.length})
+                  </Button>
+                </div>
                 <Table>
                   <thead>
                     <tr>
@@ -1366,6 +1399,7 @@ export function Timekeeping() {
                         "Worked / expected",
                         "Calculated result",
                         "HR review",
+                        "Complete",
                         "Details",
                       ].map((h) => (
                         <th key={h}>{h}</th>
@@ -1435,6 +1469,27 @@ export function Timekeeping() {
                           >
                             {r.review.status}
                           </Badge>
+                        </td>
+                        <td>
+                          {isNormalOvertimeForSeparateMonitoring(r) ? (
+                            <label className="timekeeping-completion-check">
+                              <input
+                                type="checkbox"
+                                aria-label={`Mark normal overtime on ${date(r.date)} as completed`}
+                                checked={selectedOvertimeIds.includes(r.id)}
+                                onChange={(event) =>
+                                  setSelectedOvertimeIds((current) =>
+                                    event.target.checked
+                                      ? [...current, r.id]
+                                      : current.filter((id) => id !== r.id),
+                                  )
+                                }
+                              />
+                              Overtime monitored
+                            </label>
+                          ) : (
+                            <small className="muted">Individual review</small>
+                          )}
                         </td>
                         <td>
                           <div className="timekeeping-table-actions">
@@ -1604,6 +1659,68 @@ export function Timekeeping() {
             )}
           </Card>
         </>
+      )}
+      {confirmOvertimeCompletion && batch && (
+        <Modal
+          title="Complete normal overtime review"
+          busy={!!busy}
+          onClose={() => setConfirmOvertimeCompletion(false)}
+        >
+          <p>
+            Mark <strong>{selectedNormalOvertime.length}</strong> selected
+            normal-overtime record
+            {selectedNormalOvertime.length === 1 ? "" : "s"} as completed
+            for <strong>{employeeRows[0]?.employee || "this employee"}</strong>?
+          </p>
+          <p className="muted">
+            This does not approve overtime or alter Odoo. It removes only clean
+            9–13 hour overtime from this cutoff's active queue because approval
+            is verified in the separate overtime-monitoring process.
+          </p>
+          <Field label="Completion note">
+            <textarea
+              rows={3}
+              maxLength={4000}
+              value={overtimeCompletionNote}
+              onChange={(event) => setOvertimeCompletionNote(event.target.value)}
+            />
+          </Field>
+          <div className="modal-actions">
+            <Button
+              variant="secondary"
+              onClick={() => setConfirmOvertimeCompletion(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              disabled={!overtimeCompletionNote.trim() || !!busy}
+              onClick={() =>
+                void run("Completing normal overtime", async () => {
+                  const result = await requestJson<{ batch: OdooBatch }>(
+                    "/api/timekeeping",
+                    json({
+                      action: "complete-normal-overtime",
+                      id: batch.id,
+                      revision: batch.revision,
+                      employeeKey: employee,
+                      recordIds: selectedNormalOvertime.map((record) => record.id),
+                      note: overtimeCompletionNote,
+                    }),
+                  );
+                  setBatch(result.batch);
+                  setSelectedOvertimeIds([]);
+                  setConfirmOvertimeCompletion(false);
+                  notify(
+                    `${selectedNormalOvertime.length} normal overtime record${selectedNormalOvertime.length === 1 ? "" : "s"} marked completed for separate overtime monitoring.`,
+                  );
+                })
+              }
+            >
+              <CheckCircle2 size={16} />
+              Confirm completion
+            </Button>
+          </div>
+        </Modal>
       )}
       {selected && batch && (
         <Modal

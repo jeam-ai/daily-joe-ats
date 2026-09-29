@@ -30,6 +30,7 @@ import {
   defaultTimekeepingCutoffGraceDays,
   timekeepingCutoffExpiresAt,
 } from "@/lib/timekeeping-retention";
+import { isNormalOvertimeForSeparateMonitoring } from "@/lib/timekeeping-workflow";
 export const odooRulesSchema = z.object({
   timezone: z.enum(["Asia/Manila", "Asia/Singapore", "UTC"]),
   start: z.union([
@@ -622,6 +623,112 @@ export async function reviewOdoo(input: unknown, user: User) {
       recordId: row.id,
       previous,
       next: body.status,
+      note: body.note,
+    });
+    return batch;
+  });
+}
+
+export async function completeNormalOvertimeForEmployee(
+  input: unknown,
+  user: User,
+) {
+  requireTimekeeping(user);
+  const parsed = z
+    .object({
+      id: z.string(),
+      revision: z.number().int(),
+      employeeKey: z.string().min(1).max(300),
+      recordIds: z.array(z.string().min(1)).min(1).max(31),
+      note: z.string().trim().min(1).max(4000),
+    })
+    .safeParse(input);
+  if (!parsed.success)
+    throw new SafeError("Choose one employee's eligible overtime records.");
+  const body = parsed.data;
+  if (new Set(body.recordIds).size !== body.recordIds.length)
+    throw new SafeError("Each overtime record can only be completed once.");
+
+  return transaction(async (tx) => {
+    const encrypted = await readRecord<string>(tx, "odoo_batches", body.id);
+    if (!encrypted) throw new SafeError("Analysis not found.", 404);
+    const batch = unseal<OdooBatch>(encrypted, config().encryptionKey);
+    if (batch.revision !== body.revision)
+      throw new SafeError(
+        "Another HR user updated this analysis. Reload it before completing overtime.",
+        409,
+      );
+    const rows = batch.records.filter((row) => body.recordIds.includes(row.id));
+    if (rows.length !== body.recordIds.length)
+      throw new SafeError("One or more attendance records no longer exist.", 404);
+    if (
+      rows.some(
+        (row) =>
+          (row.employeeId || row.employee) !== body.employeeKey ||
+          !isNormalOvertimeForSeparateMonitoring(row),
+      )
+    )
+      throw new SafeError(
+        "Only clean normal-overtime records for one employee can be completed here. Other attendance exceptions require individual HR review.",
+        409,
+      );
+
+    const now = new Date().toISOString();
+    for (const row of rows) {
+      const previous = row.review.status;
+      row.review = {
+        ...row.review,
+        status: "Resolved",
+        note: body.note,
+        reviewer: user.email,
+        reviewedAt: now,
+        history: [
+          ...row.review.history,
+          {
+            previous,
+            next: "Resolved",
+            note: body.note,
+            reviewer: user.email,
+            timestamp: now,
+          },
+        ],
+      };
+      await putRecord(tx, "odoo_reviews", crypto.randomUUID(), {
+        batchId: batch.id,
+        recordId: row.id,
+        employee: row.employee,
+        date: row.date,
+        previous,
+        status: "Resolved",
+        note: body.note,
+        reviewer: user.email,
+        createdAt: now,
+        action: "normal_overtime_completed",
+      });
+    }
+    batch.revision++;
+    await saveExceptions(tx, batch);
+    await putRecord(
+      tx,
+      "odoo_batches",
+      batch.id,
+      seal(batch, config().encryptionKey),
+    );
+    const index = await readRecord<Record<string, unknown>>(
+      tx,
+      "odoo_index",
+      batch.id,
+    );
+    if (index)
+      await putRecord(tx, "odoo_index", batch.id, {
+        ...index,
+        flagged: batch.records.filter((r) => r.review.status === "For Review")
+          .length,
+      });
+    await audit(tx, user.email, "timekeeping.normal_overtime_completed", undefined, {
+      batchId: batch.id,
+      employeeKey: body.employeeKey,
+      recordIds: body.recordIds,
       note: body.note,
     });
     return batch;

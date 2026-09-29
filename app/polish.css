@@ -3295,15 +3295,47 @@ progress {
 .timekeeping-import-card details > summary {
   display: flex;
   align-items: center;
-  min-height: 30px;
+  min-height: 22px;
   color: var(--text-primary);
   font-weight: 650;
 }
 .timekeeping-import-card .timekeeping-import-copy {
-  margin: 10px 0 15px;
+  margin: 5px 0 10px;
 }
 .timekeeping-import-card .timekeeping-read-reports {
   margin-top: 12px;
+}
+.timekeeping-import-card .odoo-upload-heading {
+  margin-bottom: 0;
+}
+.timekeeping-employee-bulk-action {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin: 14px 0;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--accent) 20%, var(--border));
+  border-radius: 11px;
+  background: var(--surface-subtle);
+}
+.timekeeping-employee-bulk-action strong {
+  display: block;
+  color: var(--text-primary);
+  font-size: 13px;
+}
+.timekeeping-employee-bulk-action p {
+  margin: 3px 0 0;
+  font-size: 12px;
+}
+.timekeeping-completion-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
 }
 .timekeeping-disclosure > summary,
 .timekeeping-upload-disclosure > summary {
