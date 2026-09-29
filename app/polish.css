@@ -2066,18 +2066,24 @@ td > small.muted {
 .info-tooltip > [role="tooltip"] {
   display: none;
   position: absolute;
-  right: 0;
+  left: 50%;
   top: 28px;
+  transform: translateX(-50%);
   width: min(320px, 75vw);
+  max-width: calc(100vw - 32px);
   padding: 12px;
   background: var(--surface-elevated);
   color: var(--text-primary);
   border: 1px solid var(--border);
   border-radius: var(--radius-control);
   box-shadow: var(--shadow-elevated);
-  z-index: 30;
+  z-index: 100;
   font-size: 13px;
+  font-weight: 400;
   line-height: 1.5;
+  text-align: left;
+  overflow-wrap: anywhere;
+  pointer-events: none;
 }
 .info-tooltip:hover > [role="tooltip"],
 .info-tooltip:focus > [role="tooltip"] {
@@ -2166,6 +2172,7 @@ th,
 .profile-coverage .help-tip > [role="tooltip"] {
   right: 0;
   left: auto;
+  transform: none;
   width: min(280px, calc(100vw - 40px));
   font-weight: 400;
   overflow-wrap: anywhere;
@@ -2770,6 +2777,12 @@ progress {
 }
 .help-tip {
   vertical-align: middle;
+}
+
+/* Help text is intentionally allowed to rise above its card. Card shells
+   otherwise clip an absolutely positioned tooltip before it can be read. */
+.card:has(.info-tooltip) {
+  overflow: visible;
 }
 
 /* HR hub: employee records, onboarding, global search, and saved report views. */
