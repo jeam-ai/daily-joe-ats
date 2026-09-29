@@ -3422,6 +3422,12 @@ progress {
   margin: 3px 0 0;
   font-size: 12px;
 }
+.timekeeping-overtime-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
 .timekeeping-completion-check {
   display: inline-flex;
   align-items: center;
@@ -3430,6 +3436,18 @@ progress {
   font-size: 12px;
   font-weight: 600;
   white-space: nowrap;
+}
+@media (max-width: 720px) {
+  .timekeeping-employee-bulk-action {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .timekeeping-overtime-actions {
+    justify-content: stretch;
+  }
+  .timekeeping-overtime-actions .button {
+    flex: 1 1 180px;
+  }
 }
 .timekeeping-disclosure > summary,
 .timekeeping-upload-disclosure > summary {

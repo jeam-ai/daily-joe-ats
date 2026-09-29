@@ -434,6 +434,20 @@ export function Timekeeping() {
       selectedOvertimeIds.includes(record.id) &&
       isNormalOvertimeForSeparateMonitoring(record),
   );
+  const normalOvertimeRows = employeeRows.filter(
+    isNormalOvertimeForSeparateMonitoring,
+  );
+  const allNormalOvertimeSelected =
+    normalOvertimeRows.length > 0 &&
+    normalOvertimeRows.every((record) => selectedOvertimeIds.includes(record.id));
+  function toggleAllNormalOvertime() {
+    const visibleIds = new Set(normalOvertimeRows.map((record) => record.id));
+    setSelectedOvertimeIds((current) =>
+      allNormalOvertimeSelected
+        ? current.filter((id) => !visibleIds.has(id))
+        : [...new Set([...current, ...visibleIds])],
+    );
+  }
   const openQueueRecord = (record: OdooDay) => {
     setReviewNext(true);
     openRecord(record);
@@ -1376,19 +1390,30 @@ export function Timekeeping() {
                       the separate overtime-monitoring process.
                     </p>
                   </div>
-                  <Button
-                    variant="secondary"
-                    disabled={!selectedNormalOvertime.length || !!busy}
-                    onClick={() => {
-                      setOvertimeCompletionNote(
-                        "Normal overtime reviewed; approval is tracked in the separate overtime-monitoring process.",
-                      );
-                      setConfirmOvertimeCompletion(true);
-                    }}
-                  >
-                    <CheckCircle2 size={16} />
-                    Complete selected ({selectedNormalOvertime.length})
-                  </Button>
+                  <div className="timekeeping-overtime-actions">
+                    <Button
+                      variant="ghost"
+                      disabled={!normalOvertimeRows.length || !!busy}
+                      onClick={toggleAllNormalOvertime}
+                    >
+                      {allNormalOvertimeSelected
+                        ? "Clear normal overtime"
+                        : `Select all overtime (${normalOvertimeRows.length})`}
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      disabled={!selectedNormalOvertime.length || !!busy}
+                      onClick={() => {
+                        setOvertimeCompletionNote(
+                          "Normal overtime reviewed; approval is tracked in the separate overtime-monitoring process.",
+                        );
+                        setConfirmOvertimeCompletion(true);
+                      }}
+                    >
+                      <CheckCircle2 size={16} />
+                      Complete selected ({selectedNormalOvertime.length})
+                    </Button>
+                  </div>
                 </div>
                 <Table>
                   <thead>
