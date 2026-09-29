@@ -86,9 +86,10 @@ export function ScreeningCriterion({ criterion: c }: { criterion: Criterion }) {
         <strong>{c.requirement}</strong>
         <StatusBadge status={c.result} />
       </div>
-      <p>
-        <b>Evidence:</b> {c.evidence}
-      </p>
+      <div className="criterion-evidence">
+        <b>Evidence:</b>
+        <RichTextContent value={c.evidence} />
+      </div>
     </div>
   );
 }

@@ -360,26 +360,32 @@ export function ApplicantEditor({
             />
           </Field>
           <Field label="Experience details">
-            <textarea
+            <RichTextEditor
               name="experienceDetails"
-              defaultValue={application?.applicant.experienceDetails || ""}
+              defaultValue={
+                draft.experienceDetails ??
+                application?.applicant.experienceDetails ??
+                ""
+              }
               maxLength={4000}
               rows={3}
             />
           </Field>
           <Field label="Skills">
-            <textarea
+            <RichTextEditor
               name="skills"
-              defaultValue={application?.applicant.skills || ""}
+              defaultValue={draft.skills ?? application?.applicant.skills ?? ""}
               maxLength={2000}
               rows={3}
               placeholder="One skill per line, or separate items with commas"
             />
           </Field>
           <Field label="Certifications / trainings">
-            <textarea
+            <RichTextEditor
               name="certifications"
-              defaultValue={application?.applicant.certifications || ""}
+              defaultValue={
+                draft.certifications ?? application?.applicant.certifications ?? ""
+              }
               maxLength={2000}
               rows={3}
               placeholder="One certification per line, or separate items with commas"

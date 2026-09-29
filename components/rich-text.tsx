@@ -59,6 +59,7 @@ export function RichTextEditor({
   "aria-label": ariaLabel,
 }: EditorProps) {
   const root = useRef<HTMLDivElement>(null);
+  const hiddenInput = useRef<HTMLInputElement>(null);
   const selectionRange = useRef<Range | null>(null);
   const [content, setContent] = useState(value ?? defaultValue);
   const [toolbarPosition, setToolbarPosition] = useState<{
@@ -81,6 +82,10 @@ export function RichTextEditor({
   const update = () => {
     const next = root.current ? editorHtmlToRichText(root.current) : "";
     if (maxLength && next.length > maxLength) return content;
+    // Keep the form value in lockstep with the editable surface. Form-level
+    // draft handlers can run during this input event, before React has had a
+    // chance to commit the next render.
+    if (hiddenInput.current) hiddenInput.current.value = next;
     setContent(next);
     onChange?.(next);
     return next;
@@ -121,6 +126,10 @@ export function RichTextEditor({
     document.addEventListener("selectionchange", captureSelection);
     return () => document.removeEventListener("selectionchange", captureSelection);
   }, [captureSelection]);
+  const dismissSelectionToolbar = () => {
+    selectionRange.current = null;
+    setToolbarPosition(null);
+  };
   const command = (action: string) => {
     if (disabled || !root.current) return;
     const selection = window.getSelection();
@@ -132,11 +141,15 @@ export function RichTextEditor({
     if (action === "quote") document.execCommand("formatBlock", false, "blockquote");
     else document.execCommand(action, false);
     update();
-    captureSelection();
+    // The toolbar is the only control that alters formatting. Once an action
+    // has run, dismiss the selection UI instead of leaving it over the text or
+    // making HR click elsewhere just to continue editing.
+    selection?.removeAllRanges();
+    dismissSelectionToolbar();
   };
   return (
     <div className={`rich-text-editor${disabled ? " is-disabled" : ""}`}>
-      {name && <input type="hidden" name={name} value={content} />}
+      {name && <input ref={hiddenInput} type="hidden" name={name} value={content} />}
       <div
         ref={root}
         className="rich-text-surface"
@@ -150,6 +163,7 @@ export function RichTextEditor({
         style={{ minHeight: `${Math.max(2, rows) * 1.5}rem` }}
         onInput={() => void update()}
         onBlur={() => onBlur?.(update())}
+        onMouseDown={dismissSelectionToolbar}
         onMouseUp={captureSelection}
         onKeyUp={captureSelection}
       />

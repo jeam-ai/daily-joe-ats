@@ -10,6 +10,7 @@ import {
   missingInformation,
 } from "@/lib/applicant-information";
 import { formalFact } from "@/lib/formal-facts";
+import { RichTextContent } from "./rich-text";
 export function ApplicantInformation({
   application: a,
   editable = false,
@@ -95,6 +96,10 @@ export function ApplicantInformation({
       .split(/\s+·\s+|\n+/)
       .map((item) => item.trim())
       .filter(Boolean);
+  const hasRichFormatting = (value?: string) =>
+    /(?:\*\*[^*]+\*\*|__[^_]+__|~~[^~]+~~|^>\s|^[-*]\s+|^\d+[.)]\s+)/m.test(
+      value || "",
+    );
   const educationItem = (item: string) => {
     const formatted = formalFact("education", item);
     const dated = /^(.*?)\s*[—–-]\s*(\d{4}–(?:\d{4}|Present))$/.exec(formatted);
@@ -202,7 +207,11 @@ export function ApplicantInformation({
                         : undefined
                     }
                   >
-                    {(key === "skills" || key === "certifications") &&
+                    {(["experienceDetails", "skills", "certifications"].includes(
+                      key,
+                    ) && hasRichFormatting(value)) ? (
+                      <RichTextContent value={value} />
+                    ) : (key === "skills" || key === "certifications") &&
                     !missingInformation(value) ? (
                       <ul className="information-list">
                         {listItems(value!).map((item) => (

@@ -7,7 +7,7 @@ import { Sparkles } from "lucide-react";
 import { canManage } from "@/lib/data-policy";
 import { qualificationRulesForPosition } from "@/lib/screening";
 import { ScreeningControls } from "./screening-controls";
-import { RichTextEditor } from "./rich-text";
+import { RichTextContent, RichTextEditor } from "./rich-text";
 import {
   Badge,
   Button,
@@ -194,7 +194,7 @@ export function ApplicantTools({
               {a.screening.criteria.map((c) => (
                 <li key={c.id}>
                   <strong>{c.requirement}</strong>
-                  <p>{c.evidence}</p>
+                  <RichTextContent value={c.evidence} />
                 </li>
               ))}
             </ul>
@@ -480,10 +480,12 @@ export function ApplicantTools({
                   </Select>
                 </Field>
                 <Field label="Evidence and source">
-                  <textarea
+                  <RichTextEditor
                     name={`evidence-${c.id}`}
                     required
                     defaultValue={c.evidence}
+                    rows={3}
+                    maxLength={4000}
                   />
                 </Field>
               </div>
