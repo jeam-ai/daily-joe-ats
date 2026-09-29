@@ -33,6 +33,7 @@ import Link from "next/link";
 import { QualificationEditor } from "./qualification-editor";
 import type { QualificationRule } from "@/types";
 import { canManage } from "@/lib/data-policy";
+import { RichTextEditor } from "./rich-text";
 
 function operationalUrgency(need: HiringNeed) {
   if (need.status !== "Open") return need.urgency;
@@ -465,7 +466,12 @@ export function HiringNeeds() {
               onChange={setRules}
             />
             <Field label="Interview reference questions">
-              <textarea name="questions" defaultValue={existing?.questions} />
+              <RichTextEditor
+                name="questions"
+                defaultValue={existing?.questions}
+                rows={4}
+                placeholder="Add interview reference questions"
+              />
             </Field>
             <div className="modal-actions">
               <Button

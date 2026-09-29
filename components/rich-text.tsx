@@ -101,12 +101,20 @@ export function RichTextEditor({
     }
     const range = selection.getRangeAt(0).cloneRange();
     const selectionRect = range.getBoundingClientRect();
-    const editorRect = element.getBoundingClientRect();
     if (!selectionRect.width && !selectionRect.height) return;
+    const toolbarWidth = Math.min(292, window.innerWidth - 16);
     selectionRange.current = range;
     setToolbarPosition({
-      left: Math.max(8, Math.min(selectionRect.left - editorRect.left, editorRect.width - 282)),
-      top: Math.max(8, selectionRect.top - editorRect.top - 44),
+      left: Math.max(
+        8,
+        Math.min(selectionRect.left, window.innerWidth - toolbarWidth - 8),
+      ),
+      // Keep the selected words unobstructed. The bubble sits above the
+      // selection whenever possible and flips beneath it near the viewport top.
+      top:
+        selectionRect.top > 56
+          ? selectionRect.top - 44
+          : selectionRect.bottom + 8,
     });
   }, []);
   useEffect(() => {

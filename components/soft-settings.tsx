@@ -11,6 +11,7 @@ import type {
 import { useApp } from "./provider";
 import { Button, Card, Field, Input, Select, Modal, Badge } from "./ui";
 import { QualificationEditor } from "./qualification-editor";
+import { RichTextEditor } from "./rich-text";
 export function UsersSettings() {
   const { state, update, saving } = useApp();
   const [editing, setEditing] = useState<User | null>(null);
@@ -424,7 +425,12 @@ export function QualificationsSettings() {
           >
             <QualificationEditor value={rules} onChange={setRules} />
             <Field label="Interview reference questions">
-              <textarea name="questions" defaultValue={q.questions} />
+              <RichTextEditor
+                name="questions"
+                defaultValue={q.questions}
+                rows={4}
+                placeholder="Add interview reference questions"
+              />
             </Field>
             <p>
               HR records actual interview answers. The system does not infer

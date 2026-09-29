@@ -3243,7 +3243,7 @@ progress {
   background: var(--surface-subtle);
 }
 .rich-text-toolbar {
-  position: absolute;
+  position: fixed;
   z-index: 4;
   display: flex;
   flex-wrap: wrap;
