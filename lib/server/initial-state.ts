@@ -27,9 +27,9 @@ export function initialState(): AppState {
         : email === official
           ? ""
           : "",
-    role: email === owner ? "Admin" : "Talent Acquisition",
+    role: email === owner || email === official ? "Admin" : "Talent Acquisition",
     title:
-      email === official ? "Talent Acquisition Specialist" : "HR Associate",
+      email === official ? "Workspace Administrator" : "HR Associate",
     active: true,
   }));
   return {

@@ -25,8 +25,13 @@ type Context = {
   ) => Promise<boolean>;
   ensureApplication: (id: string) => Promise<void>;
   notify: (message: string, tone?: "success" | "error" | "info") => void;
-  refresh: (options?: { clearDetails?: boolean }) => Promise<void>;
+  refresh: (options?: {
+    clearDetails?: boolean;
+    background?: boolean;
+    force?: boolean;
+  }) => Promise<void>;
   patchState: (fn: (state: AppState) => AppState) => void;
+  beginDraft: () => () => void;
   saving: boolean;
   dataset: "real" | "demo";
   setDataset: (value: "real" | "demo") => void;
@@ -51,6 +56,8 @@ export function AppProvider({
     [saving, setSaving] = useState(false);
   const ref = useRef<AppState | null>(null);
   const detailCache = useRef(new Map<string, Application>());
+  const activeDrafts = useRef(0);
+  const deferredRefresh = useRef(false);
   const cacheKey = email ? `djc-workspace:${email.toLowerCase()}` : "";
   const [dataset, setDataset] = useState<"real" | "demo">("real");
   useEffect(() => {
@@ -120,9 +127,20 @@ export function AppProvider({
     [cacheKey],
   );
   const refresh = useCallback(
-    async (options?: { clearDetails?: boolean }) => {
+    async (options?: {
+      clearDetails?: boolean;
+      background?: boolean;
+      force?: boolean;
+    }) => {
+      // An intake or another user's update must never replace a form while HR
+      // is typing. Queue it, then reconcile against the server as soon as the
+      // draft closes so separate browsers still receive saved profile changes.
+      if (activeDrafts.current && !options?.force) {
+        deferredRefresh.current = true;
+        return;
+      }
       const request = ++generation.current;
-      setLoading(true);
+      if (!options?.background && !ref.current) setLoading(true);
       try {
         const r = await clientFetch("/api/workspace", { cache: "no-store" });
         const data = await r.json();
@@ -154,11 +172,24 @@ export function AppProvider({
       } catch (e) {
         if (request === generation.current) setError((e as Error).message);
       } finally {
-        if (request === generation.current) setLoading(false);
+        if (request === generation.current && !ref.current) setLoading(false);
       }
     },
     [cacheKey],
   );
+  const beginDraft = useCallback(() => {
+    activeDrafts.current += 1;
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      activeDrafts.current = Math.max(0, activeDrafts.current - 1);
+      if (!activeDrafts.current && deferredRefresh.current) {
+        deferredRefresh.current = false;
+        void refresh({ background: true });
+      }
+    };
+  }, [refresh]);
   useLayoutEffect(() => {
     // A short-lived, same-user cache lets the shell and current page render
     // immediately from a recent same-user cache. A background refresh always
@@ -178,6 +209,47 @@ export function AppProvider({
       } catch {}
     void refresh();
   }, [cacheKey, refresh]);
+  useEffect(() => {
+    let stopped = false;
+    const checkForRemoteChanges = async () => {
+      const current = ref.current;
+      if (
+        stopped ||
+        !current ||
+        busy.current ||
+        document.visibilityState !== "visible"
+      )
+        return;
+      try {
+        const response = await clientFetch(
+          `/api/workspace?revision=${encodeURIComponent(current.revision ?? 0)}`,
+          { cache: "no-store" },
+        );
+        const result = await response.json();
+        if (!response.ok || !result.changed) return;
+        if (activeDrafts.current) {
+          deferredRefresh.current = true;
+          return;
+        }
+        await refresh({ background: true });
+      } catch {
+        // The next interval, focus, or normal route refresh retries. Do not
+        // interrupt HR with a transient cross-device synchronization read.
+      }
+    };
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void checkForRemoteChanges();
+    };
+    const timer = window.setInterval(() => void checkForRemoteChanges(), 30000);
+    window.addEventListener("focus", checkForRemoteChanges);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+      window.removeEventListener("focus", checkForRemoteChanges);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [refresh]);
   useEffect(() => {
     const media = window.matchMedia("(prefers-color-scheme: dark)");
     const apply = () => {
@@ -357,6 +429,7 @@ export function AppProvider({
         notify,
         refresh,
         patchState,
+        beginDraft,
         saving,
         dataset,
         setDataset: switchDataset,

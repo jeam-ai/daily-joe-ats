@@ -3,14 +3,27 @@ import {
   publicState,
   updateState,
   updatePreferences,
+  workspaceRevision,
 } from "@/lib/server/repository";
 import { safeError } from "@/lib/server/response";
 import { SafeError } from "@/lib/server/config";
 export const runtime = "nodejs";
 export const maxDuration = 240;
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    return Response.json(await publicState(await requireUser()), {
+    const user = await requireUser();
+    const revision = new URL(request.url).searchParams.get("revision");
+    if (revision !== null) {
+      const known = Number(revision);
+      if (!Number.isSafeInteger(known) || known < 0)
+        throw new SafeError("Invalid workspace revision.");
+      const current = await workspaceRevision();
+      return Response.json(
+        { revision: current, changed: current !== known },
+        { headers: { "Cache-Control": "no-store" } },
+      );
+    }
+    return Response.json(await publicState(user), {
       headers: { "Cache-Control": "no-store" },
     });
   } catch (e) {

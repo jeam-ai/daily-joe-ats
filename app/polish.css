@@ -904,9 +904,6 @@ tbody tr:hover {
   display: inline-flex;
   margin-top: 8px;
 }
-.application-qualification-cell {
-  border-left: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
-}
 .application-qualification-cell .cell-secondary {
   line-height: 1.35;
 }
@@ -2661,25 +2658,6 @@ progress {
 .timekeeping-page {
   gap: 16px;
 }
-.onboarding-page .workspace-page-heading,
-.issuance-page .workspace-page-heading,
-.timekeeping-page .workspace-page-heading {
-  position: relative;
-  padding: 3px 4px 15px;
-  border-bottom: 1px solid color-mix(in srgb, var(--accent) 16%, var(--border));
-}
-.onboarding-page .workspace-page-heading::after,
-.issuance-page .workspace-page-heading::after,
-.timekeeping-page .workspace-page-heading::after {
-  position: absolute;
-  bottom: -1px;
-  left: 4px;
-  width: 46px;
-  height: 2px;
-  border-radius: 999px;
-  background: var(--accent);
-  content: "";
-}
 .workspace-heading-side {
   display: grid;
   justify-items: end;
@@ -2792,10 +2770,6 @@ progress {
 }
 .people-summary {
   grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-.onboarding-page .workspace-heading-note {
-  max-width: 720px;
-  margin-top: -4px;
 }
 .people-summary .metric {
   min-height: 132px;
@@ -3110,6 +3084,9 @@ progress {
 }
 .issuance-status-filter {
   min-width: 156px;
+}
+.issuance-sort {
+  min-width: 176px;
 }
 .issuance-toolbar .tabs {
   min-width: 0;

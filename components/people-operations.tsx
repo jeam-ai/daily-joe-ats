@@ -58,19 +58,14 @@ export function PeopleOperations() {
             confirmed hire through handover.
           </p>
         </div>
-        <div className="workspace-heading-side">
-          <span className="workspace-heading-context">
-            Confirmed hires and HR handover
-          </span>
-          <span className="workspace-heading-note people-help-note">
-            This workspace uses confirmed hiring data; it does not create an
-            employee record from an applicant automatically.
-            <HelpTip>
-              An employee appears here only after HR marks the applicant as Hired or records a hire date.
-            </HelpTip>
-          </span>
-        </div>
       </div>
+      <p className="workspace-heading-note people-help-note">
+        This workspace uses confirmed hiring data; it does not create an
+        employee record from an applicant automatically.
+        <HelpTip>
+          An employee appears here only after HR marks the applicant as Hired or records a hire date.
+        </HelpTip>
+      </p>
       <div className="metrics-grid people-summary">
         <MetricCard
           label="New hires"

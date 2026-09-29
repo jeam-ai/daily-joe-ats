@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { Application } from "@/types";
 import { useApp } from "./provider";
@@ -15,7 +15,7 @@ export function ApplicantEditor({
   application?: Application;
   onClose: () => void;
 }) {
-  const { state, refresh, notify } = useApp();
+  const { state, refresh, notify, patchState, beginDraft } = useApp();
   const router = useRouter();
   const [busy, setBusy] = useState(false),
     [error, setError] = useState("");
@@ -25,6 +25,7 @@ export function ApplicantEditor({
     ? nameParts(application.applicant.name)
     : { firstName: "", middleName: "", lastName: "" };
   const [requestId] = useState(() => crypto.randomUUID());
+  useEffect(() => beginDraft(), [beginDraft]);
   if (!state) return null;
   const need = state.hiringNeeds.find((n) => n.id === needId);
   return (
@@ -74,12 +75,17 @@ export function ApplicantEditor({
           };
           try {
             if (application) {
-              await requestJson(`/api/applicants/${application.id}`, {
+              const saved = await requestJson<{ application: Application }>(`/api/applicants/${application.id}`, {
                 method: "PATCH",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(fields),
               });
-              await refresh({ clearDetails: true });
+              patchState((current) => ({
+                ...current,
+                applications: current.applications.map((item) =>
+                  item.id === saved.application.id ? saved.application : item,
+                ),
+              }));
               const photo = form.get("photo");
               const removePhoto = form.get("removePhoto") === "on";
               if (photo instanceof File && photo.size) {
@@ -89,13 +95,14 @@ export function ApplicantEditor({
                   method: "POST",
                   body: payload,
                 });
-                await refresh();
+                void refresh({ clearDetails: true });
               } else if (removePhoto && application.applicantPhotoId) {
                 await requestJson(`/api/applicants/${application.id}/photo`, {
                   method: "DELETE",
                 });
-                await refresh();
+                void refresh({ clearDetails: true });
               }
+              notify("Applicant profile saved.");
             } else {
               const result = createdId
                 ? { id: createdId }

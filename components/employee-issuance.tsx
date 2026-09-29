@@ -44,6 +44,7 @@ const statuses: IssuanceStatus[] = [
   "Returned",
 ];
 const categories: IssuanceCategory[] = ["Uniform", "Welcome Kit", "Other"];
+type IssuanceSort = "latest-updated" | "latest-issued" | "employee-a-z";
 const today = () => new Date().toISOString().slice(0, 10);
 
 function employeeCount(records: IssuanceRecord[]) {
@@ -57,6 +58,7 @@ export function EmployeeIssuance() {
   const [statusFilter, setStatusFilter] = useState<"All" | IssuanceStatus>(
     "All",
   );
+  const [sort, setSort] = useState<IssuanceSort>("latest-updated");
   const [query, setQuery] = useState("");
   const [newCategory, setNewCategory] = useState<IssuanceCategory>("Uniform");
   const [stockCategory, setStockCategory] =
@@ -135,8 +137,22 @@ export function EmployeeIssuance() {
             record.size,
           ].some((value) => value?.toLowerCase().includes(needle)),
       )
-      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-  }, [query, records, statusFilter, view]);
+      .sort((a, b) => {
+        if (sort === "employee-a-z")
+          return (
+            a.employeeName.localeCompare(b.employeeName) ||
+            a.item.localeCompare(b.item) ||
+            b.updatedAt.localeCompare(a.updatedAt)
+          );
+        if (sort === "latest-issued")
+          return (
+            (b.issuedAt || b.receivedAt || b.updatedAt).localeCompare(
+              a.issuedAt || a.receivedAt || a.updatedAt,
+            ) || b.updatedAt.localeCompare(a.updatedAt)
+          );
+        return b.updatedAt.localeCompare(a.updatedAt);
+      });
+  }, [query, records, sort, statusFilter, view]);
   const editable =
     dataset === "real" &&
     ["Admin", "Talent Acquisition", "HR Generalist"].includes(
@@ -561,6 +577,16 @@ export function EmployeeIssuance() {
                 {status}
               </option>
             ))}
+          </Select>
+          <Select
+            aria-label="Sort employee issuance"
+            className="issuance-sort"
+            value={sort}
+            onChange={(event) => setSort(event.target.value as IssuanceSort)}
+          >
+            <option value="latest-updated">Latest release update</option>
+            <option value="latest-issued">Latest issued / received</option>
+            <option value="employee-a-z">Employee A–Z</option>
           </Select>
           <div className="search-field issuance-search">
             <Search size={17} />
