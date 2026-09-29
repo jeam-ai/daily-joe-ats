@@ -808,6 +808,8 @@ input[type="radio"] {
   }
 }
 .tabs {
+  min-width: 0;
+  max-width: 100%;
   overflow-x: auto;
   gap: 24px;
   white-space: nowrap;
