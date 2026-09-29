@@ -2781,7 +2781,11 @@ progress {
 
 /* Help text is intentionally allowed to rise above its card. Card shells
    otherwise clip an absolutely positioned tooltip before it can be read. */
-.card:has(.info-tooltip) {
+.card:has(.info-tooltip),
+.people-workspace:has(.info-tooltip),
+.timekeeping-review-card:has(.info-tooltip),
+.settings-workspace-content > .card:has(.info-tooltip),
+.settings-workspace-content > .section-boundary > .card:has(.info-tooltip) {
   overflow: visible;
 }
 
