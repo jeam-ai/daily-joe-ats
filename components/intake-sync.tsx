@@ -63,6 +63,10 @@ export function IntakeSyncStatus() {
         timeZone: "UTC",
       }).format(new Date(`${job.backfillMonth}-01T00:00:00Z`))
     : "Standby";
+  // Gmail intake is owned by the daily server cron or an explicit Sync Now
+  // request. A visible tab is only a status monitor; it must not repeatedly
+  // start expensive Gmail work every time its status poll completes.
+  const idleStatusDelay = 5 * 60 * 1000;
   async function check() {
     const value = await requestJson<IntakeSync>("/api/intake/sync");
     setJob(value);
@@ -89,52 +93,23 @@ export function IntakeSyncStatus() {
     async function tick() {
       if (stopped || running) return;
       running = true;
-      let delay = 60000;
+      let delay = idleStatusDelay;
       try {
         const value = await check();
         if (stopped) return;
         delay =
           value.status === "capacity"
-            ? 60000
+            ? idleStatusDelay
             : ["checking", "processing"].includes(value.status)
               ? // The server lease owns the work. Status reads do not need to
                 // poll every few seconds while a document batch is processing.
                 30000
               : value.nextSyncAt && value.nextSyncAt > Date.now()
-                ? Math.max(1000, value.nextSyncAt - Date.now() + 100)
+                ? Math.max(30000, value.nextSyncAt - Date.now() + 100)
                 : value.nextBackfillAt && value.nextBackfillAt > Date.now()
-                  ? 30000
-                  : value.pending.length || value.page
-                    ? 5000
-                    : // A visible HR workspace is the live intake monitor. Keep a
-                      // light status pulse so newly received applications do not
-                      // wait for a manual refresh or the daily server cron.
-                      30000;
+                  ? idleStatusDelay
+                  : idleStatusDelay;
         setError("");
-        if (
-          !["checking", "processing", "authorization", "paused"].includes(
-            value.status,
-          ) &&
-          (value.consecutiveFailures || 0) < 3 &&
-          (!value.retryAt || value.retryAt <= Date.now())
-        ) {
-          await requestJson("/api/intake/sync", { method: "POST" });
-          // The server now owns the next claim. Give its Aiven transaction a
-          // short, visible queue window instead of firing another request.
-          delay = 30000;
-          setJob((old) =>
-            old
-              ? {
-                  ...old,
-                  status: "checking",
-                  databaseState: "queued",
-                  nextSyncAt: Date.now() + 30000,
-                  message:
-                    "The next intake batch is queued for the ATS database. Waiting for the prior save to finish safely…",
-                }
-              : old,
-          );
-        }
       } catch {
         if (!stopped)
           setError(
@@ -148,7 +123,7 @@ export function IntakeSyncStatus() {
       }
     }
     function onVisibilityChange() {
-      if (stopped) return;
+      if (stopped || document.visibilityState !== "visible") return;
       clearTimeout(timer);
       if (!running) void tick();
     }

@@ -257,7 +257,10 @@ export function AppProvider({
     const onVisible = () => {
       if (document.visibilityState === "visible") void checkForRemoteChanges();
     };
-    const timer = window.setInterval(() => void checkForRemoteChanges(), 30000);
+    // Edits refresh the local view immediately and focus performs an instant
+    // check. A 90-second background cadence keeps other signed-in devices in
+    // sync without turning every open HR tab into a constant server poll.
+    const timer = window.setInterval(() => void checkForRemoteChanges(), 90000);
     window.addEventListener("focus", checkForRemoteChanges);
     document.addEventListener("visibilitychange", onVisible);
     return () => {
