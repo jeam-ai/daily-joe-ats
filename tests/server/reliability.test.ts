@@ -691,6 +691,15 @@ test("large Odoo jobs preserve 900+ source rows, report progress and deduplicate
   assert.equal(batch.period.end, "2026-09-15");
   assert.equal(batch.records.length, 1040);
   assert.equal(batch.records.flatMap((r) => r.raw).length, 975);
+  // A completed analysis consumes its upload preview. Re-uploading identical
+  // files must restore a usable preview instead of returning that stale ID.
+  const reupload = await createTimekeepingJob(input, user);
+  assert.equal(reupload.status, "Queued");
+  await runTimekeepingJob(reupload.id, user);
+  const refreshed = await getTimekeepingJob(reupload.id, user);
+  assert.equal(refreshed.status, "Completed");
+  assert.notEqual((refreshed.result as { id: string }).id, preview.id);
+  assert.equal((await createTimekeepingJob(input, user)).status, "Completed");
   await assert.rejects(
     getTimekeepingJob(job.id, { ...user, email: "other@example.invalid" }),
     /not found/,

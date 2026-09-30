@@ -31,6 +31,11 @@ import {
 } from "@/lib/screening";
 import { detectResumeType, extractResume } from "@/lib/server/documents";
 import { withDeadline } from "@/lib/server/deadline";
+import {
+  applicationSearchQuery,
+  detectApplicationEmail,
+  resumeFilename,
+} from "@/lib/intake-detector";
 export function resumeScreeningInsight(
   text: string,
   mime: string,
@@ -60,6 +65,7 @@ type Message = {
   id: string;
   threadId: string;
   internalDate: string;
+  labelIds?: string[];
   payload: Part & { headers: { name: string; value: string }[] };
 };
 export type PreviewRow = {
@@ -97,22 +103,6 @@ type Preview = {
   used?: boolean;
 };
 
-/**
- * Applies only to the bounded fallback used when the configured Gmail label
- * returned no messages. It accepts normal no-subject resume submissions while
- * keeping unrelated attachment mail out of applicant intake.
- */
-function looksLikeApplicationSubmission(
-  subject: string,
-  body: string,
-  attachments: Part[],
-) {
-  const filename = attachments.map((part) => part.filename || "").join(" ");
-  const text = `${subject}\n${body}\n${filename}`.toLowerCase();
-  return /\b(resume|résumé|curriculum vitae|\bcv\b|application|applying|applicant|barista|job\s*(?:application|position)?|work experience|career objective|education|skills)\b/.test(
-    text,
-  );
-}
 export async function official() {
   const c = await withStore((s) => s.officialConnection, false);
   if (!c || c.email !== config().officialEmail)
@@ -170,8 +160,6 @@ export async function previewImport(
     automatic?: boolean;
     /** Historical recovery records email facts first; source files stay in Gmail. */
     emailOnly?: boolean;
-    /** Guard the recent unlabeled attachment-recovery route from non-HR mail. */
-    requireApplicationEvidence?: boolean;
   } = {},
 ) {
   if (!["Admin", "Talent Acquisition", "HR Generalist"].includes(user.role))
@@ -180,10 +168,6 @@ export async function previewImport(
   const deadline = options.deadline || Date.now() + 150000;
   const realApps = state.applications.filter(activeIntake);
   const realCount = realApps.filter((a) => a.source === "Gmail").length;
-  if (!state.intakeQuery?.trim())
-    throw new SafeError(
-      "Configure the application email filter in Settings first.",
-    );
   const token = await accessToken(await official());
   let page: string | undefined;
   const ids: string[] = [...(options.ids || [])];
@@ -194,7 +178,7 @@ export async function previewImport(
         nextPageToken?: string;
       }>(
         token,
-        `messages?maxResults=${MAX_PREVIEW_MESSAGES}&q=${encodeURIComponent(state.intakeQuery)}${page ? `&pageToken=${encodeURIComponent(page)}` : ""}`,
+        `messages?maxResults=${MAX_PREVIEW_MESSAGES}&q=${encodeURIComponent(applicationSearchQuery(state.intakeQuery))}${page ? `&pageToken=${encodeURIComponent(page)}` : ""}`,
       );
       ids.push(...(data.messages || []).map((m) => m.id));
       page = data.nextPageToken;
@@ -250,17 +234,29 @@ export async function previewImport(
         continue;
       }
       const attachments = parts(message.payload).filter((p) => p.filename);
-      const p = attachments.find((p) =>
+      const candidates = attachments.filter((p) =>
         /\.(pdf|docx|txt|png|jpe?g)$/i.test(p.filename!),
       );
+      const p =
+        candidates.find((part) => resumeFilename(part.filename!)) ||
+        candidates.find(
+          (part) => !/invoice|receipt|payslip|timesheet/i.test(part.filename!),
+        ) ||
+        candidates[0];
       const emailBody = messageBody(message.payload);
-      if (
-        options.requireApplicationEvidence &&
-        !looksLikeApplicationSubmission(subject, emailBody, attachments)
-      ) {
-        skip(
-          "Recent attachment did not contain application or resume evidence.",
-        );
+      const detectionInput = {
+        subject,
+        body: emailBody,
+        filenames: attachments.map((part) => part.filename!),
+        headers: message.payload.headers,
+        labelIds: message.labelIds,
+        knownThread: state.applications.some(
+          (app) => app.gmailThreadId === message.threadId,
+        ),
+      };
+      const detection = detectApplicationEmail(detectionInput);
+      if (detection.decision === "ignore") {
+        skip(detection.reason);
         continue;
       }
       const pushEmailOnly = (
@@ -272,10 +268,12 @@ export async function previewImport(
           data: string;
           attachmentId?: string;
         },
+        resumeText = "",
       ) => {
         const evidence = intakeEvidence({
           subject,
           body: emailBody,
+          resume: resumeText,
           filename: attachments[0]?.filename,
           from,
           positions: state.hiringNeeds.map((need) => need.position),
@@ -328,13 +326,19 @@ export async function previewImport(
               .digest("hex"),
         );
       };
-      if (options.emailOnly) {
+      if (options.emailOnly && detection.decision === "application") {
         pushEmailOnly(
           "Historical email-only intake. The resume remains in Gmail and is retrieved only when HR opens or processes this applicant.",
         );
         continue;
       }
       if (Date.now() >= deadline) {
+        if (detection.decision !== "application") {
+          skip(
+            "Application verification time limit reached; retry preview to inspect the original email.",
+          );
+          continue;
+        }
         if (options.automatic) {
           pushEmailOnly(
             "Resume processing was deferred so Gmail intake could continue. The submitted email was imported; retry document processing from the applicant profile.",
@@ -349,6 +353,12 @@ export async function previewImport(
         break;
       }
       if (!p || (p.body?.size || 0) > 8 * 1024 * 1024) {
+        if (detection.decision !== "application") {
+          skip(
+            "Attachment needs application verification; review the original email.",
+          );
+          continue;
+        }
         pushEmailOnly(attachmentProblem(attachments, p));
         continue;
       }
@@ -393,6 +403,12 @@ export async function previewImport(
           ? Math.min(8000, remaining)
           : remaining;
         if (extractionBudget <= 0) {
+          if (detection.decision !== "application") {
+            skip(
+              "Application verification time limit reached; retry preview to inspect the original email.",
+            );
+            continue;
+          }
           pushEmailOnly(
             "Resume processing was deferred so Gmail intake could continue. The original resume was retained; retry document processing from the applicant profile.",
             deferredResume,
@@ -404,6 +420,24 @@ export async function previewImport(
           Math.max(1, extractionBudget),
         );
         const { text: extracted, mime, extraction } = document;
+        if (
+          detection.decision !== "application" &&
+          detectApplicationEmail({ ...detectionInput, resumeText: extracted })
+            .decision !== "application"
+        ) {
+          skip(
+            "Attached document did not contain resume or application evidence.",
+          );
+          continue;
+        }
+        if (options.emailOnly) {
+          pushEmailOnly(
+            "Application detected from resume contents. The original resume remains in Gmail for HR review.",
+            undefined,
+            extracted,
+          );
+          continue;
+        }
         const evidence = intakeEvidence({
           subject,
           body: emailBody,
@@ -447,6 +481,12 @@ export async function previewImport(
         seen.add(message.id);
         hashes.add(hash);
       } catch (error) {
+        if (detection.decision !== "application") {
+          skip(
+            "Failed to read application evidence from the attachment. Retry preview or review the original email; unreadable files are not automatically treated as applications.",
+          );
+          continue;
+        }
         // The message itself is still an application. Preserve submitted email
         // facts and let automatic AI fallback inspect subject/body rather than
         // repeatedly blocking intake on one unreadable attachment.

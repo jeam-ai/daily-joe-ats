@@ -13,14 +13,21 @@ function safeFailureSummary(error: unknown) {
   const message =
     typeof candidate?.message === "string"
       ? candidate.message
-          .replace(/(?:postgres(?:ql)?:\/\/|https?:\/\/)[^\s]+/gi, "[redacted-url]")
+          .replace(
+            /(?:postgres(?:ql)?:\/\/|https?:\/\/)[^\s]+/gi,
+            "[redacted-url]",
+          )
           .slice(0, 500)
       : "Unknown non-error value";
   return {
     type:
-      typeof candidate?.name === "string" ? candidate.name.slice(0, 100) : "Error",
+      typeof candidate?.name === "string"
+        ? candidate.name.slice(0, 100)
+        : "Error",
     code:
-      typeof candidate?.code === "string" ? candidate.code.slice(0, 100) : undefined,
+      typeof candidate?.code === "string"
+        ? candidate.code.slice(0, 100)
+        : undefined,
     message,
   };
 }
@@ -67,7 +74,11 @@ export function safeError(error: unknown) {
       ...(diagnosticId ? { diagnosticId } : {}),
     },
     {
-      status: error instanceof SafeError ? error.status : 500,
+      status: databaseFailure
+        ? 503
+        : error instanceof SafeError
+          ? error.status
+          : 500,
       headers: {
         "Cache-Control": "no-store",
         ...(diagnosticId ? { "X-DJC-Diagnostic-Id": diagnosticId } : {}),

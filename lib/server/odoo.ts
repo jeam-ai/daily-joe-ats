@@ -18,9 +18,11 @@ import { config, SafeError } from "./config";
 import { seal, unseal } from "@/lib/auth/security";
 import {
   transaction,
+  retryableTransaction,
   readTransaction,
   readRecord,
   putRecord,
+  putRecords,
   type Transaction,
 } from "./database";
 import { audit, getState, saveState } from "./repository";
@@ -61,29 +63,39 @@ export type OdooBatch = OdooAnalysis & {
   // Metadata only: the prior cutoff analysis itself is removed on replacement.
   previousBatchId?: string;
 };
-async function saveExceptions(tx: Transaction, batch: OdooBatch) {
+async function saveExceptions(
+  tx: Transaction,
+  batch: OdooBatch,
+  records = batch.records,
+) {
   // Named read model: the encrypted batch remains the source of truth. Stable
   // batch/day IDs let HR inspect exceptions without duplicating analyses.
-  const rows = batch.records.filter(
+  const rows = records.filter(
     (r) =>
       r.issues.length ||
       r.review.status === "For Review" ||
       r.review.history.length,
   );
-  for (const r of rows)
-    await putRecord(tx, "odoo_exceptions", `${batch.id}:${r.id}`, {
+  await putRecords(
+    tx,
+    "odoo_exceptions",
+    rows.map((r) => ({
       id: `${batch.id}:${r.id}`,
-      batchId: batch.id,
-      name: r.employee,
-      date: r.date,
-      results: r.results,
-      issues: r.issues,
-      worked: r.worked,
-      expected: r.expected,
-      status: r.review.status,
-      review: r.review,
-      createdAt: batch.analyzedAt,
-    });
+      value: {
+        id: `${batch.id}:${r.id}`,
+        batchId: batch.id,
+        name: r.employee,
+        date: r.date,
+        results: r.results,
+        issues: r.issues,
+        worked: r.worked,
+        expected: r.expected,
+        status: r.review.status,
+        review: r.review,
+        createdAt: batch.analyzedAt,
+      },
+    })),
+  );
 }
 type Upload = {
   uploadedAt: string;
@@ -162,7 +174,7 @@ export async function previewOdoo(
     throw new SafeError((e as Error).message);
   }
   const id = crypto.randomUUID();
-  await transaction(async (tx) => {
+  await retryableTransaction(async (tx) => {
     await putRecord(
       tx,
       "odoo_uploads",
@@ -182,7 +194,7 @@ export async function previewOdoo(
       period: reports.period,
       sourceHashes: reports.sources.map((s) => s.hash),
     });
-  });
+  }, 3);
   return {
     id,
     period: reports.period,
@@ -349,7 +361,7 @@ export async function analyzeOdooUpload(
     } catch (e) {
       throw new SafeError((e as Error).message);
     }
-    return transaction(async (tx) => {
+    return retryableTransaction(async (tx) => {
       const existing = await readRecord<string>(
         tx,
         "odoo_fingerprints",
@@ -588,7 +600,7 @@ export async function reviewOdoo(input: unknown, user: User) {
       ],
     };
     batch.revision++;
-    await saveExceptions(tx, batch);
+    await saveExceptions(tx, batch, [row]);
     await putRecord(tx, "odoo_reviews", crypto.randomUUID(), {
       batchId: batch.id,
       recordId: row.id,
@@ -638,15 +650,21 @@ export async function completeNormalOvertimeForEmployee(
     .object({
       id: z.string(),
       revision: z.number().int(),
-      employeeKey: z.string().min(1).max(300),
-      recordIds: z.array(z.string().min(1)).min(1).max(31),
+      scope: z.enum(["employee", "cutoff"]).default("employee"),
+      employeeKey: z.string().min(1).max(300).optional(),
+      recordIds: z.array(z.string().min(1)).min(1).max(94).optional(),
       note: z.string().trim().min(1).max(4000),
     })
     .safeParse(input);
   if (!parsed.success)
     throw new SafeError("Choose one employee's eligible overtime records.");
   const body = parsed.data;
-  if (new Set(body.recordIds).size !== body.recordIds.length)
+  if (
+    body.scope === "employee" &&
+    (!body.employeeKey || !body.recordIds?.length)
+  )
+    throw new SafeError("Choose one employee’s overtime-only records.");
+  if (body.recordIds && new Set(body.recordIds).size !== body.recordIds.length)
     throw new SafeError("Each overtime record can only be completed once.");
 
   return transaction(async (tx) => {
@@ -658,22 +676,33 @@ export async function completeNormalOvertimeForEmployee(
         "Another HR user updated this analysis. Reload it before completing overtime.",
         409,
       );
-    const rows = batch.records.filter((row) => body.recordIds.includes(row.id));
-    if (rows.length !== body.recordIds.length)
-      throw new SafeError("One or more attendance records no longer exist.", 404);
+    // Derive cutoff-wide selection on the server, independent of filters and pagination.
+    const rows =
+      body.scope === "cutoff"
+        ? batch.records.filter(isNormalOvertimeForSeparateMonitoring)
+        : batch.records.filter((row) => body.recordIds!.includes(row.id));
+    if (!rows.length)
+      throw new SafeError("No overtime-only records remain for review.", 409);
+    if (body.scope === "employee" && rows.length !== body.recordIds!.length)
+      throw new SafeError(
+        "One or more attendance records no longer exist.",
+        404,
+      );
     if (
       rows.some(
         (row) =>
-          (row.employeeId || row.employee) !== body.employeeKey ||
+          (body.scope === "employee" &&
+            (row.employeeId || row.employee) !== body.employeeKey) ||
           !isNormalOvertimeForSeparateMonitoring(row),
       )
     )
       throw new SafeError(
-        "Only clean normal-overtime records for one employee can be completed here. Other attendance exceptions require individual HR review.",
+        "Only records with exactly one classification, Overtime, can be completed here. Mixed classifications require individual HR review.",
         409,
       );
 
     const now = new Date().toISOString();
+    const reviews: { id: string; value: unknown }[] = [];
     for (const row of rows) {
       const previous = row.review.status;
       row.review = {
@@ -693,21 +722,25 @@ export async function completeNormalOvertimeForEmployee(
           },
         ],
       };
-      await putRecord(tx, "odoo_reviews", crypto.randomUUID(), {
-        batchId: batch.id,
-        recordId: row.id,
-        employee: row.employee,
-        date: row.date,
-        previous,
-        status: "Resolved",
-        note: body.note,
-        reviewer: user.email,
-        createdAt: now,
-        action: "normal_overtime_completed",
+      reviews.push({
+        id: crypto.randomUUID(),
+        value: {
+          batchId: batch.id,
+          recordId: row.id,
+          employee: row.employee,
+          date: row.date,
+          previous,
+          status: "Resolved",
+          note: body.note,
+          reviewer: user.email,
+          createdAt: now,
+          action: "normal_overtime_completed",
+        },
       });
     }
     batch.revision++;
-    await saveExceptions(tx, batch);
+    await putRecords(tx, "odoo_reviews", reviews);
+    await saveExceptions(tx, batch, rows);
     await putRecord(
       tx,
       "odoo_batches",
@@ -725,12 +758,23 @@ export async function completeNormalOvertimeForEmployee(
         flagged: batch.records.filter((r) => r.review.status === "For Review")
           .length,
       });
-    await audit(tx, user.email, "timekeeping.normal_overtime_completed", undefined, {
-      batchId: batch.id,
-      employeeKey: body.employeeKey,
-      recordIds: body.recordIds,
-      note: body.note,
-    });
+    await audit(
+      tx,
+      user.email,
+      "timekeeping.normal_overtime_completed",
+      undefined,
+      {
+        batchId: batch.id,
+        employeeKey: body.employeeKey,
+        scope: body.scope,
+        recordCount: rows.length,
+        employeeCount: new Set(
+          rows.map((row) => row.employeeId || row.employee),
+        ).size,
+        recordIds: rows.map((row) => row.id),
+        note: body.note,
+      },
+    );
     return batch;
   });
 }

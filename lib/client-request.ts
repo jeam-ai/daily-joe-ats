@@ -5,14 +5,17 @@ export async function clientFetch(
 ) {
   try {
     const timeout = AbortSignal.timeout(
-      String(input).includes("/api/intake")
-        ? 240000
-        : String(input).includes("/ai")
-          ? 90000
-          : String(input).includes("/resume") ||
-              String(input).includes("/processing")
-            ? 180000
-            : 60000,
+      String(input).includes("/api/timekeeping?job=")
+        ? 20000
+        : String(input).includes("/api/intake")
+          ? 240000
+          : String(input).includes("/ai")
+            ? 90000
+            : String(input).includes("/resume") ||
+                String(input).includes("/processing") ||
+                String(input).includes("/api/timekeeping")
+              ? 180000
+              : 60000,
     );
     const response = await fetch(input, {
       ...init,
@@ -35,12 +38,23 @@ export async function clientFetch(
     if (error instanceof DOMException && error.name === "AbortError")
       throw new Error("The request was cancelled.");
     if (error instanceof DOMException && error.name === "TimeoutError")
-      throw new Error(
+      throw new RequestError(
         "This request took too long. Refresh to check whether it completed before trying again.",
+        408,
       );
-    throw new Error(
+    throw new RequestError(
       "Unable to reach Daily Joe Careers. Check your connection and try again.",
+      0,
     );
+  }
+}
+export class RequestError extends Error {
+  constructor(
+    message: string,
+    public status: number,
+  ) {
+    super(message);
+    this.name = "RequestError";
   }
 }
 export async function requestJson<T = Record<string, unknown>>(
@@ -50,9 +64,10 @@ export async function requestJson<T = Record<string, unknown>>(
   const response = await clientFetch(url, init);
   const data = await response.json().catch(() => null);
   if (!response.ok || !data)
-    throw new Error(
+    throw new RequestError(
       data?.error ||
         "The service could not complete this request. Please try again.",
+      response.status,
     );
   return data as T;
 }

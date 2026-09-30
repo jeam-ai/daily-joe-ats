@@ -99,7 +99,7 @@ test("excessive overtime remains an HR verification issue, not an automatic appr
   assert.equal(cutoffWorkflow([excessive]).actionRequired.length, 1);
 });
 
-test("only clean normal overtime can be completed through separate overtime monitoring", () => {
+test("overtime completion requires exactly one Overtime classification and an open review", () => {
   const normalOvertime = record("06", ["Overtime"]);
   normalOvertime.issues = [];
   const overtimeWithoutSchedule = record("06b", ["Overtime"]);
@@ -117,6 +117,22 @@ test("only clean normal overtime can be completed through separate overtime moni
   assert.equal(isNormalOvertimeForSeparateMonitoring(excessive), false);
   assert.equal(
     isNormalOvertimeForSeparateMonitoring(overtimeWithSourceIssue),
+    true,
+  );
+  for (const tags of [
+    ["Overtime", "Multiple Entries"],
+    ["Overtime", "Data Discrepancy"],
+    ["Overtime", "Overtime"],
+    [],
+  ])
+    assert.equal(
+      isNormalOvertimeForSeparateMonitoring(record("09", tags)),
+      false,
+    );
+  assert.equal(
+    isNormalOvertimeForSeparateMonitoring(
+      record("10", ["Overtime"], { status: "Resolved" }),
+    ),
     false,
   );
 });

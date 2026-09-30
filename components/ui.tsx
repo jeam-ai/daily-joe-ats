@@ -1,5 +1,6 @@
 "use client";
-import { useEffect, useRef, useId } from "react";
+import { useEffect, useLayoutEffect, useRef, useId, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   X,
   Inbox,
@@ -9,24 +10,6 @@ import {
   Info,
   ArrowRight,
 } from "lucide-react";
-
-/** Keeps a help bubble within the visible viewport before it is shown. */
-function positionHelpTip(event: React.SyntheticEvent<HTMLSpanElement>) {
-  const trigger = event.currentTarget;
-  const viewportWidth = window.visualViewport?.width ?? window.innerWidth;
-  const tooltipWidth = Math.min(320, viewportWidth * 0.75, viewportWidth - 32);
-  const triggerBox = trigger.getBoundingClientRect();
-  const triggerCenter = triggerBox.left + triggerBox.width / 2;
-  const tooltipLeft = Math.min(
-    Math.max(triggerCenter - tooltipWidth / 2, 16),
-    viewportWidth - tooltipWidth - 16,
-  );
-
-  trigger.style.setProperty(
-    "--tooltip-translate-x",
-    `${Math.round(tooltipLeft - triggerCenter)}px`,
-  );
-}
 
 /** Small, keyboard-accessible help for a term or calculation that needs context. */
 export function HelpTip({
@@ -40,20 +23,106 @@ export function HelpTip({
   className?: string;
   icon?: React.ReactNode;
 }) {
+  const trigger = useRef<HTMLSpanElement>(null);
+  const bubble = useRef<HTMLSpanElement>(null);
+  const hovered = useRef(false);
+  const [open, setOpen] = useState(false);
+  const tooltipId = useId();
+  useLayoutEffect(() => {
+    const tip = bubble.current;
+    const anchor = trigger.current;
+    if (!open || !tip || !anchor) return;
+    // A native popover stays above clipped cards, tables and modal dialogs.
+    if (typeof tip.showPopover === "function") tip.showPopover();
+    else tip.style.display = "block";
+    const position = () => {
+      const viewport = window.visualViewport;
+      const left = (viewport?.offsetLeft ?? 0) + 16;
+      const top = (viewport?.offsetTop ?? 0) + 16;
+      const width = Math.max(0, (viewport?.width ?? window.innerWidth) - 32);
+      const height = Math.max(0, (viewport?.height ?? window.innerHeight) - 32);
+      tip.style.width = `${Math.min(320, width)}px`;
+      tip.style.maxHeight = `${height}px`;
+      const box = anchor.getBoundingClientRect();
+      const measured = tip.getBoundingClientRect();
+      const x = Math.max(
+        left,
+        Math.min(
+          box.left + box.width / 2 - measured.width / 2,
+          left + width - measured.width,
+        ),
+      );
+      const below = box.bottom + 8;
+      const above = box.top - measured.height - 8;
+      const y = below + measured.height <= top + height ? below : above;
+      tip.style.left = `${x}px`;
+      tip.style.top = `${Math.max(top, Math.min(y, top + height - measured.height))}px`;
+    };
+    position();
+    const resize = new ResizeObserver(position);
+    resize.observe(tip);
+    resize.observe(anchor);
+    const dismiss = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        setOpen(false);
+      }
+    };
+    window.addEventListener("scroll", position, true);
+    window.addEventListener("resize", position);
+    window.addEventListener("keydown", dismiss, true);
+    window.visualViewport?.addEventListener("resize", position);
+    window.visualViewport?.addEventListener("scroll", position);
+    return () => {
+      if (typeof tip.hidePopover === "function" && tip.matches(":popover-open"))
+        tip.hidePopover();
+      resize.disconnect();
+      window.removeEventListener("scroll", position, true);
+      window.removeEventListener("resize", position);
+      window.removeEventListener("keydown", dismiss, true);
+      window.visualViewport?.removeEventListener("resize", position);
+      window.visualViewport?.removeEventListener("scroll", position);
+    };
+  }, [open]);
   return (
     <span
+      ref={trigger}
       className={`info-tooltip help-tip ${className}`}
       tabIndex={0}
       aria-label={label}
-      onFocus={positionHelpTip}
-      onMouseEnter={positionHelpTip}
+      aria-describedby={open ? tooltipId : undefined}
+      onFocus={() => setOpen(true)}
+      onBlur={() => {
+        if (!hovered.current) setOpen(false);
+      }}
+      onMouseEnter={() => {
+        hovered.current = true;
+        setOpen(true);
+      }}
+      onMouseLeave={() => {
+        hovered.current = false;
+        if (document.activeElement !== trigger.current) setOpen(false);
+      }}
       onClick={(event) => {
-        positionHelpTip(event);
         event.currentTarget.focus();
+        setOpen(true);
       }}
     >
       {icon || <Info size={15} aria-hidden />}
-      <span role="tooltip">{children}</span>
+      {open &&
+        createPortal(
+          <span
+            className="help-tooltip"
+            ref={bubble}
+            id={tooltipId}
+            role="tooltip"
+            popover="manual"
+          >
+            {children}
+          </span>,
+          trigger.current?.closest("dialog") || document.body,
+        )}
     </span>
   );
 }

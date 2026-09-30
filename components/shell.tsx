@@ -167,7 +167,12 @@ function Frame({
         >
           <X size={20} />
         </button>
-        <Link href="/" className="brand" onClick={() => setOpen(false)}>
+        <Link
+          prefetch={false}
+          href="/"
+          className="brand"
+          onClick={() => setOpen(false)}
+        >
           <Image
             className="brand-logo"
             src="/daily-joe-logo-blue.png"
@@ -185,7 +190,11 @@ function Frame({
           aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
           title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
         >
-          {collapsed ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}
+          {collapsed ? (
+            <PanelLeftOpen size={17} />
+          ) : (
+            <PanelLeftClose size={17} />
+          )}
           <span className="sidebar-collapse-label">
             {collapsed ? "Expand" : "Collapse"}
           </span>
@@ -228,7 +237,11 @@ function Frame({
             <strong>Daily Joe Careers</strong>
             <p>Recruitment and HR operations.</p>
           </div>
-          <Link href="/settings/account" className="sidebar-profile">
+          <Link
+            prefetch={false}
+            href="/settings/account"
+            className="sidebar-profile"
+          >
             <Avatar
               name={state?.currentUser?.name || name || email || "HR"}
               imageUrl={state?.currentUser?.avatarUrl}
@@ -260,7 +273,11 @@ function Frame({
             <strong>{active?.[0] || "Notifications"}</strong>
           </div>
           <div className="topbar-actions">
-            <form action="/search" className="global-search" title="Search applicants, employees, hiring needs, locations, and issued items">
+            <form
+              action="/search"
+              className="global-search"
+              title="Search applicants, employees, hiring needs, locations, and issued items"
+            >
               <Search size={16} />
               <input
                 aria-label="Search HR hub"
@@ -275,6 +292,7 @@ function Frame({
               / 100 active
             </Badge>
             <Link
+              prefetch={false}
               className="icon-button notification-button"
               href="/notifications"
               aria-label="Notifications"
@@ -283,7 +301,11 @@ function Frame({
               {state?.preferences.notifications !== false &&
                 state?.notifications.some((n) => !n.read) && <i />}
             </Link>
-            <Link href="/settings/account" aria-label="Your profile">
+            <Link
+              prefetch={false}
+              href="/settings/account"
+              aria-label="Your profile"
+            >
               <Avatar
                 name={state?.currentUser?.name || name || email || "HR"}
                 imageUrl={state?.currentUser?.avatarUrl}

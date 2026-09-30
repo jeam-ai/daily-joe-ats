@@ -536,14 +536,12 @@ test("missing baseline templates are repaired before applicant evidence is scree
   );
 });
 
-test("legacy subject-gated Gmail filters are upgraded so labelled no-subject applications are included", () => {
+test("legacy subject-gated Gmail filters are upgraded to label-free application detection", () => {
   const state = initialState();
   state.intakeQuery =
     "has:attachment {subject:application subject:resume} -in:spam -in:trash";
 
   assert.ok(ensureRecruitmentConfiguration(state) > 0);
-  assert.equal(
-    state.intakeQuery,
-    'label:"HR - Applications" -in:spam -in:trash -in:sent',
-  );
+  assert.ok(!state.intakeQuery.includes("label:"));
+  assert.ok(state.intakeQuery.includes("has:attachment"));
 });

@@ -6,6 +6,7 @@ import { seal, unseal } from "@/lib/auth/security";
 import { config } from "./config";
 import {
   transaction,
+  readTransaction,
   readRecord,
   putRecord,
   postgresConfigured,
@@ -60,43 +61,41 @@ export function withStore<T>(
   // Keep the legacy remote-store behavior until the Sheets pipeline is
   // retired, while also honoring an Aiven-only deployment after cutover.
   const remoteConfigured = postgresConfigured() || !!process.env.DATABASE_URL;
-  return transaction(
-    async (tx) => {
-      step = "read_secure_record";
-      const encrypted = await readRecord<string>(tx, "secure", "auth");
-      const store = encrypted
-        ? unseal<Store>(encrypted, config().encryptionKey)
-        : remoteConfigured
-          ? ({ sessions: {}, events: [], requests: {} } as Store)
-          : await read();
-      const count = store.events.length;
-      step = "update_store";
-      const result = await fn(store);
-      if (persist) {
-        step = "write_audit";
-        for (const event of store.events.slice(count))
-          await writeAudit(
-            tx,
-            event.user,
-            event.action,
-            undefined,
-            event.metadata,
-          );
-      }
-      if (persist || (!encrypted && !remoteConfigured)) {
-        step = "write_secure_record";
-        await putRecord(
+  const execute = persist ? transaction : readTransaction;
+  return execute(async (tx) => {
+    step = "read_secure_record";
+    const encrypted = await readRecord<string>(tx, "secure", "auth");
+    const store = encrypted
+      ? unseal<Store>(encrypted, config().encryptionKey)
+      : remoteConfigured
+        ? ({ sessions: {}, events: [], requests: {} } as Store)
+        : await read();
+    const count = store.events.length;
+    step = "update_store";
+    const result = await fn(store);
+    if (persist) {
+      step = "write_audit";
+      for (const event of store.events.slice(count))
+        await writeAudit(
           tx,
-          "secure",
-          "auth",
-          seal(store, config().encryptionKey),
+          event.user,
+          event.action,
+          undefined,
+          event.metadata,
         );
-      }
-      step = "commit";
-      return result;
-    },
-    { readOnly: !persist },
-  ).catch((error: unknown) => {
+    }
+    if (persist || (!encrypted && !remoteConfigured)) {
+      step = "write_secure_record";
+      await putRecord(
+        tx,
+        "secure",
+        "auth",
+        seal(store, config().encryptionKey),
+      );
+    }
+    step = "commit";
+    return result;
+  }).catch((error: unknown) => {
     // PostgreSQL SQLSTATE and a fixed operation label are enough to diagnose
     // a failed session write. Never log the SQL, encrypted store or tokens.
     const code =

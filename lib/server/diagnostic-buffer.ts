@@ -33,7 +33,9 @@ export function clearBufferedFailure(category: string) {
 export function isDatabaseFailure(error: unknown) {
   const e = error as { code?: string; message?: string };
   return (
-    /^(08|53|57P|ETIMEDOUT|ECONNREFUSED|ECONNRESET)/.test(e?.code || "") ||
+    /^(08|53|57P|40001$|40P01$|55P03$|57014$|ETIMEDOUT|ECONNREFUSED|ECONNRESET)/.test(
+      e?.code || "",
+    ) ||
     /connection (?:terminated|timeout)|timeout exceeded when trying to connect|query read timeout/i.test(
       e?.message || "",
     )

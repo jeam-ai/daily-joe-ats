@@ -14,7 +14,7 @@ import {
 import { useApp } from "./provider";
 import { clientFetch } from "@/lib/client-request";
 import { formatDate } from "@/lib/dates";
-import { releasedForStock } from "@/lib/issuance-stock";
+import { releasedForStock, statusAfterReleaseDate } from "@/lib/issuance-stock";
 import type {
   IssuanceCategory,
   IssuanceInventory,
@@ -72,6 +72,8 @@ export function EmployeeIssuance() {
   const [manualStockIssued, setManualStockIssued] = useState(0);
   const [manualStockOnHand, setManualStockOnHand] = useState(0);
   const [adding, setAdding] = useState(false);
+  const [newStatus, setNewStatus] = useState<IssuanceStatus>("Issued");
+  const [newReleasedAt, setNewReleasedAt] = useState(today);
   const [editing, setEditing] = useState<IssuanceRecord | null>(null);
   const [editingStock, setEditingStock] = useState<
     IssuanceInventory | "new" | null
@@ -383,7 +385,11 @@ export function EmployeeIssuance() {
               title={
                 !editable ? "An authorized HR role is required" : undefined
               }
-              onClick={() => setAdding(true)}
+              onClick={() => {
+                setNewStatus("Issued");
+                setNewReleasedAt(today());
+                setAdding(true);
+              }}
             >
               <Plus size={16} />
               Record issuance
@@ -469,7 +475,9 @@ export function EmployeeIssuance() {
       <Card className="issuance-inventory-card">
         <div className="section-heading">
           <div className="stock-register-identity">
-            <span className="stock-register-icon"><PackageCheck size={19} /></span>
+            <span className="stock-register-icon">
+              <PackageCheck size={19} />
+            </span>
             <div>
               <span className="section-kicker">Stock control</span>
               <h2>Stock register</h2>
@@ -778,14 +786,38 @@ export function EmployeeIssuance() {
                 <Input name="condition" placeholder="New, used, replacement" />
               </Field>
               <Field label="Status">
-                <Select name="status" defaultValue="Issued">
+                <Select
+                  name="status"
+                  value={newStatus}
+                  onChange={(event) =>
+                    setNewStatus(
+                      statusAfterReleaseDate(
+                        event.target.value as IssuanceStatus,
+                        newReleasedAt,
+                      ),
+                    )
+                  }
+                >
                   {statuses.map((status) => (
                     <option key={status}>{status}</option>
                   ))}
                 </Select>
               </Field>
-              <Field label="Date issued">
-                <Input name="issuedAt" type="date" defaultValue={today()} />
+              <Field label="Date released">
+                <Input
+                  name="issuedAt"
+                  type="date"
+                  value={newReleasedAt}
+                  onChange={(event) => {
+                    setNewReleasedAt(event.target.value);
+                    setNewStatus((status) =>
+                      statusAfterReleaseDate(status, event.target.value),
+                    );
+                  }}
+                />
+                <small className="muted">
+                  A release date changes Pending to Issued.
+                </small>
               </Field>
               <Field label="Date received">
                 <Input name="receivedAt" type="date" />
@@ -865,16 +897,10 @@ export function EmployeeIssuance() {
                 />
               </Field>
               <Field label="Position">
-                <Input
-                  name="position"
-                  defaultValue={editing.position || ""}
-                />
+                <Input name="position" defaultValue={editing.position || ""} />
               </Field>
               <Field label="Branch / location">
-                <Input
-                  name="branch"
-                  defaultValue={editing.branch || ""}
-                />
+                <Input name="branch" defaultValue={editing.branch || ""} />
               </Field>
               <Field label="Item">
                 <Select
@@ -891,10 +917,7 @@ export function EmployeeIssuance() {
                       item.name === editing.item,
                   ) && <option value={editing.item}>{editing.item}</option>}
                   {catalog
-                    .filter(
-                      (item) =>
-                        item.category === editing.category,
-                    )
+                    .filter((item) => item.category === editing.category)
                     .map((item) => (
                       <option key={item.id} value={item.name}>
                         {item.name}
@@ -915,21 +938,52 @@ export function EmployeeIssuance() {
                 />
               </Field>
               <Field label="Condition">
-                <Input name="condition" defaultValue={editing.condition || ""} />
+                <Input
+                  name="condition"
+                  defaultValue={editing.condition || ""}
+                />
               </Field>
               <Field label="Status">
-                <Select name="status" defaultValue={editing.status}>
+                <Select
+                  name="status"
+                  value={statusAfterReleaseDate(
+                    editing.status,
+                    editing.issuedAt,
+                  )}
+                  onChange={(event) =>
+                    setEditing({
+                      ...editing,
+                      status: statusAfterReleaseDate(
+                        event.target.value as IssuanceStatus,
+                        editing.issuedAt,
+                      ),
+                    })
+                  }
+                >
                   {statuses.map((status) => (
                     <option key={status}>{status}</option>
                   ))}
                 </Select>
               </Field>
-              <Field label="Date issued">
+              <Field label="Date released">
                 <Input
                   name="issuedAt"
                   type="date"
-                  defaultValue={editing.issuedAt || ""}
+                  value={editing.issuedAt || ""}
+                  onChange={(event) =>
+                    setEditing({
+                      ...editing,
+                      issuedAt: event.target.value,
+                      status: statusAfterReleaseDate(
+                        editing.status,
+                        event.target.value,
+                      ),
+                    })
+                  }
                 />
+                <small className="muted">
+                  A release date changes Pending to Issued.
+                </small>
               </Field>
               <Field label="Date received">
                 <Input
@@ -1123,9 +1177,8 @@ export function EmployeeIssuance() {
             </label>
             <p className="fine-print">
               Automatic is the default: Released / out follows active issuance
-              history and Current on hand is Beginning minus Released / out.
-              Use an override only to retain a documented physical-count
-              correction.
+              history and Current on hand is Beginning minus Released / out. Use
+              an override only to retain a documented physical-count correction.
             </p>
             <div className="modal-actions">
               <Button

@@ -29,6 +29,7 @@ import {
 } from "@/lib/server/odoo";
 import { putRecord } from "@/lib/server/database";
 import { z } from "zod";
+import { deleteOdooCutoff } from "@/lib/server/timekeeping-delete";
 export const runtime = "nodejs";
 export const maxDuration = 180;
 export async function GET(request: Request) {
@@ -58,7 +59,7 @@ export async function GET(request: Request) {
     );
   } catch (error) {
     if (!(error instanceof SafeError) || error.status >= 500)
-      await reportIssue("timekeeping.failed");
+      after(() => reportIssue("timekeeping.failed"));
     return safeError(error);
   }
 }
@@ -137,6 +138,8 @@ export async function POST(request: Request) {
     }
     if (body.action === "review")
       return Response.json({ batch: await reviewOdoo(body, user) });
+    if (body.action === "delete-cutoff")
+      return Response.json(await deleteOdooCutoff(body, user));
     if (body.action === "complete-normal-overtime")
       return Response.json({
         batch: await completeNormalOvertimeForEmployee(body, user),
@@ -192,7 +195,7 @@ export async function POST(request: Request) {
     throw new SafeError("Choose a timekeeping action.");
   } catch (error) {
     if (!(error instanceof SafeError) || error.status >= 500)
-      await reportIssue("timekeeping.failed");
+      after(() => reportIssue("timekeeping.failed"));
     return safeError(error);
   }
 }

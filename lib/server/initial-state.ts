@@ -1,4 +1,5 @@
 import { defaultEmailTemplate } from "@/lib/email-templates";
+import { GMAIL_APPLICATION_QUERY } from "@/lib/intake-detector";
 import type { AppState, User } from "@/types";
 
 export const defaultIssuanceItems = [
@@ -27,9 +28,9 @@ export function initialState(): AppState {
         : email === official
           ? ""
           : "",
-    role: email === owner || email === official ? "Admin" : "Talent Acquisition",
-    title:
-      email === official ? "Workspace Administrator" : "HR Associate",
+    role:
+      email === owner || email === official ? "Admin" : "Talent Acquisition",
+    title: email === official ? "Workspace Administrator" : "HR Associate",
     active: true,
   }));
   return {
@@ -50,7 +51,7 @@ export function initialState(): AppState {
     notifications: [],
     importLimit: 100,
     importValidated: false,
-    intakeQuery: 'label:"HR - Applications" -in:spam -in:trash -in:sent',
+    intakeQuery: GMAIL_APPLICATION_QUERY,
     locations: [
       {
         id: "naga",

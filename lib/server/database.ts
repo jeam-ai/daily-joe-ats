@@ -4,6 +4,7 @@ import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { Pool } from "pg";
+import { attachDatabasePool } from "@vercel/functions";
 import { SafeError } from "./config";
 import { sheetsPrimary } from "./sheets-gateway";
 import { sheetsTransaction } from "./sheets-database";
@@ -169,14 +170,13 @@ async function databaseTransaction<T>(
         // 20 total connections, so one idle connection per instance is safer
         // than multiplying a 2-client pool by concurrent route instances.
         max: process.env.VERCEL ? 1 : 5,
-        idleTimeoutMillis:
-          process.env.VERCEL && aiven ? 1 : process.env.VERCEL ? 1000 : 10000,
-        maxUses: process.env.VERCEL && aiven ? 1 : 0,
+        idleTimeoutMillis: process.env.VERCEL ? 5000 : 10000,
         connectionTimeoutMillis: 10000,
         statement_timeout: 30000,
         query_timeout: 35000,
         idle_in_transaction_session_timeout: 60000,
       });
+      if (process.env.VERCEL) attachDatabasePool(globalDb.djPool);
       console.info("PostgreSQL pool configured", {
         provider: aiven ? "aiven" : "other",
         pooled: connectionUrl === process.env.DATABASE_POOL_URL,
@@ -199,10 +199,24 @@ async function databaseTransaction<T>(
         await globalDb.djPool!.query(schema.join("; "));
       // One Gmail thread can legitimately contain multiple application
       // messages. Only the individual message id is an idempotency key.
-      await globalDb.djPool!.query(
-        "ALTER TABLE applications DROP CONSTRAINT IF EXISTS applications_gmail_thread_id_key",
+      // Check first: even an ALTER ... IF EXISTS that does nothing requires
+      // an exclusive table lock. Cold route instances must remain read-only
+      // once migrations are complete, especially during attendance uploads.
+      const constraints = await globalDb.djPool!.query(
+        "SELECT conname FROM pg_constraint WHERE conrelid=to_regclass('applications') AND conname IN ('applications_gmail_thread_id_key','applications_stage_valid','applications_status_valid')",
       );
-      await globalDb.djPool!.query(`
+      const constraintNames = new Set(
+        constraints.rows.map((row) => row.conname),
+      );
+      if (constraintNames.has("applications_gmail_thread_id_key"))
+        await globalDb.djPool!.query(
+          "ALTER TABLE applications DROP CONSTRAINT IF EXISTS applications_gmail_thread_id_key",
+        );
+      if (
+        !constraintNames.has("applications_stage_valid") ||
+        !constraintNames.has("applications_status_valid")
+      )
+        await globalDb.djPool!.query(`
         DO $$ BEGIN
           IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='applications_stage_valid') THEN
             ALTER TABLE applications ADD CONSTRAINT applications_stage_valid
@@ -220,6 +234,7 @@ async function databaseTransaction<T>(
     });
     await globalDb.djSchemaReady;
     const client = await globalDb.djPool.connect();
+    let broken = false;
     try {
       await client.query(
         options.readOnly
@@ -239,14 +254,16 @@ async function databaseTransaction<T>(
       await client.query("COMMIT");
       return result;
     } catch (error) {
-      await client.query("ROLLBACK");
+      // A disconnected client cannot roll back. Preserve the original cause
+      // so callers can classify and recover from the database interruption.
+      await client.query("ROLLBACK").catch(() => {
+        broken = true;
+      });
       throw error;
     } finally {
-      // Direct Aiven services have a small account-wide connection limit. A
-      // Vercel invocation cannot safely keep an idle client while several UI
-      // requests or background tasks run in parallel, so release it at the
-      // server boundary instead of letting cold instances accumulate clients.
-      client.release(aiven && !!process.env.VERCEL);
+      // Reuse healthy TLS connections for auth, reads and writes in one request.
+      // attachDatabasePool releases idle clients before Vercel suspends it.
+      client.release(broken);
     }
   }
   if (process.env.VERCEL)
@@ -334,11 +351,12 @@ function retryableSheetsConflict(error: unknown) {
 export async function retryableTransaction<T>(
   fn: (tx: Transaction) => Promise<T>,
   attempts = 7,
+  options: { lockKey?: number } = {},
 ) {
   let lastError: unknown;
   for (let attempt = 0; attempt < attempts; attempt++) {
     try {
-      return await transaction(fn);
+      return await transaction(fn, options);
     } catch (error) {
       lastError = error;
       // This helper is restricted to callbacks with no external side effects.
@@ -427,4 +445,26 @@ export async function putRecord(
     "INSERT INTO records(collection,id,payload) VALUES($1,$2,$3) ON CONFLICT(collection,id) DO UPDATE SET payload=excluded.payload",
     [collection, id, JSON.stringify(value)],
   );
+}
+export async function putRecords(
+  tx: Transaction,
+  collection: string,
+  entries: { id: string; value: unknown }[],
+) {
+  for (let offset = 0; offset < entries.length; offset += 200) {
+    const chunk = entries.slice(offset, offset + 200);
+    const values = chunk.flatMap(({ id, value }) => [
+      collection,
+      id,
+      JSON.stringify(value),
+    ]);
+    await tx.query(
+      "INSERT INTO records(collection,id,payload) VALUES" +
+        chunk
+          .map((_, i) => `($${i * 3 + 1},$${i * 3 + 2},$${i * 3 + 3})`)
+          .join(",") +
+        " ON CONFLICT(collection,id) DO UPDATE SET payload=excluded.payload",
+      values,
+    );
+  }
 }

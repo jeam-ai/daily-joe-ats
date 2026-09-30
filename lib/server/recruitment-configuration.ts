@@ -1,4 +1,8 @@
 import type { AppState, QualificationTemplate } from "@/types";
+import {
+  applicationSearchQuery,
+  GMAIL_APPLICATION_QUERY,
+} from "@/lib/intake-detector";
 
 const baselineTemplates: QualificationTemplate[] = [
   {
@@ -99,23 +103,20 @@ const key = (value: string) =>
     .trim();
 const legacyIntakeQuery =
   "has:attachment {subject:application subject:applying subject:resume subject:cv} -in:spam -in:trash -in:sent";
-const labeledIntakeQuery =
-  'label:"HR - Applications" -in:spam -in:trash -in:sent';
+// Label-free detection is the default for both new workspaces and old installs.
 
 /**
  * Older releases encouraged subject and attachment gates. Those gates are not
- * safe for this mailbox: an application can be deliberately labelled by HR
- * while using a person's name, a branch name, or no subject at all. Treat
+ * suitable for this mailbox: applications can use a person's name, a branch
+ * name, or no subject at all, and no HR label is required. Treat
  * those shipped-style filters as legacy even if spacing or one of the subject
- * terms was edited, but leave a real label-based HR query alone.
+ * terms was edited, but preserve deliberate custom search filters.
  */
 function isRestrictiveLegacyIntakeQuery(query: string) {
   const normalized = query.trim().toLowerCase();
   if (!normalized || normalized === legacyIntakeQuery) return true;
   if (/\blabel\s*:/.test(normalized)) return false;
-  return /\bsubject\s*:\s*(application|applying|resume|cv)\b/.test(
-    normalized,
-  );
+  return /\bsubject\s*:\s*(application|applying|resume|cv)\b/.test(normalized);
 }
 
 /**
@@ -125,11 +126,13 @@ function isRestrictiveLegacyIntakeQuery(query: string) {
  */
 export function ensureRecruitmentConfiguration(state: AppState) {
   let updated = 0;
-  // The old subject-only query skipped valid applications titled with a name,
-  // branch, or no subject. Upgrade every variation of that legacy filter. A
-  // deliberately authored label-based HR query remains untouched.
-  if (isRestrictiveLegacyIntakeQuery(state.intakeQuery || "")) {
-    state.intakeQuery = labeledIntakeQuery;
+  // Replace shipped subject gates and the former HR label requirement.
+  const query = applicationSearchQuery(state.intakeQuery);
+  if (
+    query !== state.intakeQuery ||
+    isRestrictiveLegacyIntakeQuery(state.intakeQuery || "")
+  ) {
+    state.intakeQuery = GMAIL_APPLICATION_QUERY;
     updated++;
   }
   for (const baseline of baselineTemplates) {

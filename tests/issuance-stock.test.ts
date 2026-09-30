@@ -1,6 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { reconcileInventory } from "../lib/issuance-stock";
+import {
+  reconcileInventory,
+  statusAfterReleaseDate,
+} from "../lib/issuance-stock";
 import type { IssuanceInventory, IssuanceRecord } from "../types";
 
 const stock: IssuanceInventory = {
@@ -45,4 +48,34 @@ test("a verified physical-count override remains untouched", () => {
   );
   assert.equal(updated.issued, 4);
   assert.equal(updated.onHand, 11);
+});
+
+test("a valid release date completes Pending issuance without requiring a receipt", () => {
+  assert.equal(statusAfterReleaseDate("Pending", "2026-10-01"), "Issued");
+  for (const date of [undefined, "", "not-a-date", "2026-02-31"])
+    assert.equal(statusAfterReleaseDate("Pending", date), "Pending");
+  for (const status of [
+    "Issued",
+    "Returned",
+    "Incomplete",
+    "For Replacement",
+  ] as const)
+    assert.equal(statusAfterReleaseDate(status, "2026-10-01"), status);
+  const pending = release({
+    status: "Pending",
+    issuedAt: "2026-10-01",
+    receivedAt: undefined,
+    signed: false,
+  });
+  const [updated] = reconcileInventory(
+    [stock],
+    [
+      {
+        ...pending,
+        status: statusAfterReleaseDate(pending.status, pending.issuedAt),
+      },
+    ],
+  );
+  assert.equal(updated.issued, 2);
+  assert.equal(updated.onHand, 13);
 });

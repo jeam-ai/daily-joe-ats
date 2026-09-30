@@ -26,18 +26,14 @@ export const needsClassification = (record: OdooDay) =>
 
 /**
  * Normal overtime is monitored in its own HR process. It can be completed in
- * this cutoff workspace only when it has no other exception or source issue.
+ * this cutoff workspace only when Overtime is its single classification.
  * Ambiguous attendance, missing punches, duplicates, and 14+ hour overtime
  * remain individual decisions.
  */
 export const isNormalOvertimeForSeparateMonitoring = (record: OdooDay) =>
   record.review.status === "For Review" &&
-  record.results.includes("Overtime") &&
-  !record.results.includes("Excessive Overtime") &&
-  record.results.every((result) => result === "Overtime") &&
-  record.issues.every((issue) =>
-    /schedule information unavailable/i.test(issue),
-  );
+  record.results.length === 1 &&
+  record.results[0] === "Overtime";
 
 export const needsAction = (record: OdooDay) =>
   record.review.status === "For Review" || needsClassification(record);

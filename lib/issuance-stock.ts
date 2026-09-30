@@ -1,4 +1,21 @@
-import type { IssuanceInventory, IssuanceRecord } from "@/types";
+import type {
+  IssuanceInventory,
+  IssuanceRecord,
+  IssuanceStatus,
+} from "@/types";
+
+/** A released item is no longer pending; receipt and signature remain separate. */
+export function statusAfterReleaseDate(
+  status: IssuanceStatus,
+  issuedAt?: string,
+) {
+  const date = issuedAt?.trim() || "";
+  const validDate =
+    /^\d{4}-\d{2}-\d{2}$/.test(date) &&
+    Number.isFinite(Date.parse(date)) &&
+    new Date(date).toISOString().slice(0, 10) === date;
+  return status === "Pending" && validDate ? "Issued" : status;
+}
 
 const countedStatuses = new Set<IssuanceRecord["status"]>([
   "Issued",

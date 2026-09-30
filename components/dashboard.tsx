@@ -311,7 +311,7 @@ export function Dashboard() {
                 </h2>
                 <p>Finding the right people for every branch.</p>
               </div>
-              <Link className="text-link" href="/hiring-needs">
+              <Link prefetch={false} className="text-link" href="/hiring-needs">
                 View all <ArrowUpRight size={16} />
               </Link>
             </div>
@@ -361,7 +361,11 @@ export function Dashboard() {
                   : `Show all ${openNeeds.length} hiring needs`}
               </button>
             )}
-            <Link href="/hiring-needs?new=1" className="card-bottom-link">
+            <Link
+              prefetch={false}
+              href="/hiring-needs?new=1"
+              className="card-bottom-link"
+            >
               <Plus size={16} /> Create a hiring need
             </Link>
           </Card>
@@ -371,7 +375,7 @@ export function Dashboard() {
                 <h2>Recent applicant conversations</h2>
                 <p>Latest Gmail reply or application received first.</p>
               </div>
-              <Link className="text-link" href="/applications">
+              <Link prefetch={false} className="text-link" href="/applications">
                 View all <ArrowUpRight size={16} />
               </Link>
             </div>
@@ -463,7 +467,7 @@ export function Dashboard() {
                   </h2>
                   <p>Current counts from the editable On Hand register.</p>
                 </div>
-                <Link className="text-link" href="/issuance">
+                <Link prefetch={false} className="text-link" href="/issuance">
                   Open stock <ArrowUpRight size={16} />
                 </Link>
               </div>
@@ -474,7 +478,10 @@ export function Dashboard() {
                       <strong>{stock.category}</strong>
                       <span>Issuance inventory</span>
                     </div>
-                    <div className="home-stock-metrics" aria-label={`${stock.category} stock summary`}>
+                    <div
+                      className="home-stock-metrics"
+                      aria-label={`${stock.category} stock summary`}
+                    >
                       <span>
                         <small>Beginning</small>
                         <b>{stock.beginning}</b>
@@ -611,7 +618,12 @@ export function Dashboard() {
             {attention
               .filter((item) => item.count > 0)
               .map(({ title, description, count, href, icon: Icon }) => (
-                <Link href={href} className="attention-row" key={title}>
+                <Link
+                  prefetch={false}
+                  href={href}
+                  className="attention-row"
+                  key={title}
+                >
                   <span className="attention-icon">
                     <Icon size={18} />
                   </span>
@@ -630,7 +642,11 @@ export function Dashboard() {
                 </p>
               </div>
             )}
-            <Link className="attention-foot" href="/hiring-needs">
+            <Link
+              prefetch={false}
+              className="attention-foot"
+              href="/hiring-needs"
+            >
               {
                 state.hiringNeeds.filter(
                   (n) =>
@@ -653,6 +669,7 @@ export function Dashboard() {
             {upcoming.length ? (
               upcoming.map((interview) => (
                 <Link
+                  prefetch={false}
                   key={interview.id}
                   className="interview-row"
                   href={`/applications/${interview.applicationId}`}

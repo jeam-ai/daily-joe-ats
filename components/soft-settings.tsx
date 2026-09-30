@@ -12,6 +12,7 @@ import { useApp } from "./provider";
 import { Button, Card, Field, Input, Select, Modal, Badge } from "./ui";
 import { QualificationEditor } from "./qualification-editor";
 import { RichTextEditor } from "./rich-text";
+import { applicationSearchQuery } from "@/lib/intake-detector";
 export function UsersSettings() {
   const { state, update, saving } = useApp();
   const [editing, setEditing] = useState<User | null>(null);
@@ -465,7 +466,9 @@ export function IssuanceSettings() {
     const saved = await update((workspace) => ({
       ...workspace,
       issuanceItems: (workspace.issuanceItems || []).map((current) =>
-        current.id === item.id ? { ...draft, name: draft.name!.trim() } : current,
+        current.id === item.id
+          ? { ...draft, name: draft.name!.trim() }
+          : current,
       ),
     }));
     if (saved)
@@ -494,47 +497,49 @@ export function IssuanceSettings() {
           const draft = { ...item, ...drafts[item.id] };
           const changed = !!drafts[item.id];
           return (
-          <div className="issuance-item-setting" key={item.id}>
-            <Select
-              aria-label={`${item.name} category`}
-              disabled={!admin || saving}
-              value={draft.category}
-              onChange={(event) =>
-                setDraft(item.id, {
-                  category: event.target.value as IssuanceCategory,
-                })
-              }
-            >
-              <option>Uniform</option>
-              <option>Welcome Kit</option>
-              <option>Other</option>
-            </Select>
-            <Input
-              aria-label="Issuance item name"
-              disabled={!admin || saving}
-              value={draft.name}
-              onChange={(event) => setDraft(item.id, { name: event.target.value })}
-            />
-            <label className="checkbox-row">
-              <input
-                type="checkbox"
+            <div className="issuance-item-setting" key={item.id}>
+              <Select
+                aria-label={`${item.name} category`}
                 disabled={!admin || saving}
-                checked={draft.active}
+                value={draft.category}
                 onChange={(event) =>
-                  setDraft(item.id, { active: event.target.checked })
+                  setDraft(item.id, {
+                    category: event.target.value as IssuanceCategory,
+                  })
+                }
+              >
+                <option>Uniform</option>
+                <option>Welcome Kit</option>
+                <option>Other</option>
+              </Select>
+              <Input
+                aria-label="Issuance item name"
+                disabled={!admin || saving}
+                value={draft.name}
+                onChange={(event) =>
+                  setDraft(item.id, { name: event.target.value })
                 }
               />
-              Active
-            </label>
-            <Button
-              type="button"
-              variant="secondary"
-              disabled={!admin || saving || !changed || !draft.name?.trim()}
-              onClick={() => void save(item)}
-            >
-              {saving ? "Saving…" : "Save"}
-            </Button>
-          </div>
+              <label className="checkbox-row">
+                <input
+                  type="checkbox"
+                  disabled={!admin || saving}
+                  checked={draft.active}
+                  onChange={(event) =>
+                    setDraft(item.id, { active: event.target.checked })
+                  }
+                />
+                Active
+              </label>
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={!admin || saving || !changed || !draft.name?.trim()}
+                onClick={() => void save(item)}
+              >
+                {saving ? "Saving…" : "Save"}
+              </Button>
+            </div>
           );
         })}
         {!items.length && (
@@ -699,8 +704,12 @@ export function PreferencesSettings() {
                 state.currentUser?.role !== "Admin" || dataset === "demo"
               }
               name="query"
-              defaultValue={state.intakeQuery}
+              defaultValue={applicationSearchQuery(state.intakeQuery)}
             />
+            <small className="muted">
+              The default finds applications without Gmail labels. Messages are
+              checked for application intent or resume evidence before import.
+            </small>
           </Field>
           <label className="checkbox-label">
             <input

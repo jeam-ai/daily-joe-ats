@@ -97,13 +97,17 @@ export function Intake({ authorized = false }: { authorized?: boolean }) {
         <div>
           <h2>Gmail applicant import</h2>
           <p>
-            {state.applicationSummary?.real.active || 0} / 100 active
-            applicants
+            {state.applicationSummary?.real.active || 0} / 100 active applicants
           </p>
         </div>
         <Badge>Optional manual preview</Badge>
       </div>
       <div className="padded form-stack">
+        <p className="info-banner">
+          No Gmail label is required. Intake checks application wording and
+          resume evidence in incoming emails, including messages without a
+          subject. Unrelated messages and automatic replies are excluded.
+        </p>
         <p>
           Preview the newest 40 matching application emails from the official
           careers mailbox. Verify each name and map the application to a hiring

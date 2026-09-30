@@ -9,6 +9,7 @@ import {
   CheckCircle2,
   CircleAlert,
   ClipboardCheck,
+  Trash2,
 } from "lucide-react";
 import { useApp } from "./provider";
 import {
@@ -24,7 +25,7 @@ import {
   HelpTip,
 } from "./ui";
 import { RichTextContent, RichTextEditor } from "./rich-text";
-import { requestJson, downloadFile } from "@/lib/client-request";
+import { requestJson, downloadFile, RequestError } from "@/lib/client-request";
 import {
   defaultOdooRules,
   reviewStatuses,
@@ -278,9 +279,12 @@ export function Timekeeping() {
     [retainedSourceRows, setRetainedSourceRows] = useState<number[]>([]),
     [reviewNext, setReviewNext] = useState(false),
     [selectedOvertimeIds, setSelectedOvertimeIds] = useState<string[]>([]),
-    [confirmOvertimeCompletion, setConfirmOvertimeCompletion] =
-      useState(false),
+    [confirmOvertimeCompletion, setConfirmOvertimeCompletion] = useState(false),
     [overtimeCompletionNote, setOvertimeCompletionNote] = useState("");
+  const [overtimeScope, setOvertimeScope] = useState<"employee" | "cutoff">(
+    "employee",
+  );
+  const [confirmDeleteCutoff, setConfirmDeleteCutoff] = useState(false);
   function openRecord(record: OdooDay) {
     setDetail(record.id);
     setReview(record.review.status);
@@ -325,17 +329,36 @@ export function Timekeeping() {
     setJob(current);
     sessionStorage.setItem("djc-timekeeping-job", current.id);
     const until = Date.now() + 180000;
+    let interruptions = 0;
     while (current.status === "Queued" || current.status === "Running") {
       if (Date.now() > until)
         throw Error(
           "Processing is still being checked. Use Check progress to resume; your uploaded reports are saved.",
         );
       await new Promise((resolve) => setTimeout(resolve, 1500));
-      current = (
-        await requestJson<{ job: TimekeepingJob }>(
-          `/api/timekeeping?job=${current.id}`,
+      try {
+        current = (
+          await requestJson<{ job: TimekeepingJob }>(
+            `/api/timekeeping?job=${current.id}`,
+          )
+        ).job;
+        interruptions = 0;
+      } catch (error) {
+        if (
+          !(error instanceof RequestError) ||
+          ![0, 408, 503, 504].includes(error.status) ||
+          ++interruptions > 3
         )
-      ).job;
+          throw error;
+        setJob({
+          ...current,
+          detail: "Connection interrupted. Checking saved progress…",
+        });
+        await new Promise((resolve) =>
+          setTimeout(resolve, 1000 * 2 ** interruptions),
+        );
+        continue;
+      }
       setJob(current);
     }
     if (current.status === "Failed")
@@ -438,9 +461,17 @@ export function Timekeeping() {
   const normalOvertimeRows = employeeRows.filter(
     isNormalOvertimeForSeparateMonitoring,
   );
+  const cutoffOvertimeRows = records.filter(
+    isNormalOvertimeForSeparateMonitoring,
+  );
+  const completionRows =
+    overtimeScope === "cutoff" ? cutoffOvertimeRows : selectedNormalOvertime;
+  const completionEmployees = new Set(completionRows.map(key)).size;
   const allNormalOvertimeSelected =
     normalOvertimeRows.length > 0 &&
-    normalOvertimeRows.every((record) => selectedOvertimeIds.includes(record.id));
+    normalOvertimeRows.every((record) =>
+      selectedOvertimeIds.includes(record.id),
+    );
   function toggleAllNormalOvertime() {
     const visibleIds = new Set(normalOvertimeRows.map((record) => record.id));
     setSelectedOvertimeIds((current) =>
@@ -884,12 +915,17 @@ export function Timekeeping() {
                       }),
                     );
                     setBatch(saved.batch);
-                    setBatches(
-                      (
-                        await requestJson<{ batches: BatchIndex[] }>(
-                          "/api/timekeeping",
-                        )
-                      ).batches,
+                    setBatches((current) =>
+                      current.map((index) =>
+                        index.id === saved.batch.id
+                          ? {
+                              ...index,
+                              savedAt: saved.batch.savedAt,
+                              retentionExpiresAt:
+                                saved.batch.retentionExpiresAt,
+                            }
+                          : index,
+                      ),
                     );
                     notify(
                       "Cutoff checkpoint saved. You can resume it from Saved cutoffs anytime before its retention deadline.",
@@ -899,6 +935,13 @@ export function Timekeeping() {
               >
                 <Save size={16} />
                 Save checkpoint
+              </Button>
+              <Button
+                variant="danger"
+                disabled={!!busy}
+                onClick={() => setConfirmDeleteCutoff(true)}
+              >
+                <Trash2 size={16} /> Delete saved cutoff
               </Button>
               {["xlsx", "csv"].map((format) => (
                 <Button
@@ -1242,6 +1285,30 @@ export function Timekeeping() {
                   </button>
                 ))}
               </div>
+              <div className="timekeeping-employee-bulk-action">
+                <div>
+                  <strong>Overtime-only mass completion</strong>
+                  <p className="muted">
+                    Across all employees in this cutoff. Exactly one
+                    classification: Overtime. Records with Multiple Entries or
+                    any other classification stay for review.
+                  </p>
+                </div>
+                <Button
+                  variant="secondary"
+                  disabled={!cutoffOvertimeRows.length || !!busy}
+                  onClick={() => {
+                    setOvertimeScope("cutoff");
+                    setOvertimeCompletionNote(
+                      "Overtime-only records reviewed; approval is tracked in the separate overtime-monitoring process.",
+                    );
+                    setConfirmOvertimeCompletion(true);
+                  }}
+                >
+                  <CheckCircle2 size={16} /> Complete all overtime-only (
+                  {cutoffOvertimeRows.length})
+                </Button>
+              </div>
             </details>
           </section>
           <details className="card padded spaced timekeeping-source-details">
@@ -1387,8 +1454,9 @@ export function Timekeeping() {
                   <div>
                     <strong>Normal overtime completion</strong>
                     <p className="muted">
-                      Tick clean 9–13 hour overtime only. Approval remains in
-                      the separate overtime-monitoring process.
+                      Tick records with Overtime as their only classification.
+                      Approval remains in the separate overtime-monitoring
+                      process.
                     </p>
                   </div>
                   <div className="timekeeping-overtime-actions">
@@ -1405,6 +1473,7 @@ export function Timekeeping() {
                       variant="secondary"
                       disabled={!selectedNormalOvertime.length || !!busy}
                       onClick={() => {
+                        setOvertimeScope("employee");
                         setOvertimeCompletionNote(
                           "Normal overtime reviewed; approval is tracked in the separate overtime-monitoring process.",
                         );
@@ -1686,22 +1755,95 @@ export function Timekeeping() {
           </Card>
         </>
       )}
+      {confirmDeleteCutoff && batch && (
+        <Modal
+          title="Permanently delete saved cutoff?"
+          busy={!!busy}
+          onClose={() => setConfirmDeleteCutoff(false)}
+        >
+          <p>
+            <strong>
+              {date(batch.period.start)} – {date(batch.period.end)}
+            </strong>{" "}
+            · {batch.records.length} attendance records
+          </p>
+          <p>
+            This permanently removes this cutoff’s analysis, saved versions,
+            attendance records, review notes and related processing data from
+            the database. It cannot be restored. Export it first if you need a
+            copy.
+          </p>
+          <div className="modal-actions">
+            <Button
+              variant="secondary"
+              onClick={() => setConfirmDeleteCutoff(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="danger"
+              disabled={!!busy}
+              onClick={() =>
+                void run("Deleting saved cutoff", async () => {
+                  const id = batch.id;
+                  await requestJson(
+                    "/api/timekeeping",
+                    json({
+                      action: "delete-cutoff",
+                      id,
+                      revision: batch.revision,
+                      confirmed: true,
+                    }),
+                  );
+                  setBatches((current) =>
+                    current.filter((index) => index.id !== id),
+                  );
+                  setBatch(null);
+                  setPreview(null);
+                  setEmployee("");
+                  setDetail("");
+                  setSelectedOvertimeIds([]);
+                  setJob(null);
+                  sessionStorage.removeItem("djc-timekeeping-job");
+                  const url = new URL(window.location.href);
+                  url.searchParams.delete("batch");
+                  window.history.replaceState(null, "", url);
+                  setConfirmDeleteCutoff(false);
+                  notify("Saved cutoff permanently deleted from the database.");
+                  void refresh({ background: true });
+                })
+              }
+            >
+              <Trash2 size={16} /> Permanently delete
+            </Button>
+          </div>
+        </Modal>
+      )}
       {confirmOvertimeCompletion && batch && (
         <Modal
-          title="Complete normal overtime review"
+          title={
+            overtimeScope === "cutoff"
+              ? "Complete all overtime-only records"
+              : "Complete selected overtime-only records"
+          }
           busy={!!busy}
           onClose={() => setConfirmOvertimeCompletion(false)}
         >
           <p>
-            Mark <strong>{selectedNormalOvertime.length}</strong> selected
-            normal-overtime record
-            {selectedNormalOvertime.length === 1 ? "" : "s"} as completed
-            for <strong>{employeeRows[0]?.employee || "this employee"}</strong>?
+            Mark <strong>{completionRows.length}</strong> overtime-only record
+            {completionRows.length === 1 ? "" : "s"} completed for{" "}
+            <strong>
+              {overtimeScope === "cutoff"
+                ? completionEmployees + " employees across this entire cutoff"
+                : employeeRows[0]?.employee || "this employee"}
+            </strong>
+            ?
           </p>
           <p className="muted">
-            This does not approve overtime or alter Odoo. It removes only clean
-            9–13 hour overtime from this cutoff's active queue because approval
-            is verified in the separate overtime-monitoring process.
+            Only records with exactly one classification, Overtime, are
+            included. Mixed classifications, including Overtime with Multiple
+            Entries, remain for review. Overtime approval stays in the separate
+            monitoring process.
           </p>
           <Field label="Completion note">
             <RichTextEditor
@@ -1719,7 +1861,11 @@ export function Timekeeping() {
               Cancel
             </Button>
             <Button
-              disabled={!overtimeCompletionNote.trim() || !!busy}
+              disabled={
+                !completionRows.length ||
+                !overtimeCompletionNote.trim() ||
+                !!busy
+              }
               onClick={() =>
                 void run("Completing normal overtime", async () => {
                   const result = await requestJson<{ batch: OdooBatch }>(
@@ -1728,8 +1874,15 @@ export function Timekeeping() {
                       action: "complete-normal-overtime",
                       id: batch.id,
                       revision: batch.revision,
-                      employeeKey: employee,
-                      recordIds: selectedNormalOvertime.map((record) => record.id),
+                      scope: overtimeScope,
+                      ...(overtimeScope === "employee"
+                        ? {
+                            employeeKey: employee,
+                            recordIds: completionRows.map(
+                              (record) => record.id,
+                            ),
+                          }
+                        : {}),
                       note: overtimeCompletionNote,
                     }),
                   );
@@ -1737,7 +1890,7 @@ export function Timekeeping() {
                   setSelectedOvertimeIds([]);
                   setConfirmOvertimeCompletion(false);
                   notify(
-                    `${selectedNormalOvertime.length} normal overtime record${selectedNormalOvertime.length === 1 ? "" : "s"} marked completed for separate overtime monitoring.`,
+                    `${completionRows.length} overtime-only record${completionRows.length === 1 ? "" : "s"} marked completed for separate overtime monitoring.`,
                   );
                 })
               }

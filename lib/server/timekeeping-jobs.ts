@@ -87,17 +87,22 @@ export async function createTimekeepingJob(input: Input, user: User) {
       "timekeeping_jobs",
       id,
     );
-    // Upload previews expire, so a later upload must be allowed to produce a new preview.
-    if (
-      previous &&
-      !(
-        previous.kind === "upload" &&
-        previous.status === "Completed" &&
-        Date.now() - Date.parse(previous.completedAt || previous.createdAt) >
-          25 * 60000
-      )
-    )
-      return previous;
+    // Analysis consumes its preview. Re-uploading those same files must create
+    // another usable preview, even before the original 30-minute expiry.
+    if (previous) {
+      if (previous.kind !== "upload" || previous.status !== "Completed")
+        return previous;
+      const previewId = (previous.result as { id?: string } | undefined)?.id;
+      const encrypted =
+        previewId && (await readRecord<string>(tx, "odoo_uploads", previewId));
+      if (encrypted) {
+        const preview = unseal<{ expiresAt: number }>(
+          encrypted,
+          config().encryptionKey,
+        );
+        if (preview.expiresAt > Date.now()) return previous;
+      }
+    }
     const job: TimekeepingJob = {
       id,
       kind: input.kind,

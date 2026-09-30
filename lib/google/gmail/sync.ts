@@ -25,6 +25,7 @@ import { canManage } from "@/lib/data-policy";
 import { SafeError } from "@/lib/server/config";
 import { ensureRecruitmentConfiguration } from "@/lib/server/recruitment-configuration";
 import type { User } from "@/types";
+import { applicationSearchQuery } from "@/lib/intake-detector";
 
 export type IntakeSync = {
   status:
@@ -104,10 +105,10 @@ export const AUTOMATIC_INTAKE_BATCH_SIZE = MAX_GMAIL_IMPORT_BATCH_SIZE;
 // One minute after a confirmed commit gives Aiven time to release the prior
 // write while keeping current applicants moving through the queue promptly.
 export const INTAKE_COOLDOWN_MS = 60 * 1000;
-// Version 3 introduces a separate three-day latest/recovery cursor. The
+// Version 4 enables label-free detection and resets the candidate search cursor. The
 // rebase discards only unimported queue pointers; applications already
 // committed to the ATS remain untouched and are still de-duplicated.
-export const INTAKE_QUEUE_VERSION = 3;
+export const INTAKE_QUEUE_VERSION = 4;
 export const NEW_INTAKE_QUIET_PERIOD_MS = 6 * 60 * 60 * 1000;
 export const BACKFILL_MONTHLY_LIMIT = 60;
 const BACKFILL_QUEUE_POLICY_VERSION = 2;
@@ -249,7 +250,7 @@ export async function restartQueuedIntake(requestedBy: User) {
     Object.assign(job, empty(), {
       message:
         "Queued Gmail backlog cleared. Restarting from the newest eligible applications…",
-      query: workspace.intakeQuery?.trim(),
+      query: applicationSearchQuery(workspace.intakeQuery),
       queueVersion: INTAKE_QUEUE_VERSION,
     });
     delete job.page;
@@ -397,7 +398,7 @@ export async function syncIntake(
         "The connected account does not match the official mailbox.",
         401,
       );
-    const query = workspace.intakeQuery?.trim();
+    const query = applicationSearchQuery(workspace.intakeQuery);
     if (!query)
       throw new SafeError(
         "Set an application email filter in Recruitment settings.",
@@ -421,7 +422,7 @@ export async function syncIntake(
     // Always inspect the most recent three days before a saved historical
     // cursor. Gmail can return more than one 100-message page during a busy
     // day, so retain a separate recent cursor and recover every unimported
-    // labelled application in that window as *latest* work—not backfill.
+    // eligible application in that window as *latest* work—not backfill.
     stage = "mailbox-head";
     let recentQuery = `${query} newer_than:3d`;
     if (job.recentWindowQuery !== recentQuery) {
@@ -484,7 +485,7 @@ export async function syncIntake(
     }
     // Once the current mailbox head is known, continue through the remaining
     // recent pages. Append them behind the newest page so freshness still
-    // wins, while no labelled email from the last three days is skipped.
+    // wins, while no eligible email from the last three days is skipped.
     if (!fresh.length && !job.pending.length && job.recentPage) {
       stage = "mailbox-recent-page";
       const page = await gmail<{
@@ -507,7 +508,7 @@ export async function syncIntake(
         job.lastNewEligibleAt = now;
         delete job.backfillPausedReason;
         job.phase = "latest";
-        job.message = "Recovering recent labelled applications from Gmail…";
+        job.message = "Checking recent application candidates from Gmail…";
       }
     }
     job.headCheckedAt = now;
@@ -629,8 +630,6 @@ export async function syncIntake(
       deadline: now + Math.min(60000, Math.max(1000, budgetMs - 30000)),
       automatic: true,
       emailOnly: job.lastBatchPhase === "backfill",
-      requireApplicationEvidence:
-        !!job.latestDiagnostics?.recoveredFromRecentAttachments,
     });
     job.checked = preview.scanned;
     job.batchChecked = preview.scanned;

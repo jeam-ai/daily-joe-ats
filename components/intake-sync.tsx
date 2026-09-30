@@ -254,7 +254,7 @@ export function IntakeSyncStatus() {
               <p className="intake-diagnostics">
                 {job.latestDiagnostics.recoveredFromRecentAttachments
                   ? "Configured label returned no recent messages; recent resume attachment recovery:"
-                  : "Latest labelled scan:"}{" "}
+                  : "Latest application scan:"}{" "}
                 {job.latestDiagnostics.matching} found ·{" "}
                 {job.latestDiagnostics.available} ready ·{" "}
                 {job.latestDiagnostics.alreadyImported} already imported ·{" "}

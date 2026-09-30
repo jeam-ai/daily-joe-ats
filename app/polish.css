@@ -2065,14 +2065,16 @@ td > small.muted {
   border-radius: 50%;
   color: var(--text-secondary);
 }
-.info-tooltip > [role="tooltip"] {
+.help-tooltip {
   display: none;
-  position: absolute;
-  left: 50%;
-  top: 28px;
-  transform: translateX(var(--tooltip-translate-x, -50%));
-  width: min(320px, 75vw);
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  box-sizing: border-box;
+  width: min(320px, calc(100vw - 32px));
   max-width: calc(100vw - 32px);
+  max-height: calc(100dvh - 32px);
+  overflow: auto;
   padding: 12px;
   background: var(--surface-elevated);
   color: var(--text-primary);
@@ -2084,11 +2086,11 @@ td > small.muted {
   font-weight: 400;
   line-height: 1.5;
   text-align: left;
+  white-space: normal;
   overflow-wrap: anywhere;
   pointer-events: none;
 }
-.info-tooltip:hover > [role="tooltip"],
-.info-tooltip:focus > [role="tooltip"] {
+.help-tooltip:popover-open {
   display: block;
 }
 .ai-result {
@@ -2773,16 +2775,6 @@ progress {
   vertical-align: middle;
 }
 
-/* Help text is intentionally allowed to rise above its card. Card shells
-   otherwise clip an absolutely positioned tooltip before it can be read. */
-.card:has(.info-tooltip),
-.people-workspace:has(.info-tooltip),
-.timekeeping-review-card:has(.info-tooltip),
-.settings-workspace-content > .card:has(.info-tooltip),
-.settings-workspace-content > .section-boundary > .card:has(.info-tooltip) {
-  overflow: visible;
-}
-
 /* HR hub: employee records, onboarding, global search, and saved report views. */
 .people-help-note {
   display: flex;
@@ -3343,7 +3335,7 @@ progress {
 /* Settings */
 .settings-workspace-layout {
   width: 100%;
-  max-width: 1130px;
+  max-width: none;
   min-width: 0;
   align-items: start;
   gap: 24px;

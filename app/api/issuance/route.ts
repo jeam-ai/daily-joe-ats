@@ -2,9 +2,16 @@ import ExcelJS from "exceljs";
 import { requireOrigin, requireUser } from "@/lib/auth/session";
 import { SafeError } from "@/lib/server/config";
 import { safeError } from "@/lib/server/response";
-import { putRecord, transaction, type Transaction } from "@/lib/server/database";
+import {
+  putRecord,
+  transaction,
+  type Transaction,
+} from "@/lib/server/database";
 import { audit, getState } from "@/lib/server/repository";
-import { reconcileInventory } from "@/lib/issuance-stock";
+import {
+  reconcileInventory,
+  statusAfterReleaseDate,
+} from "@/lib/issuance-stock";
 import type {
   IssuanceCatalogItem,
   IssuanceCategory,
@@ -213,7 +220,10 @@ export async function importIssuanceWorkbook(file: File, actor: string) {
         branch: text(sheetValue(row, headers, "store name")?.text) || undefined,
         condition:
           text(sheetValue(row, headers, "item status")?.text) || undefined,
-        status: receivedAt ? "Issued" : "Pending",
+        status: statusAfterReleaseDate(
+          receivedAt ? "Issued" : "Pending",
+          issuedAt,
+        ),
         issuedAt: issuedAt || undefined,
         receivedAt: receivedAt || undefined,
         // The supplied issuance sheets represent items already released to
@@ -288,13 +298,24 @@ export async function importIssuanceWorkbook(file: File, actor: string) {
       (record) => !existing.has(sourceSignature(record)),
     );
     let acknowledgmentsMarked = 0;
+    let releasesUpdated = 0;
     const issuance = (state.issuance || []).map((record) => {
       const imported = records.find(
         (candidate) => sourceSignature(candidate) === sourceSignature(record),
       );
-      if (imported?.signed && !record.signed) {
-        acknowledgmentsMarked++;
-        return { ...record, signed: true, updatedAt: now };
+      const status = imported
+        ? statusAfterReleaseDate(record.status, record.issuedAt)
+        : record.status;
+      const markSigned = imported?.signed && !record.signed;
+      if (markSigned || status !== record.status) {
+        if (markSigned) acknowledgmentsMarked++;
+        if (status !== record.status) releasesUpdated++;
+        return {
+          ...record,
+          status,
+          signed: record.signed || !!imported?.signed,
+          updatedAt: now,
+        };
       }
       return record;
     });
@@ -340,6 +361,7 @@ export async function importIssuanceWorkbook(file: File, actor: string) {
       unique.length ||
       inventoryUpdated ||
       acknowledgmentsMarked ||
+      releasesUpdated ||
       catalogAdded
     ) {
       state.issuance = [...issuance, ...unique];
@@ -360,6 +382,7 @@ export async function importIssuanceWorkbook(file: File, actor: string) {
       duplicatesSkipped: records.length - unique.length,
       inventoryUpdated,
       acknowledgmentsMarked,
+      releasesUpdated,
       catalogAdded,
       sheets: [...issuanceSheets, ...(onHandSheet ? [onHandSheet] : [])].map(
         (sheet) => sheet.name,
@@ -373,6 +396,7 @@ export async function importIssuanceWorkbook(file: File, actor: string) {
       skipped: records.length - unique.length,
       inventoryUpdated,
       acknowledgmentsMarked,
+      releasesUpdated,
       catalogAdded,
     };
   });
@@ -410,6 +434,7 @@ export async function POST(request: Request) {
       if (!employeeName || !item || !Number.isInteger(quantity) || quantity < 1)
         throw new SafeError("Enter an employee, item, and whole quantity.");
       const now = new Date().toISOString();
+      const issuedAt = text(body.issuedAt, 20) || undefined;
       const record: IssuanceRecord = {
         id: crypto.randomUUID(),
         category,
@@ -421,8 +446,8 @@ export async function POST(request: Request) {
         size: text(body.size) || undefined,
         quantity,
         condition: text(body.condition) || undefined,
-        status,
-        issuedAt: text(body.issuedAt, 20) || undefined,
+        status: statusAfterReleaseDate(status, issuedAt),
+        issuedAt,
         receivedAt: text(body.receivedAt, 20) || undefined,
         signed: body.signed === true,
         returnedAt: text(body.returnedAt, 20) || undefined,
@@ -595,8 +620,8 @@ export async function POST(request: Request) {
           record.size = text(body.size) || undefined;
           record.quantity = quantity;
           record.condition = text(body.condition) || undefined;
-          record.status = status;
           record.issuedAt = text(body.issuedAt, 20) || undefined;
+          record.status = statusAfterReleaseDate(status, record.issuedAt);
           record.signed = body.signed === true;
           record.receivedAt = text(body.receivedAt, 20) || undefined;
           record.returnedAt = text(body.returnedAt, 20) || undefined;
