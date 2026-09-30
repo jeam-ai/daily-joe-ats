@@ -63,10 +63,30 @@ export function IntakeSyncStatus() {
         timeZone: "UTC",
       }).format(new Date(`${job.backfillMonth}-01T00:00:00Z`))
     : "Standby";
-  // Gmail intake is owned by the daily server cron or an explicit Sync Now
-  // request. A visible tab is only a status monitor; it must not repeatedly
-  // start expensive Gmail work every time its status poll completes.
+  // Gmail intake remains automatic while HR is using the workspace. A browser
+  // profile claims one shared five-minute trigger, so several open tabs do
+  // not all start the same expensive Gmail pass.
   const idleStatusDelay = 5 * 60 * 1000;
+  const automaticRequestKey = "daily-joe-intake-automatic-requested-at";
+  function claimAutomaticRequest() {
+    try {
+      const lastRequested = Number(
+        window.localStorage.getItem(automaticRequestKey) || 0,
+      );
+      if (
+        Number.isFinite(lastRequested) &&
+        Date.now() - lastRequested < idleStatusDelay
+      )
+        return false;
+      window.localStorage.setItem(automaticRequestKey, String(Date.now()));
+      return true;
+    } catch {
+      // Storage may be unavailable in a restricted browser. The server still
+      // enforces the same cooldown, so a status tab never creates duplicate
+      // Gmail work.
+      return true;
+    }
+  }
   async function check() {
     const value = await requestJson<IntakeSync>("/api/intake/sync");
     setJob(value);
@@ -97,18 +117,48 @@ export function IntakeSyncStatus() {
       try {
         const value = await check();
         if (stopped) return;
-        delay =
-          value.status === "capacity"
-            ? idleStatusDelay
-            : ["checking", "processing"].includes(value.status)
-              ? // The server lease owns the work. Status reads do not need to
-                // poll every few seconds while a document batch is processing.
-                30000
-              : value.nextSyncAt && value.nextSyncAt > Date.now()
-                ? Math.max(30000, value.nextSyncAt - Date.now() + 100)
-                : value.nextBackfillAt && value.nextBackfillAt > Date.now()
-                  ? idleStatusDelay
-                  : idleStatusDelay;
+        const syncDue = !value.retryAt || value.retryAt <= Date.now();
+        const mayStartAutomaticSync =
+          syncDue &&
+          ![
+            "checking",
+            "processing",
+            "authorization",
+            "paused",
+            "capacity",
+          ].includes(value.status);
+        if (mayStartAutomaticSync && claimAutomaticRequest()) {
+          const result = await requestJson<{ queued: boolean }>(
+            "/api/intake/sync/run?automatic=1",
+            { method: "POST" },
+          );
+          if (stopped) return;
+          if (result.queued) {
+            setJob((current) =>
+              current
+                ? {
+                    ...current,
+                    status: "checking",
+                    message: "Automatic Gmail check queued…",
+                  }
+                : current,
+            );
+            delay = 30000;
+          }
+        } else {
+          delay =
+            value.status === "capacity"
+              ? idleStatusDelay
+              : ["checking", "processing"].includes(value.status)
+                ? // The server lease owns the work. Status reads do not need to
+                  // poll every few seconds while a document batch is processing.
+                  30000
+                : value.nextSyncAt && value.nextSyncAt > Date.now()
+                  ? Math.max(30000, value.nextSyncAt - Date.now() + 100)
+                  : value.nextBackfillAt && value.nextBackfillAt > Date.now()
+                    ? idleStatusDelay
+                    : idleStatusDelay;
+        }
         setError("");
       } catch {
         if (!stopped)
@@ -142,7 +192,9 @@ export function IntakeSyncStatus() {
         <div className="intake-heading">
           <div>
             <strong>Gmail intake</strong>
-            <span>Newest applications are checked first.</span>
+            <span>
+              New applications are checked automatically and newest is first.
+            </span>
           </div>
           <b
             className={`intake-state ${error ? "attention" : ""}`}
@@ -244,7 +296,7 @@ export function IntakeSyncStatus() {
                   setBusy(true);
                   try {
                     const result = await requestJson<{ job?: IntakeSync }>(
-                      "/api/intake/sync?reset=1",
+                      "/api/intake/sync/run?reset=1",
                       { method: "POST" },
                     );
                     if (result.job) setJob(result.job);
@@ -270,7 +322,7 @@ export function IntakeSyncStatus() {
               onClick={async () => {
                 setBusy(true);
                 try {
-                  await requestJson("/api/intake/sync?force=1", {
+                  await requestJson("/api/intake/sync/run?force=1", {
                     method: "POST",
                   });
                   setError("");

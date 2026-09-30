@@ -37,7 +37,7 @@ const config: NextConfig = {
       "./node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs",
     ],
     "/api/intake": ocrRuntimeFiles,
-    "/api/intake/sync": ocrRuntimeFiles,
+    "/api/intake/sync/run": ocrRuntimeFiles,
     "/api/cron/intake": ocrRuntimeFiles,
     "/api/auth/callback": ocrRuntimeFiles,
     "/api/system/extraction": ocrRuntimeFiles,
