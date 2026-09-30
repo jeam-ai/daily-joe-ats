@@ -37,6 +37,7 @@ import type {
   ScreeningCriterion as Criterion,
   Interview,
 } from "@/types";
+import type { EmailRecord } from "@/types/email";
 import {
   nextStage,
   transition,
@@ -188,22 +189,31 @@ export function ApplicantProfile({ id }: { id: string }) {
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [pendingDelivery, setPendingDelivery] = useState<{
+    emailId: string;
+    stage: string;
+  } | null>(null);
   const evidenceChecked = useRef(new Set<string>());
+  const initialApplicationLoad = useRef<string | null>(null);
   const [pendingChange, setPendingChange] = useState<{
     action: string;
     value: Application;
   } | null>(null);
   useEffect(() => {
-    if (
-      !state ||
-      state.applications.some((application) => application.id === id)
-    )
-      return;
+    if (!state || initialApplicationLoad.current === id) return;
+    initialApplicationLoad.current = id;
     let current = true;
     setDetailLoading(true);
-    ensureApplication(id)
+    // The workspace response is intentionally bounded, so a direct profile
+    // route may initially render from a same-user cached detail. Always read
+    // this one record once on mount to avoid showing a stale stage after a
+    // confirmed Gmail transition.
+    ensureApplication(id, true)
       .catch((cause) => {
-        if (current) setError((cause as Error).message);
+        if (current) {
+          initialApplicationLoad.current = null;
+          setError((cause as Error).message);
+        }
       })
       .finally(() => {
         if (current) setDetailLoading(false);
@@ -211,7 +221,7 @@ export function ApplicantProfile({ id }: { id: string }) {
     return () => {
       current = false;
     };
-  }, [state?.revision, state?.applications.length, id, ensureApplication]);
+  }, [state, id, ensureApplication]);
   useEffect(() => {
     const application = state?.applications.find((item) => item.id === id);
     if (
@@ -242,6 +252,51 @@ export function ApplicantProfile({ id }: { id: string }) {
     state?.currentUser,
     ensureApplication,
   ]);
+  useEffect(() => {
+    if (!pendingDelivery) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const checkDelivery = async () => {
+      try {
+        const result = await requestJson<{ emails: EmailRecord[] }>(
+          `/api/applicants/${id}/emails`,
+        );
+        const mail = result.emails.find(
+          (item) => item.id === pendingDelivery.emailId,
+        );
+        if (!mail || mail.status === "Queued" || mail.status === "Sending") {
+          timer = setTimeout(() => void checkDelivery(), 2500);
+          return;
+        }
+        if (cancelled) return;
+        setPendingDelivery(null);
+        await refresh({ background: true, force: true });
+        // Profiles outside the bounded workspace list are held in the detail
+        // cache. Fetch this record explicitly so a confirmed transition is
+        // never hidden behind a prior cached Screening-stage snapshot.
+        await ensureApplication(id, true);
+        if (mail.status === "Sent") {
+          notify(
+            `Email sent. Applicant automatically moved to ${pendingDelivery.stage}.`,
+          );
+          return;
+        }
+        notify(
+          mail.status === "Unconfirmed"
+            ? "Gmail could not confirm delivery. Review the email before retrying."
+            : "Gmail could not send the email. Review the delivery error before retrying.",
+          "error",
+        );
+      } catch {
+        if (!cancelled) timer = setTimeout(() => void checkDelivery(), 5000);
+      }
+    };
+    void checkDelivery();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [ensureApplication, id, notify, pendingDelivery, refresh]);
   if (!state) return <LoadingSkeleton />;
   const a = state.applications.find((a) => a.id === id);
   if (!a) if (detailLoading) return <LoadingSkeleton />;
@@ -397,29 +452,39 @@ export function ApplicantProfile({ id }: { id: string }) {
     setSaving(true);
     try {
       if (decision === "Proceed") {
-        const result = await requestJson<{ message: string }>(
-          `/api/applicants/${id}/proceed`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              expectedStage: app.stage,
-              confirmed: true,
-              scheduledAt: selectedDate
-                ? scheduledIso(selectedDate, state?.preferences.timezone)
-                : undefined,
-              note: decisionNote,
-              interviewer: String(
-                new FormData(e.currentTarget).get("interviewer") || "",
-              ),
-              templateId: template?.id,
-            }),
-          },
-        );
-        await refresh();
+        const result = await requestJson<{
+          message: string;
+          emailId?: string;
+          pendingStage?: string;
+        }>(`/api/applicants/${id}/proceed`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            expectedStage: app.stage,
+            confirmed: true,
+            scheduledAt: selectedDate
+              ? scheduledIso(selectedDate, state?.preferences.timezone)
+              : undefined,
+            note: decisionNote,
+            interviewer: String(
+              new FormData(e.currentTarget).get("interviewer") || "",
+            ),
+            templateId: template?.id,
+          }),
+        });
+        await refresh({ background: true });
         setDecision(null);
         setDecisionNote("");
-        notify(result.message);
+        if (result.emailId) {
+          setPendingDelivery({
+            emailId: result.emailId,
+            stage: result.pendingStage || next,
+          });
+          notify(
+            "Email delivery is in progress. This page will update automatically once Gmail confirms it was sent.",
+            "info",
+          );
+        } else notify(result.message);
         return;
       }
       const result = transition(app, decision, {
@@ -967,9 +1032,7 @@ export function ApplicantProfile({ id }: { id: string }) {
                       label: "Add Note",
                       onClick: () =>
                         document
-                          .querySelector<HTMLElement>(
-                            '[aria-label="HR Notes"]',
-                          )
+                          .querySelector<HTMLElement>('[aria-label="HR Notes"]')
                           ?.focus(),
                       disabled: !editable,
                     },

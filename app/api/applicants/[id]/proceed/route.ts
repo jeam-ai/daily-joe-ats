@@ -45,7 +45,7 @@ export async function POST(
     return Response.json({
       ...result,
       message: result.emailId
-        ? "Progression requested. The stage will advance after Gmail confirms the email was sent. Check Email History for delivery or retry."
+        ? "Email delivery is in progress. The applicant will advance automatically when Gmail confirms it was sent."
         : "Demo stage changed. No email sent.",
     });
   } catch (e) {
