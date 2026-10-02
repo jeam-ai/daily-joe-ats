@@ -25,11 +25,14 @@ import {
   previewOdoo,
   requireTimekeeping,
   reviewOdoo,
+  resolveEmployeeAttendance,
+  resolveZeroExpectedHours,
   odooRulesSchema,
 } from "@/lib/server/odoo";
 import { putRecord } from "@/lib/server/database";
 import { z } from "zod";
 import { deleteOdooCutoff } from "@/lib/server/timekeeping-delete";
+import { isZeroExpectedHoursSystemIssue } from "@/lib/odoo";
 export const runtime = "nodejs";
 export const maxDuration = 180;
 export async function GET(request: Request) {
@@ -136,8 +139,41 @@ export async function POST(request: Request) {
       after(() => runTimekeepingJob(job.id, user));
       return Response.json({ job }, { status: 202 });
     }
-    if (body.action === "review")
-      return Response.json({ batch: await reviewOdoo(body, user) });
+    if (body.action === "review" || body.action === "resolve-employee") {
+      const batch =
+        body.action === "review"
+          ? await reviewOdoo(body, user)
+          : await resolveEmployeeAttendance(body, user);
+      if (body.compact) {
+        const ids = new Set<string>(
+          body.action === "review"
+            ? [body.recordId]
+            : body.records.map((row: { recordId: string }) => row.recordId),
+        );
+        return Response.json({
+          id: batch.id,
+          revision: batch.revision,
+          records: batch.records.filter((row) => ids.has(row.id)),
+        });
+      }
+      return Response.json({ batch });
+    }
+    if (body.action === "resolve-zero-expected") {
+      const batch = await resolveZeroExpectedHours(body, user);
+      return Response.json(
+        body.compact
+          ? {
+              id: batch.id,
+              revision: batch.revision,
+              records: batch.records.filter(
+                (row) =>
+                  isZeroExpectedHoursSystemIssue(row) &&
+                  row.review.status === "Resolved",
+              ),
+            }
+          : { batch },
+      );
+    }
     if (body.action === "delete-cutoff")
       return Response.json(await deleteOdooCutoff(body, user));
     if (body.action === "complete-normal-overtime")

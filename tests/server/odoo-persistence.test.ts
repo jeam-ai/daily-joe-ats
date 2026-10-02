@@ -42,6 +42,7 @@ async function file(name: string, rows: unknown[][]) {
   b.addWorksheet("Report").addRows(rows);
   return { name, bytes: Buffer.from(await b.xlsx.writeBuffer()) };
 }
+
 test("combined Odoo uploads persist reviews, deduplicate exact reports, version changed rules and export auditable results", async () => {
   const raw = await file("Attendance.xlsx", [
     [
@@ -238,4 +239,65 @@ test("explicit payroll dates identify a cutoff even when its edge days have no e
     replacement.id,
   );
   await assert.rejects(getOdooBatch(saved.id, user), /Analysis not found/);
+});
+
+test("reanalysis retains a confirmed main attendance row and its correction history", async () => {
+  const raw = await file("QA-duplicate-Attendance.xlsx", [
+    [
+      "Employee",
+      "Check In",
+      "Check Out",
+      "Worked Hours",
+      "Over Time",
+      "Extra Hours",
+    ],
+    ["QA Duplicate", "2026-09-05 08:00:00", "2026-09-05 17:00:00", 9, 1, 0],
+    ["QA Duplicate", "2026-09-05 08:00:00", "2026-09-05 17:00:00", 9, 1, 0],
+  ]);
+  const pivot = await file("QA-duplicate-Pivot.xlsx", [
+    [null, "September 2026"],
+    [null, "Worked Hours", "Expected Hours", "Difference", "Balance"],
+    ["QA Duplicate", 9, 8, 1, 1],
+    ["05 Sep 2026", 9, 8, 1, 1],
+  ]);
+  const preview = await previewOdoo(raw, pivot, user);
+  const initial = await analyzeOdooUpload(
+    preview.id,
+    defaultOdooRules,
+    {},
+    user,
+  );
+  const corrected = await reviewOdoo(
+    {
+      id: initial.id,
+      revision: initial.revision,
+      recordId: initial.records[0].id,
+      status: "Resolved",
+      duplicateResolution: {
+        retainedSourceRows: [2],
+        disregardedSourceRows: [3],
+      },
+    },
+    user,
+  );
+  assert.equal(corrected.records[0].raw.length, 1);
+  const nextPreview = await previewOdoo(raw, pivot, user);
+  const updated = await analyzeOdooUpload(
+    nextPreview.id,
+    { ...defaultOdooRules, graceMinutes: 1 },
+    {},
+    user,
+  );
+  assert.equal(updated.records[0].review.status, "Resolved");
+  assert.equal(updated.records[0].raw.length, 1);
+  assert.equal(updated.records[0].worked, 9);
+  assert.ok(!updated.records[0].results.includes("Multiple Entries"));
+  assert.equal(
+    updated.records[0].review.duplicateResolution?.disregardedRecords?.length,
+    1,
+  );
+  assert.match(
+    (await exportOdoo(updated, true)).toString(),
+    /Previously multiple entries; corrected/,
+  );
 });

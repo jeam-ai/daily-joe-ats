@@ -16,35 +16,68 @@ function escapeHtml(value: string) {
 }
 
 function inline(value: string) {
-  let rendered = escapeHtml(value);
-  // Keep the supported toolbar output deliberately small and predictable.
-  rendered = rendered.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
-  rendered = rendered.replace(/__([^_]+)__/g, "<u>$1</u>");
-  rendered = rendered.replace(/~~([^~]+)~~/g, "<s>$1</s>");
-  rendered = rendered.replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, "<em>$1</em>");
-  return rendered;
+  const source = escapeHtml(value);
+  const tokens = [
+    ["**", "strong"],
+    ["__", "u"],
+    ["~~", "s"],
+    ["*", "em"],
+  ] as const;
+  // Parse nested toolbar marks, including bold + italic (***text***). Regex
+  // replacements lose nested formatting when the editor is blurred or reopened.
+  const parse = (
+    start: number,
+    closing?: string,
+  ): { html: string; end: number; closed: boolean } => {
+    let html = "",
+      index = start;
+    while (index < source.length) {
+      if (closing && source.startsWith(closing, index))
+        return { html, end: index + closing.length, closed: true };
+      const token = tokens.find(([marker]) => source.startsWith(marker, index));
+      if (token) {
+        const [marker, tag] = token;
+        const nested = parse(index + marker.length, marker);
+        if (nested.closed) {
+          html += `<${tag}>${nested.html}</${tag}>`;
+          index = nested.end;
+          continue;
+        }
+        html += marker;
+        index += marker.length;
+      } else html += source[index++];
+    }
+    return { html, end: index, closed: false };
+  };
+  return parse(0).html;
 }
 
 /** Render the supported persisted format as already-sanitized HTML. */
 export function richTextToHtml(value?: string) {
-  const lines = String(value || "").replace(/\r\n?/g, "\n").split("\n");
+  const lines = String(value || "")
+    .replace(/\r\n?/g, "\n")
+    .split("\n");
   const blocks: string[] = [];
   let paragraph: string[] = [];
-  let list: { type: "ul" | "ol"; items: string[] } | null = null;
+  const lists: { type: "ul" | "ol"; indent: number; itemOpen: boolean }[] = [];
   const flushParagraph = () => {
     if (!paragraph.length) return;
     blocks.push(`<p>${paragraph.map(inline).join("<br />")}</p>`);
     paragraph = [];
   };
-  const flushList = () => {
+  const closeList = () => {
+    const list = lists.pop();
     if (!list) return;
-    blocks.push(`<${list.type}>${list.items.map((item) => `<li>${inline(item)}</li>`).join("")}</${list.type}>`);
-    list = null;
+    if (list.itemOpen) blocks.push("</li>");
+    blocks.push(`</${list.type}>`);
+  };
+  const flushList = () => {
+    while (lists.length) closeList();
   };
   for (const line of lines) {
     const quote = /^>\s?(.*)$/.exec(line);
-    const bullet = /^[-*]\s+(.*)$/.exec(line);
-    const numbered = /^\d+[.)]\s+(.*)$/.exec(line);
+    const bullet = /^(\s*)[-*]\s+(.*)$/.exec(line);
+    const numbered = /^(\s*)\d+[.)]\s+(.*)$/.exec(line);
     if (quote) {
       flushParagraph();
       flushList();
@@ -52,11 +85,21 @@ export function richTextToHtml(value?: string) {
     } else if (bullet || numbered) {
       flushParagraph();
       const type: "ul" | "ol" = numbered ? "ol" : "ul";
-      if (!list || list.type !== type) {
-        flushList();
-        list = { type, items: [] };
+      const match = (bullet || numbered)!;
+      const indent = match[1].replace(/\t/g, "  ").length;
+      while (lists.length && lists.at(-1)!.indent > indent) closeList();
+      if (lists.at(-1)?.indent === indent && lists.at(-1)?.type !== type)
+        closeList();
+      if (!lists.length || lists.at(-1)!.indent < indent) {
+        blocks.push(
+          `<${type}${!lists.length && indent > 0 ? ` style="margin-left: ${(indent / 2) * 24}px"` : ""}>`,
+        );
+        lists.push({ type, indent, itemOpen: false });
       }
-      list.items.push((bullet || numbered)![1]);
+      const list = lists.at(-1)!;
+      if (list.itemOpen) blocks.push("</li>");
+      blocks.push(`<li>${inline(match[2])}`);
+      list.itemOpen = true;
     } else if (!line.trim()) {
       flushParagraph();
       flushList();
@@ -73,32 +116,62 @@ export function richTextToHtml(value?: string) {
 /** Plain-text alternative for email clients and exports that do not render HTML. */
 export function richTextToPlainText(value?: string) {
   return String(value || "")
-    .replace(/\*\*([^*]+)\*\*/g, "$1")
-    .replace(/__([^_]+)__/g, "$1")
-    .replace(/~~([^~]+)~~/g, "$1")
-    .replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, "$1")
+    .split("\n")
+    .map((line) =>
+      inline(line)
+        .replace(/<\/?(?:strong|em|u|s)>/g, "")
+        .replace(/&lt;/g, "<")
+        .replace(/&gt;/g, ">")
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .replace(/&amp;/g, "&"),
+    )
+    .join("\n")
     .replace(/^>\s?/gm, "")
     .trim();
 }
 
 /** Turn toolbar-produced HTML back into the compact persisted format. */
 export function editorHtmlToRichText(root: HTMLElement) {
-  const read = (node: Node): string => {
-    if (node.nodeType === Node.TEXT_NODE) return node.textContent || "";
+  type Marks = {
+    bold?: boolean;
+    italic?: boolean;
+    underline?: boolean;
+    strike?: boolean;
+  };
+  const read = (node: Node, inherited: Marks = {}): string => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      let text = node.textContent || "";
+      if (!text) return "";
+      if (inherited.italic) text = `*${text}*`;
+      if (inherited.bold) text = `**${text}**`;
+      if (inherited.underline) text = `__${text}__`;
+      if (inherited.strike) text = `~~${text}~~`;
+      return text;
+    }
     if (!(node instanceof HTMLElement)) return "";
-    const content = Array.from(node.childNodes).map(read).join("");
+    const marks = { ...inherited };
+    if (["STRONG", "B"].includes(node.tagName)) marks.bold = true;
+    if (["EM", "I"].includes(node.tagName)) marks.italic = true;
+    if (node.tagName === "U") marks.underline = true;
+    if (["S", "STRIKE"].includes(node.tagName)) marks.strike = true;
+    // Browsers may produce styled spans rather than semantic tags. Explicit
+    // normal styles also override an ancestor when a toolbar mark is removed.
+    if (node.style.fontWeight)
+      marks.bold =
+        node.style.fontWeight === "bold" ||
+        Number(node.style.fontWeight) >= 600;
+    if (node.style.fontStyle) marks.italic = node.style.fontStyle === "italic";
+    const decoration =
+      node.style.textDecorationLine || node.style.textDecoration;
+    if (decoration) {
+      marks.underline = decoration.includes("underline");
+      marks.strike = decoration.includes("line-through");
+    }
+    const content = Array.from(node.childNodes)
+      .map((child) => read(child, marks))
+      .join("");
     switch (node.tagName) {
-      case "STRONG":
-      case "B":
-        return `**${content}**`;
-      case "EM":
-      case "I":
-        return `*${content}*`;
-      case "U":
-        return `__${content}__`;
-      case "S":
-      case "STRIKE":
-        return `~~${content}~~`;
       case "BR":
         return "\n";
       case "BLOCKQUOTE":
@@ -110,13 +183,8 @@ export function editorHtmlToRichText(root: HTMLElement) {
       case "LI":
         return content.trim();
       case "UL":
-        return `${Array.from(node.children)
-          .map((item) => `- ${read(item).trim()}`)
-          .join("\n")}\n\n`;
       case "OL":
-        return `${Array.from(node.children)
-          .map((item, index) => `${index + 1}. ${read(item).trim()}`)
-          .join("\n")}\n\n`;
+        return `${readList(node, marks, Math.max(0, Math.round(parseFloat(node.style.marginLeft || "0") / 24)))}\n\n`;
       case "DIV":
       case "P":
         return `${content}\n`;
@@ -124,9 +192,39 @@ export function editorHtmlToRichText(root: HTMLElement) {
         return content;
     }
   };
+  const readList = (list: HTMLElement, marks: Marks, depth: number): string => {
+    let index = 0;
+    return Array.from(list.children)
+      .map((item) => {
+        if (!(item instanceof HTMLElement)) return "";
+        if (["UL", "OL"].includes(item.tagName))
+          return readList(item, marks, depth + 1);
+        const body = Array.from(item.childNodes)
+          .filter(
+            (child) =>
+              !(
+                child instanceof HTMLElement &&
+                ["UL", "OL"].includes(child.tagName)
+              ),
+          )
+          .map((child) => read(child, marks))
+          .join("")
+          .trim();
+        const marker = list.tagName === "OL" ? `${++index}.` : "-";
+        const nested = Array.from(item.children)
+          .filter(
+            (child): child is HTMLElement =>
+              child instanceof HTMLElement &&
+              ["UL", "OL"].includes(child.tagName),
+          )
+          .map((child) => readList(child, marks, depth + 1));
+        return [`${"  ".repeat(depth)}${marker} ${body}`, ...nested].join("\n");
+      })
+      .join("\n");
+  };
   return Array.from(root.childNodes)
-    .map(read)
+    .map((node) => read(node))
     .join("")
     .replace(/\n{3,}/g, "\n\n")
-    .trim();
+    .replace(/^\n+|\n+$/g, "");
 }

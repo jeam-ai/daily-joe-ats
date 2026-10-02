@@ -3274,6 +3274,7 @@ progress {
   width: max-content;
   max-width: calc(100% - 16px);
   padding: 5px;
+  margin: 0;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--surface);

@@ -1,5 +1,5 @@
 import { attendanceTimestamp, defaultAttendanceRules } from "./timekeeping";
-export const ODOO_ANALYSIS_VERSION = 5;
+export const ODOO_ANALYSIS_VERSION = 6;
 
 export type OdooCell = string | number | null;
 export type OdooMatrix = OdooCell[][];
@@ -55,7 +55,7 @@ export const defaultOdooRules: OdooRules = {
   end: "",
   graceMinutes: 0,
   overtimeMinutes: 0,
-  excessiveWorkedHours: 14,
+  excessiveWorkedHours: 16,
   discrepancyMinutes: 1,
   expectedHours: null,
   workDays: [],
@@ -91,6 +91,8 @@ export type OdooReview = {
   duplicateResolution?: {
     retainedSourceRows: number[];
     disregardedSourceRows: number[];
+    disregardedRecords?: RawAttendance[];
+    retainedRecords?: RawAttendance[];
   };
   note: string;
   reviewer: string;
@@ -139,6 +141,21 @@ export type OdooAnalysis = {
   warnings: string[];
   records: OdooDay[];
 };
+export function isZeroExpectedHoursSystemIssue(record: OdooDay) {
+  return (
+    record.expected === 0 &&
+    record.worked !== null &&
+    record.worked > 0 &&
+    record.raw.length === 1 &&
+    record.results.every((result) =>
+      [
+        "System Error — Expected hours missing or zero",
+        "Overtime",
+        "Normal",
+      ].includes(result),
+    )
+  );
+}
 const clean = (v: OdooCell | undefined) => String(v ?? "").trim();
 const header = (v: OdooCell | undefined) =>
   clean(v)
@@ -560,14 +577,17 @@ function* analyzeOdooSteps(
         );
       }
       const negativeAttendance =
-        !incomplete && difference !== null && difference < -1e-7;
+        raw.length > 0 &&
+        !incomplete &&
+        difference !== null &&
+        difference < -1e-7;
       if (negativeAttendance) {
         results.push("Negative Attendance");
         issues.push(
           "Negative attendance is ambiguous from Odoo data. HR must confirm Late, Undertime, or Early Out; no classification was selected automatically.",
         );
       }
-      const excessiveThreshold = rules.excessiveWorkedHours ?? 14;
+      const excessiveThreshold = rules.excessiveWorkedHours ?? 16;
       if (worked !== null && worked >= excessiveThreshold) {
         results.push("Excessive Overtime");
         issues.push(
@@ -655,6 +675,10 @@ function* analyzeOdooSteps(
       });
     }
   }
+  classifySingleWeeklyLeave(records);
+  for (const record of records)
+    if (isZeroExpectedHoursSystemIssue(record))
+      record.review.classification = "System / Data Issue";
   return {
     version: ODOO_ANALYSIS_VERSION,
     rules,
@@ -663,6 +687,158 @@ function* analyzeOdooSteps(
     sources: reports.sources,
     warnings: reports.warnings,
     records,
+  };
+}
+
+/** One isolated missing day in a Monday–Sunday week is treated as leave. */
+export function classifySingleWeeklyLeave(records: OdooDay[]) {
+  const weeks = new Map<string, OdooDay[]>();
+  const missingDates = new Set<string>();
+  for (const record of records) {
+    if (!record.results.includes("No Attendance") || !odooDate(record.date))
+      continue;
+    const identity = record.employeeId || employeeKey(record.employee);
+    const day = new Date(`${record.date}T00:00:00Z`);
+    day.setUTCDate(day.getUTCDate() - ((day.getUTCDay() + 6) % 7));
+    const week = `${identity}|${day.toISOString().slice(0, 10)}`;
+    weeks.set(week, [...(weeks.get(week) || []), record]);
+    missingDates.add(`${identity}|${record.date}`);
+  }
+  for (const rows of weeks.values()) {
+    if (rows.length !== 1) continue;
+    const record = rows[0];
+    const identity = record.employeeId || employeeKey(record.employee);
+    const adjacentMissing = [-1, 1].some((offset) =>
+      missingDates.has(
+        `${identity}|${new Date(Date.parse(record.date) + offset * 86400000).toISOString().slice(0, 10)}`,
+      ),
+    );
+    if (
+      adjacentMissing ||
+      (record.pivotWorked ?? 0) > 0 ||
+      record.review.classification
+    )
+      continue;
+    record.results = record.results.map((result) =>
+      result === "No Attendance" ? "Leave" : result,
+    );
+    record.issues = record.issues.filter(
+      (issue) => !issue.startsWith("No attendance"),
+    );
+    record.issues.push(
+      "Single missing attendance day in this Monday–Sunday week: classified as Leave.",
+    );
+    record.review.classification = "Leave";
+  }
+}
+
+/** Apply the new defaults to older saved cutoffs without discarding HR history. */
+export function upgradeOdooAnalysis<T extends OdooAnalysis>(analysis: T): T {
+  if (analysis.version >= ODOO_ANALYSIS_VERSION) return analysis;
+  for (const record of analysis.records) {
+    if (!record.raw.length && record.results.includes("No Attendance")) {
+      record.results = record.results.filter(
+        (result) => result !== "Negative Attendance",
+      );
+      record.issues = record.issues.filter(
+        (issue) => !issue.startsWith("Negative attendance is ambiguous"),
+      );
+    }
+  }
+  if (
+    analysis.rules.excessiveWorkedHours === 14 ||
+    analysis.rules.excessiveWorkedHours === undefined
+  ) {
+    analysis.rules.excessiveWorkedHours = 16;
+    for (const record of analysis.records) {
+      if (record.worked === null || record.worked < 9) continue;
+      record.results = record.results.filter(
+        (result) => result !== "Overtime" && result !== "Excessive Overtime",
+      );
+      record.results.push(
+        record.worked >= 16 ? "Excessive Overtime" : "Overtime",
+      );
+      record.issues = record.issues.filter(
+        (issue) => !issue.startsWith("Total worked time meets the "),
+      );
+      if (record.worked >= 16)
+        record.issues.push(
+          "Total worked time meets the 16-hour excessive-overtime threshold. HR verification required.",
+        );
+    }
+  }
+  classifySingleWeeklyLeave(analysis.records);
+  for (const record of analysis.records)
+    if (isZeroExpectedHoursSystemIssue(record) && !record.review.classification)
+      record.review.classification = "System / Data Issue";
+  analysis.version = ODOO_ANALYSIS_VERSION;
+  return analysis;
+}
+
+/** Recalculate the active day from retained rows; removed rows remain audit evidence. */
+export function correctDuplicateAttendance(
+  record: OdooDay,
+  rules: OdooRules,
+  retainedSourceRows: number[],
+) {
+  const retained = record.raw.filter((source) =>
+    retainedSourceRows.includes(source.row),
+  );
+  const removed = record.raw.filter(
+    (source) => !retainedSourceRows.includes(source.row),
+  );
+  const analysis = analyzeOdoo(
+    {
+      attendance: retained.map((source) => ({
+        ...source,
+        employee: record.employee,
+      })),
+      pivot: record.pivot.map((source) => ({
+        ...source,
+        employee: record.employee,
+      })),
+      sources: [],
+      period: { start: record.date, end: record.date, title: record.date },
+      warnings: [],
+      aliases: [],
+    },
+    rules,
+  );
+  const recalculated = analysis.records.find(
+    (day) => day.date === record.date && day.raw.length,
+  );
+  if (!recalculated) throw Error("Choose a dated attendance row to retain.");
+  const review = record.review;
+  Object.assign(record, recalculated, {
+    id: record.id,
+    employee: record.employee,
+    employeeId: record.employeeId,
+    sourceNames: record.sourceNames,
+    raw: retained,
+    pivot: record.pivot,
+    review,
+  });
+  review.duplicateResolution = {
+    retainedSourceRows: retained.map((source) => source.row),
+    disregardedSourceRows: [
+      ...new Set([
+        ...(review.duplicateResolution?.disregardedSourceRows || []),
+        ...removed.map((source) => source.row),
+      ]),
+    ],
+    retainedRecords: retained,
+    disregardedRecords: [
+      ...(review.duplicateResolution?.disregardedRecords || []),
+      ...removed,
+    ].filter(
+      (source, index, rows) =>
+        rows.findIndex(
+          (candidate) =>
+            candidate.row === source.row &&
+            candidate.checkIn === source.checkIn &&
+            candidate.checkOut === source.checkOut,
+        ) === index,
+    ),
   };
 }
 

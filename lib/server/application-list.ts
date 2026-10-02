@@ -97,6 +97,32 @@ export async function listApplications(params: URLSearchParams, demo = false) {
     ? "CASE WHEN g.latest_at>w.received_at THEN g.latest_at ELSE w.received_at END DESC,w.received_at DESC,a.id DESC"
     : "w.received_at DESC,a.id DESC";
   return readTransaction(async (tx) => {
+    const around = params.get("around");
+    if (around) {
+      const sequence = await tx.query(
+        `SELECT id,previous_id,next_id,position,total FROM (
+          SELECT a.id,LAG(a.id) OVER (ORDER BY ${order}) AS previous_id,
+            LEAD(a.id) OVER (ORDER BY ${order}) AS next_id,
+            ROW_NUMBER() OVER (ORDER BY ${order}) AS position,COUNT(*) OVER() AS total
+          ${listFrom}
+        ) sequence WHERE id=${bind(around)}`,
+        values,
+      );
+      const row = sequence[0];
+      return {
+        applications: [] as Application[],
+        total: Number(row?.total || 0),
+        page,
+        neighbors: row
+          ? {
+              previousId: row.previous_id ? String(row.previous_id) : null,
+              nextId: row.next_id ? String(row.next_id) : null,
+              position: Number(row.position),
+              total: Number(row.total),
+            }
+          : null,
+      };
+    }
     const total = Number(
       (await tx.query(`SELECT COUNT(*) AS n ${from}`, values))[0].n,
     );
@@ -140,6 +166,7 @@ export async function listApplications(params: URLSearchParams, demo = false) {
       }),
       total,
       page: actual,
+      neighbors: null,
     };
   });
 }

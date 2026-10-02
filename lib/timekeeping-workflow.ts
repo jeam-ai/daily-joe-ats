@@ -27,7 +27,7 @@ export const needsClassification = (record: OdooDay) =>
 /**
  * Normal overtime is monitored in its own HR process. It can be completed in
  * this cutoff workspace only when Overtime is its single classification.
- * Ambiguous attendance, missing punches, duplicates, and 14+ hour overtime
+ * Ambiguous attendance, missing punches, duplicates, and 16+ hour overtime
  * remain individual decisions.
  */
 export const isNormalOvertimeForSeparateMonitoring = (record: OdooDay) =>
@@ -40,9 +40,23 @@ export const needsAction = (record: OdooDay) =>
 
 export const awaitsVerification = (record: OdooDay) =>
   !needsAction(record) &&
+  record.review.status !== "Resolved" &&
+  record.review.status !== "Payroll Ready" &&
   (record.review.status === "Corrected" ||
-    (record.review.correctedInOdoo === true &&
-      record.review.status !== "Payroll Ready"));
+    record.review.correctedInOdoo === true);
+
+/** Apply saved rows immediately, while ignoring stale responses or another cutoff. */
+export function mergeAttendanceReview<
+  T extends { id: string; revision: number; records: OdooDay[] },
+>(batch: T, update: { id: string; revision: number; records: OdooDay[] }): T {
+  if (batch.id !== update.id || update.revision < batch.revision) return batch;
+  const changed = new Map(update.records.map((record) => [record.id, record]));
+  return {
+    ...batch,
+    revision: update.revision,
+    records: batch.records.map((record) => changed.get(record.id) || record),
+  };
+}
 
 const groupDefinitions: Omit<TimekeepingQueueGroup, "records">[] = [
   {
@@ -67,7 +81,7 @@ const groupDefinitions: Omit<TimekeepingQueueGroup, "records">[] = [
     id: "excessive-overtime",
     label: "Excessive overtime",
     description:
-      "14+ recorded hours require HR verification; this is not assumed to be valid overtime.",
+      "16+ recorded hours require HR verification; this is not assumed to be valid overtime.",
   },
   {
     id: "no-attendance",
@@ -79,7 +93,7 @@ const groupDefinitions: Omit<TimekeepingQueueGroup, "records">[] = [
     id: "duplicate-records",
     label: "Duplicate or conflicting records",
     description:
-      "Multiple source rows are retained for HR comparison; none are deleted automatically.",
+      "Select the main attendance row. Extra entries are removed from the active record when the correction is saved.",
   },
   {
     id: "data-errors",
@@ -140,7 +154,7 @@ export function queueGroupFilter(id: TimekeepingQueueGroupId) {
   )[id];
 }
 
-export function issueExplanation(record: OdooDay, excessiveHours = 14) {
+export function issueExplanation(record: OdooDay, excessiveHours = 16) {
   if (record.results.includes("Excessive Overtime"))
     return `Recorded attendance is ${record.worked ?? "unavailable"} hours. ${excessiveHours}+ hours is flagged for HR verification; a missing punch is possible, but not assumed.`;
   if (record.results.includes("Missing Time Out"))

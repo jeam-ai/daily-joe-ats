@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { createPortal } from "react-dom";
 import {
   Bold,
   Italic,
@@ -60,6 +61,7 @@ export function RichTextEditor({
 }: EditorProps) {
   const root = useRef<HTMLDivElement>(null);
   const hiddenInput = useRef<HTMLInputElement>(null);
+  const toolbar = useRef<HTMLDivElement>(null);
   const selectionRange = useRef<Range | null>(null);
   const [content, setContent] = useState(value ?? defaultValue);
   const [toolbarPosition, setToolbarPosition] = useState<{
@@ -68,7 +70,11 @@ export function RichTextEditor({
   } | null>(null);
   const controlled = value !== undefined;
   useEffect(() => {
-    if (controlled && value !== content && document.activeElement !== root.current)
+    if (
+      controlled &&
+      value !== content &&
+      document.activeElement !== root.current
+    )
       setContent(value);
   }, [content, controlled, value]);
   useLayoutEffect(() => {
@@ -76,7 +82,11 @@ export function RichTextEditor({
     const html = richTextToHtml(content);
     // Never rewrite an actively edited surface: replacing its HTML moves the
     // selection/caret and makes typing feel like the editor is jumping back.
-    if (element && document.activeElement !== element && element.innerHTML !== html)
+    if (
+      element &&
+      document.activeElement !== element &&
+      element.innerHTML !== html
+    )
       element.innerHTML = html;
   }, [content]);
   const update = () => {
@@ -124,21 +134,81 @@ export function RichTextEditor({
   }, []);
   useEffect(() => {
     document.addEventListener("selectionchange", captureSelection);
-    return () => document.removeEventListener("selectionchange", captureSelection);
+    return () =>
+      document.removeEventListener("selectionchange", captureSelection);
   }, [captureSelection]);
+  useLayoutEffect(() => {
+    const bubble = toolbar.current;
+    const range = selectionRange.current;
+    if (!bubble || !range || !toolbarPosition) return;
+    // A top-layer popover uses viewport coordinates even inside transformed
+    // cards and dialogs. Otherwise a fixed bubble can cover the selected text.
+    if (typeof bubble.showPopover === "function") bubble.showPopover();
+    const selection = range.getBoundingClientRect();
+    const size = bubble.getBoundingClientRect();
+    bubble.style.left = `${Math.max(8, Math.min(selection.left, window.innerWidth - size.width - 8))}px`;
+    const above = selection.top - size.height - 8;
+    bubble.style.top = `${above >= 8 ? above : selection.bottom + 8}px`;
+    const dismiss = () => {
+      selectionRange.current = null;
+      setToolbarPosition(null);
+    };
+    window.addEventListener("scroll", dismiss, true);
+    window.addEventListener("resize", dismiss);
+    return () => {
+      window.removeEventListener("scroll", dismiss, true);
+      window.removeEventListener("resize", dismiss);
+    };
+  }, [toolbarPosition]);
   const dismissSelectionToolbar = () => {
     selectionRange.current = null;
     setToolbarPosition(null);
   };
   const command = (action: string) => {
-    if (disabled || !root.current) return;
+    if (disabled || !root.current || !selectionRange.current) return;
+    if (action === "outdent") {
+      const range = selectionRange.current;
+      const items = Array.from(root.current.querySelectorAll("li")).filter(
+        (item) =>
+          Array.from(item.childNodes).some(
+            (node) =>
+              !(
+                node instanceof HTMLElement &&
+                ["UL", "OL"].includes(node.tagName)
+              ) && range.intersectsNode(node),
+          ),
+      );
+      // Chromium's outdent removes the list marker at the first level. At
+      // that level there is no further indent to remove: keep the list intact.
+      if (
+        items.some(
+          (item) => !item.parentElement?.parentElement?.closest("ul, ol"),
+        )
+      ) {
+        const topLists = [
+          ...new Set(
+            items
+              .map((item) => item.parentElement)
+              .filter((list) => list && !list.parentElement?.closest("ul, ol")),
+          ),
+        ];
+        for (const list of topLists) {
+          if (list && parseFloat(list.style.marginLeft) > 0)
+            list.style.marginLeft = `${Math.max(0, parseFloat(list.style.marginLeft) - 24)}px`;
+        }
+        update();
+        dismissSelectionToolbar();
+        return;
+      }
+    }
     const selection = window.getSelection();
+    root.current.focus();
     if (selectionRange.current && selection) {
       selection.removeAllRanges();
       selection.addRange(selectionRange.current);
     }
-    root.current.focus();
-    if (action === "quote") document.execCommand("formatBlock", false, "blockquote");
+    if (action === "quote")
+      document.execCommand("formatBlock", false, "blockquote");
     else document.execCommand(action, false);
     update();
     // The toolbar is the only control that alters formatting. Once an action
@@ -149,7 +219,9 @@ export function RichTextEditor({
   };
   return (
     <div className={`rich-text-editor${disabled ? " is-disabled" : ""}`}>
-      {name && <input ref={hiddenInput} type="hidden" name={name} value={content} />}
+      {name && (
+        <input ref={hiddenInput} type="hidden" name={name} value={content} />
+      )}
       <div
         ref={root}
         className="rich-text-surface"
@@ -167,38 +239,42 @@ export function RichTextEditor({
         onMouseUp={captureSelection}
         onKeyUp={captureSelection}
       />
-      {toolbarPosition && (
-        <div
-          className="rich-text-toolbar rich-text-selection-toolbar"
-          role="toolbar"
-          aria-label="Selected text formatting"
-          style={toolbarPosition}
-        >
-          {actions.map(([action, Icon, label]) => (
+      {toolbarPosition &&
+        createPortal(
+          <div
+            ref={toolbar}
+            popover="manual"
+            className="rich-text-toolbar rich-text-selection-toolbar"
+            role="toolbar"
+            aria-label="Selected text formatting"
+            style={toolbarPosition}
+          >
+            {actions.map(([action, Icon, label]) => (
+              <button
+                type="button"
+                key={action}
+                title={label}
+                aria-label={label}
+                disabled={disabled}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => command(action)}
+              >
+                <Icon size={15} />
+              </button>
+            ))}
             <button
               type="button"
-              key={action}
-              title={label}
-              aria-label={label}
+              title="Quote"
+              aria-label="Quote"
               disabled={disabled}
               onMouseDown={(event) => event.preventDefault()}
-              onClick={() => command(action)}
+              onClick={() => command("quote")}
             >
-              <Icon size={15} />
+              <Quote size={15} />
             </button>
-          ))}
-          <button
-            type="button"
-            title="Quote"
-            aria-label="Quote"
-            disabled={disabled}
-            onMouseDown={(event) => event.preventDefault()}
-            onClick={() => command("quote")}
-          >
-            <Quote size={15} />
-          </button>
-        </div>
-      )}
+          </div>,
+          root.current?.closest("dialog") || document.body,
+        )}
       <small className="rich-text-hint">
         Select text to format it. Formatting is saved with this note.
       </small>

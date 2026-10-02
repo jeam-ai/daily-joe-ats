@@ -126,7 +126,7 @@ test("AI fallback covers every missing profile field while demo is excluded", ()
   a.isDemo = true;
   assert.deepEqual(extractionReasons(a), []);
 });
-test("Odoo zero expected hours are errors, missing checkout is retained, and only total worked above 14 triggers excessive review", () => {
+test("Odoo zero expected hours are errors, missing checkout is retained, and 16+ worked hours trigger excessive review", () => {
   const report: OdooReports = {
     attendance: [],
     pivot: [],
@@ -182,11 +182,11 @@ test("Odoo zero expected hours are errors, missing checkout is retained, and onl
     } else {
       assert.equal(
         r.results.includes("Excessive Overtime"),
-        Number(r.employee) >= 14,
+        Number(r.employee) >= 16,
       );
       assert.equal(
         r.results.includes("Overtime"),
-        Number(r.employee) >= 9 && Number(r.employee) < 14,
+        Number(r.employee) >= 9 && Number(r.employee) < 16,
       );
     }
   }

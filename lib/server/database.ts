@@ -451,9 +451,20 @@ export async function putRecords(
   collection: string,
   entries: { id: string; value: unknown }[],
 ) {
+  return putRecordEntries(
+    tx,
+    entries.map((entry) => ({ ...entry, collection })),
+  );
+}
+
+/** Batch independent record writes across collections into bounded upserts. */
+export async function putRecordEntries(
+  tx: Transaction,
+  entries: { collection: string; id: string; value: unknown }[],
+) {
   for (let offset = 0; offset < entries.length; offset += 200) {
     const chunk = entries.slice(offset, offset + 200);
-    const values = chunk.flatMap(({ id, value }) => [
+    const values = chunk.flatMap(({ collection, id, value }) => [
       collection,
       id,
       JSON.stringify(value),

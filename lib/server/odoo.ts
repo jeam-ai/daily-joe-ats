@@ -10,9 +10,13 @@ import {
   parseOdooReports,
   reviewStatuses,
   attendanceClassifications,
+  correctDuplicateAttendance,
+  upgradeOdooAnalysis,
+  isZeroExpectedHoursSystemIssue,
   type OdooAnalysis,
   type OdooReports,
   type OdooMatrix,
+  type OdooDay,
 } from "@/lib/odoo";
 import { config, SafeError } from "./config";
 import { seal, unseal } from "@/lib/auth/security";
@@ -23,6 +27,7 @@ import {
   readRecord,
   putRecord,
   putRecords,
+  putRecordEntries,
   type Transaction,
 } from "./database";
 import { audit, getState, saveState } from "./repository";
@@ -45,7 +50,7 @@ export const odooRulesSchema = z.object({
   ]),
   graceMinutes: z.number().min(0).max(120),
   overtimeMinutes: z.number().min(0).max(240),
-  excessiveWorkedHours: z.number().min(1).max(24).default(14),
+  excessiveWorkedHours: z.number().min(9).max(24).default(16),
   discrepancyMinutes: z.number().min(0).max(120),
   expectedHours: z.number().min(0).max(24).nullable(),
   workDays: z.array(z.number().int().min(0).max(6)).max(7),
@@ -68,6 +73,9 @@ async function saveExceptions(
   batch: OdooBatch,
   records = batch.records,
 ) {
+  await putRecordEntries(tx, exceptionEntries(batch, records));
+}
+function exceptionEntries(batch: OdooBatch, records: OdooDay[]) {
   // Named read model: the encrypted batch remains the source of truth. Stable
   // batch/day IDs let HR inspect exceptions without duplicating analyses.
   const rows = records.filter(
@@ -76,26 +84,23 @@ async function saveExceptions(
       r.review.status === "For Review" ||
       r.review.history.length,
   );
-  await putRecords(
-    tx,
-    "odoo_exceptions",
-    rows.map((r) => ({
+  return rows.map((r) => ({
+    collection: "odoo_exceptions",
+    id: `${batch.id}:${r.id}`,
+    value: {
       id: `${batch.id}:${r.id}`,
-      value: {
-        id: `${batch.id}:${r.id}`,
-        batchId: batch.id,
-        name: r.employee,
-        date: r.date,
-        results: r.results,
-        issues: r.issues,
-        worked: r.worked,
-        expected: r.expected,
-        status: r.review.status,
-        review: r.review,
-        createdAt: batch.analyzedAt,
-      },
-    })),
-  );
+      batchId: batch.id,
+      name: r.employee,
+      date: r.date,
+      results: r.results,
+      issues: r.issues,
+      worked: r.worked,
+      expected: r.expected,
+      status: r.review.status,
+      review: r.review,
+      createdAt: batch.analyzedAt,
+    },
+  }));
 }
 type Upload = {
   uploadedAt: string;
@@ -217,7 +222,9 @@ export async function getOdooBatch(id: string, user: User) {
         "Analysis not found. Choose a saved cutoff or upload both reports.",
         404,
       );
-    return unseal<OdooBatch>(encrypted, config().encryptionKey);
+    return upgradeOdooAnalysis(
+      unseal<OdooBatch>(encrypted, config().encryptionKey),
+    );
   });
 }
 export async function listOdooBatches(user: User) {
@@ -255,7 +262,9 @@ export async function checkpointOdoo(
   return transaction(async (tx) => {
     const encrypted = await readRecord<string>(tx, "odoo_batches", input.id);
     if (!encrypted) throw new SafeError("Analysis not found.", 404);
-    const batch = unseal<OdooBatch>(encrypted, config().encryptionKey);
+    const batch = upgradeOdooAnalysis(
+      unseal<OdooBatch>(encrypted, config().encryptionKey),
+    );
     if (batch.revision !== input.revision)
       throw new SafeError(
         "Another HR user updated this cutoff. Reload it before saving your checkpoint.",
@@ -401,7 +410,40 @@ export async function analyzeOdooUpload(
               `${record.employeeId || record.employee}|${record.date}`,
             );
             if (saved?.history.length || saved?.classification || saved?.note)
-              record.review = saved;
+              record.review = structuredClone(saved);
+            const correction = saved?.duplicateResolution;
+            if (
+              correction?.retainedRecords?.length &&
+              correction.disregardedRecords?.length &&
+              record.raw.length > 1
+            ) {
+              const signature = (source: OdooDay["raw"][number]) =>
+                JSON.stringify([
+                  source.row,
+                  source.employee,
+                  source.employeeId,
+                  source.checkIn,
+                  source.checkOut,
+                  source.worked,
+                  source.overtime,
+                  source.extra,
+                ]);
+              const original = new Set(
+                [
+                  ...correction.retainedRecords,
+                  ...correction.disregardedRecords,
+                ].map(signature),
+              );
+              if (
+                original.size === record.raw.length &&
+                record.raw.every((source) => original.has(signature(source)))
+              )
+                correctDuplicateAttendance(
+                  record,
+                  analysis.rules,
+                  correction.retainedSourceRows,
+                );
+            }
           }
         }
       }
@@ -493,37 +535,360 @@ export async function analyzeOdooUpload(
     });
   }
 }
-export async function reviewOdoo(input: unknown, user: User) {
+const attendanceReviewSchema = z.object({
+  id: z.string(),
+  recordId: z.string(),
+  revision: z.number().int(),
+  status: z.enum(reviewStatuses),
+  note: z.string().max(4000).default(""),
+  classification: z.enum(attendanceClassifications).optional(),
+  correctedInOdoo: z.boolean().optional(),
+  correctionNote: z.string().max(4000).optional(),
+  duplicateResolution: z
+    .object({
+      retainedSourceRows: z.array(z.number().int().positive()).max(100),
+      disregardedSourceRows: z.array(z.number().int().positive()).max(100),
+    })
+    .optional(),
+});
+function applyAttendanceReview(
+  row: OdooDay,
+  body: z.infer<typeof attendanceReviewSchema>,
+  batch: OdooBatch,
+  user: User,
+  now: string,
+) {
+  if (body.duplicateResolution) {
+    if (!row.results.includes("Multiple Entries"))
+      throw new SafeError(
+        "A duplicate source selection is only available for multiple attendance entries.",
+        409,
+      );
+    const sourceRows = new Set(row.raw.map((source) => source.row));
+    const chosen = [
+      ...body.duplicateResolution.retainedSourceRows,
+      ...body.duplicateResolution.disregardedSourceRows,
+    ];
+    if (
+      !body.duplicateResolution.retainedSourceRows.length ||
+      chosen.some((sourceRow) => !sourceRows.has(sourceRow)) ||
+      new Set(chosen).size !== chosen.length ||
+      chosen.length !== sourceRows.size
+    )
+      throw new SafeError(
+        "Choose at least one valid source row to retain and account for every entry exactly once.",
+        409,
+      );
+  }
+  if (
+    body.duplicateResolution &&
+    body.status !== "For Review" &&
+    body.duplicateResolution.disregardedSourceRows.length
+  )
+    correctDuplicateAttendance(
+      row,
+      batch.rules,
+      body.duplicateResolution.retainedSourceRows,
+    );
+  const permittedClassifications = row.results.includes("Negative Attendance")
+    ? ["Late", "Undertime", "Early Out"]
+    : row.results.includes("No Attendance") || row.results.includes("Leave")
+      ? ["Absent", "Day Off", "Leave", "System / Data Issue", "Other"]
+      : isZeroExpectedHoursSystemIssue(row)
+        ? ["System / Data Issue"]
+        : [];
+  if (
+    body.classification &&
+    !permittedClassifications.includes(body.classification)
+  )
+    throw new SafeError(
+      "That classification is not available for this attendance record.",
+      409,
+    );
+  if (
+    permittedClassifications.length &&
+    body.status !== "For Review" &&
+    !body.classification &&
+    !row.review.classification
+  )
+    throw new SafeError(
+      "Confirm the attendance classification before resolving this record.",
+      409,
+    );
+  const previous = row.review.status;
+  row.review = {
+    status: body.status,
+    note: body.note,
+    classification: body.classification || row.review.classification,
+    correctedInOdoo:
+      body.correctedInOdoo ?? row.review.correctedInOdoo ?? false,
+    correctionNote: body.correctionNote || row.review.correctionNote || "",
+    duplicateResolution: row.review.duplicateResolution?.disregardedRecords
+      ?.length
+      ? row.review.duplicateResolution
+      : body.duplicateResolution || row.review.duplicateResolution,
+    reviewer: user.email,
+    reviewedAt: now,
+    history: [
+      ...row.review.history,
+      {
+        previous,
+        next: body.status,
+        note: body.note,
+        reviewer: user.email,
+        timestamp: now,
+      },
+    ],
+  };
+  return previous;
+}
+
+async function readReviewBatch(tx: Transaction, id: string) {
+  const entries = await tx.query(
+    "SELECT collection,payload FROM records WHERE id=$1 AND collection IN ('odoo_batches','odoo_index')",
+    [id],
+  );
+  const encrypted = entries.find(
+    (entry) => entry.collection === "odoo_batches",
+  );
+  if (!encrypted) throw new SafeError("Analysis not found.", 404);
+  const index = entries.find((entry) => entry.collection === "odoo_index");
+  return {
+    batch: upgradeOdooAnalysis(
+      unseal<OdooBatch>(
+        JSON.parse(String(encrypted.payload)),
+        config().encryptionKey,
+      ),
+    ),
+    index: index
+      ? (JSON.parse(String(index.payload)) as Record<string, unknown>)
+      : null,
+  };
+}
+
+async function persistReviewBatch(
+  tx: Transaction,
+  batch: OdooBatch,
+  index: Record<string, unknown> | null,
+  rows: OdooDay[],
+  reviews: { collection: string; id: string; value: unknown }[],
+) {
+  await putRecordEntries(tx, [
+    ...exceptionEntries(batch, rows),
+    ...reviews,
+    {
+      collection: "odoo_batches",
+      id: batch.id,
+      value: seal(batch, config().encryptionKey),
+    },
+    ...(index
+      ? [
+          {
+            collection: "odoo_index",
+            id: batch.id,
+            value: {
+              ...index,
+              flagged: batch.records.filter(
+                (row) => row.review.status === "For Review",
+              ).length,
+            },
+          },
+        ]
+      : []),
+  ]);
+}
+
+export async function resolveEmployeeAttendance(input: unknown, user: User) {
+  requireTimekeeping(user);
+  const body = z
+    .object({
+      id: z.string(),
+      revision: z.number().int(),
+      employeeKey: z.string().min(1),
+      records: z
+        .array(
+          attendanceReviewSchema.pick({
+            recordId: true,
+            classification: true,
+            duplicateResolution: true,
+          }),
+        )
+        .min(1)
+        .max(94),
+      note: z.string().max(4000).default(""),
+    })
+    .safeParse(input);
+  if (!body.success)
+    throw new SafeError("Choose attendance records for one employee.");
+  const data = body.data;
+  if (
+    new Set(data.records.map((row) => row.recordId)).size !==
+    data.records.length
+  )
+    throw new SafeError("Choose each attendance record only once.");
+  return transaction(async (tx) => {
+    const { batch, index } = await readReviewBatch(tx, data.id);
+    if (batch.revision !== data.revision)
+      throw new SafeError(
+        "Another HR user updated this analysis. Reload it before resolving records.",
+        409,
+      );
+    const now = new Date().toISOString();
+    const rows: OdooDay[] = [];
+    const reviews: { collection: string; id: string; value: unknown }[] = [];
+    for (const decision of data.records) {
+      const row = batch.records.find(
+        (record) => record.id === decision.recordId,
+      );
+      if (!row || (row.employeeId || row.employee) !== data.employeeKey)
+        throw new SafeError(
+          "All selected records must belong to the same employee.",
+          409,
+        );
+      if (
+        !["For Review", "Corrected"].includes(row.review.status) &&
+        !row.review.correctedInOdoo
+      )
+        throw new SafeError("A selected record is already resolved.", 409);
+      if (
+        row.results.includes("Multiple Entries") &&
+        !decision.duplicateResolution &&
+        !row.review.duplicateResolution
+      )
+        throw new SafeError(
+          "Select the attendance rows to retain before resolving duplicate records.",
+          409,
+        );
+      const previous = applyAttendanceReview(
+        row,
+        {
+          ...decision,
+          id: data.id,
+          revision: data.revision,
+          status: "Resolved",
+          note: data.note || row.review.note,
+        },
+        batch,
+        user,
+        now,
+      );
+      rows.push(row);
+      reviews.push({
+        collection: "odoo_reviews",
+        id: crypto.randomUUID(),
+        value: {
+          batchId: batch.id,
+          recordId: row.id,
+          employee: row.employee,
+          date: row.date,
+          previous,
+          status: "Resolved",
+          note: row.review.note,
+          classification: row.review.classification,
+          duplicateResolution: row.review.duplicateResolution,
+          reviewer: user.email,
+          createdAt: now,
+        },
+      });
+    }
+    batch.revision++;
+    await persistReviewBatch(tx, batch, index, rows, reviews);
+    await audit(tx, user.email, "timekeeping.employee_resolved", undefined, {
+      batchId: batch.id,
+      employeeKey: data.employeeKey,
+      recordIds: rows.map((row) => row.id),
+      note: data.note,
+    });
+    return batch;
+  });
+}
+
+export async function resolveZeroExpectedHours(input: unknown, user: User) {
   requireTimekeeping(user);
   const parsed = z
     .object({
       id: z.string(),
-      recordId: z.string(),
       revision: z.number().int(),
-      status: z.enum(reviewStatuses),
-      note: z.string().max(4000),
-      classification: z.enum(attendanceClassifications).optional(),
-      correctedInOdoo: z.boolean().optional(),
-      correctionNote: z.string().max(4000).optional(),
-      duplicateResolution: z
-        .object({
-          retainedSourceRows: z.array(z.number().int().positive()).max(100),
-          disregardedSourceRows: z.array(z.number().int().positive()).max(100),
-        })
-        .optional(),
+      note: z.string().max(4000).default(""),
     })
     .safeParse(input);
   if (!parsed.success)
+    throw new SafeError("Choose a valid cutoff and system error note.");
+  const body = parsed.data;
+  return transaction(async (tx) => {
+    const { batch, index } = await readReviewBatch(tx, body.id);
+    if (batch.revision !== body.revision)
+      throw new SafeError(
+        "Another HR user updated this analysis. Reload it before resolving system errors.",
+        409,
+      );
+    const rows = batch.records.filter(
+      (row) =>
+        row.review.status === "For Review" &&
+        isZeroExpectedHoursSystemIssue(row),
+    );
+    if (!rows.length)
+      throw new SafeError(
+        "No zero expected hours system errors remain for review.",
+        409,
+      );
+    const now = new Date().toISOString();
+    const note =
+      body.note.trim() ||
+      "System / Data Issue: Odoo reported 0 expected hours. Recorded working hours were verified.";
+    const reviews = rows.map((row) => {
+      const previous = applyAttendanceReview(
+        row,
+        {
+          id: body.id,
+          revision: body.revision,
+          recordId: row.id,
+          status: "Resolved",
+          note,
+          classification: "System / Data Issue",
+        },
+        batch,
+        user,
+        now,
+      );
+      return {
+        collection: "odoo_reviews",
+        id: crypto.randomUUID(),
+        value: {
+          batchId: batch.id,
+          recordId: row.id,
+          employee: row.employee,
+          date: row.date,
+          previous,
+          status: "Resolved",
+          classification: "System / Data Issue",
+          note,
+          reviewer: user.email,
+          createdAt: now,
+        },
+      };
+    });
+    batch.revision++;
+    await persistReviewBatch(tx, batch, index, rows, reviews);
+    await audit(
+      tx,
+      user.email,
+      "timekeeping.zero_expected_hours_resolved",
+      undefined,
+      { batchId: batch.id, recordIds: rows.map((row) => row.id), note },
+    );
+    return batch;
+  });
+}
+
+export async function reviewOdoo(input: unknown, user: User) {
+  requireTimekeeping(user);
+  const parsed = attendanceReviewSchema.safeParse(input);
+  if (!parsed.success)
     throw new SafeError("Choose a valid review status and note.");
   const body = parsed.data;
-  if (body.status !== "For Review" && !body.note.trim())
-    throw new SafeError(
-      "Record a verification note before resolving this attendance record.",
-    );
   return transaction(async (tx) => {
-    const encrypted = await readRecord<string>(tx, "odoo_batches", body.id);
-    if (!encrypted) throw new SafeError("Analysis not found.", 404);
-    const batch = unseal<OdooBatch>(encrypted, config().encryptionKey);
+    const { batch, index } = await readReviewBatch(tx, body.id);
     if (batch.revision !== body.revision)
       throw new SafeError(
         "Another HR user updated this analysis. Reload it before saving your review.",
@@ -531,105 +896,26 @@ export async function reviewOdoo(input: unknown, user: User) {
       );
     const row = batch.records.find((r) => r.id === body.recordId);
     if (!row) throw new SafeError("Attendance record not found.", 404);
-    if (body.duplicateResolution) {
-      if (!row.results.includes("Multiple Entries"))
-        throw new SafeError(
-          "A duplicate source selection is only available for multiple attendance entries.",
-          409,
-        );
-      const sourceRows = new Set(row.raw.map((source) => source.row));
-      const chosen = [
-        ...body.duplicateResolution.retainedSourceRows,
-        ...body.duplicateResolution.disregardedSourceRows,
-      ];
-      if (
-        !body.duplicateResolution.retainedSourceRows.length ||
-        chosen.some((sourceRow) => !sourceRows.has(sourceRow)) ||
-        new Set(chosen).size !== chosen.length
-      )
-        throw new SafeError(
-          "Choose at least one valid source row to retain; a source row cannot be both retained and disregarded.",
-          409,
-        );
-    }
-    const permittedClassifications = row.results.includes("Negative Attendance")
-      ? ["Late", "Undertime", "Early Out"]
-      : row.results.includes("No Attendance")
-        ? ["Absent", "Day Off", "Leave", "System / Data Issue", "Other"]
-        : [];
-    if (
-      body.classification &&
-      !permittedClassifications.includes(body.classification)
-    )
-      throw new SafeError(
-        "That classification is not available for this attendance record.",
-        409,
-      );
-    if (
-      permittedClassifications.length &&
-      body.status !== "For Review" &&
-      !body.classification &&
-      !row.review.classification
-    )
-      throw new SafeError(
-        "Confirm the attendance classification before resolving this record.",
-        409,
-      );
-    const now = new Date().toISOString(),
-      previous = row.review.status;
-    row.review = {
-      status: body.status,
-      note: body.note,
-      classification: body.classification || row.review.classification,
-      correctedInOdoo:
-        body.correctedInOdoo ?? row.review.correctedInOdoo ?? false,
-      correctionNote: body.correctionNote || row.review.correctionNote || "",
-      duplicateResolution:
-        body.duplicateResolution || row.review.duplicateResolution,
-      reviewer: user.email,
-      reviewedAt: now,
-      history: [
-        ...row.review.history,
-        {
-          previous,
-          next: body.status,
-          note: body.note,
-          reviewer: user.email,
-          timestamp: now,
-        },
-      ],
-    };
+    const now = new Date().toISOString();
+    const previous = applyAttendanceReview(row, body, batch, user, now);
     batch.revision++;
-    await saveExceptions(tx, batch, [row]);
-    await putRecord(tx, "odoo_reviews", crypto.randomUUID(), {
-      batchId: batch.id,
-      recordId: row.id,
-      employee: row.employee,
-      date: row.date,
-      previous,
-      status: body.status,
-      note: body.note,
-      duplicateResolution: body.duplicateResolution,
-      reviewer: user.email,
-      createdAt: now,
-    });
-    await putRecord(
-      tx,
-      "odoo_batches",
-      batch.id,
-      seal(batch, config().encryptionKey),
-    );
-    const index = await readRecord<Record<string, unknown>>(
-      tx,
-      "odoo_index",
-      batch.id,
-    );
-    if (index)
-      await putRecord(tx, "odoo_index", batch.id, {
-        ...index,
-        flagged: batch.records.filter((r) => r.review.status === "For Review")
-          .length,
-      });
+    const reviewEntry = {
+      collection: "odoo_reviews",
+      id: crypto.randomUUID(),
+      value: {
+        batchId: batch.id,
+        recordId: row.id,
+        employee: row.employee,
+        date: row.date,
+        previous,
+        status: body.status,
+        note: body.note,
+        duplicateResolution: row.review.duplicateResolution,
+        reviewer: user.email,
+        createdAt: now,
+      },
+    };
+    await persistReviewBatch(tx, batch, index, [row], [reviewEntry]);
     await audit(tx, user.email, "timekeeping.reviewed", undefined, {
       batchId: batch.id,
       recordId: row.id,
@@ -653,7 +939,7 @@ export async function completeNormalOvertimeForEmployee(
       scope: z.enum(["employee", "cutoff"]).default("employee"),
       employeeKey: z.string().min(1).max(300).optional(),
       recordIds: z.array(z.string().min(1)).min(1).max(94).optional(),
-      note: z.string().trim().min(1).max(4000),
+      note: z.string().trim().max(4000).default(""),
     })
     .safeParse(input);
   if (!parsed.success)
@@ -670,7 +956,9 @@ export async function completeNormalOvertimeForEmployee(
   return transaction(async (tx) => {
     const encrypted = await readRecord<string>(tx, "odoo_batches", body.id);
     if (!encrypted) throw new SafeError("Analysis not found.", 404);
-    const batch = unseal<OdooBatch>(encrypted, config().encryptionKey);
+    const batch = upgradeOdooAnalysis(
+      unseal<OdooBatch>(encrypted, config().encryptionKey),
+    );
     if (batch.revision !== body.revision)
       throw new SafeError(
         "Another HR user updated this analysis. Reload it before completing overtime.",
@@ -808,6 +1096,7 @@ export async function exportOdoo(batch: OdooBatch, csv: boolean) {
     "Pivot Source Rows",
     "Source Files",
     "Review Notes",
+    "Duplicate Correction History",
   ];
   const localTime = (iso: string) =>
     iso
@@ -850,6 +1139,9 @@ export async function exportOdoo(batch: OdooBatch, csv: boolean) {
     r.pivot.map((s) => s.row).join(", "),
     batch.sources.map((s) => s.filename).join("; "),
     r.issues.join("; "),
+    r.review.duplicateResolution?.disregardedRecords?.length
+      ? `Previously multiple entries; corrected. Removed source rows: ${r.review.duplicateResolution.disregardedSourceRows.join(", ")}`
+      : "",
   ]);
   const safe = (v: unknown) => {
     const text = String(v ?? "");

@@ -5,6 +5,7 @@ import {
   Upload,
   Save,
   ArrowLeft,
+  ArrowRight,
   ChevronRight,
   CheckCircle2,
   CircleAlert,
@@ -28,6 +29,7 @@ import { RichTextContent, RichTextEditor } from "./rich-text";
 import { requestJson, downloadFile, RequestError } from "@/lib/client-request";
 import {
   defaultOdooRules,
+  isZeroExpectedHoursSystemIssue,
   reviewStatuses,
   type OdooRules,
   type OdooDay,
@@ -49,6 +51,9 @@ import {
   isNormalOvertimeForSeparateMonitoring,
   issueExplanation,
   queueGroupFilter,
+  needsAction,
+  awaitsVerification,
+  mergeAttendanceReview,
 } from "@/lib/timekeeping-workflow";
 type Preview = Pick<
   OdooReports,
@@ -66,6 +71,7 @@ type BatchIndex = {
   savedAt?: string;
   retentionExpiresAt?: string;
 };
+type ReviewUpdate = Pick<OdooBatch, "id" | "revision" | "records">;
 const hours = (n: number | null) =>
   n === null
     ? "—"
@@ -91,7 +97,8 @@ const key = (r: OdooDay) => r.employeeId || r.employee;
 const classificationsFor = (record: OdooDay): AttendanceClassification[] =>
   record.results.includes("Negative Attendance")
     ? ["Late", "Undertime", "Early Out"]
-    : record.results.includes("No Attendance")
+    : record.results.includes("No Attendance") ||
+        record.results.includes("Leave")
       ? ["Day Off", "Leave", "Absent", "System / Data Issue", "Other"]
       : [];
 const clockTime = (
@@ -179,16 +186,17 @@ export function AttendanceRulesEditor({
         <Field label="Excessive overtime threshold (worked hours)">
           <Input
             type="number"
-            min={1}
+            min={9}
             max={24}
             step="0.5"
-            value={rules.excessiveWorkedHours ?? 14}
+            value={rules.excessiveWorkedHours ?? 16}
             onChange={(e) =>
               set("excessiveWorkedHours", Number(e.target.value))
             }
           />
           <small>
-            Default: 14 hours or more. This flags an HR review and possible
+            Normal overtime starts at 9 worked hours; excessive overtime
+            defaults to 16 hours or more. This flags an HR review and possible
             forgotten time-out; it does not define payroll entitlement.
           </small>
         </Field>
@@ -275,7 +283,6 @@ export function Timekeeping() {
     AttendanceClassification | ""
   >("");
   const [correctedInOdoo, setCorrectedInOdoo] = useState(false),
-    [correctionNote, setCorrectionNote] = useState(""),
     [retainedSourceRows, setRetainedSourceRows] = useState<number[]>([]),
     [reviewNext, setReviewNext] = useState(false),
     [selectedOvertimeIds, setSelectedOvertimeIds] = useState<string[]>([]),
@@ -285,18 +292,53 @@ export function Timekeeping() {
     "employee",
   );
   const [confirmDeleteCutoff, setConfirmDeleteCutoff] = useState(false);
+  const [confirmSystemErrors, setConfirmSystemErrors] = useState(false);
+  const [systemErrorNote, setSystemErrorNote] = useState("");
+  const [selectedAttendanceIds, setSelectedAttendanceIds] = useState<string[]>(
+    [],
+  );
+  const [bulkRows, setBulkRows] = useState<OdooDay[]>([]);
+  const [bulkNote, setBulkNote] = useState("");
+  const [bulkDecisions, setBulkDecisions] = useState<
+    Record<
+      string,
+      {
+        classification: AttendanceClassification | "";
+        retainedSourceRows: number[];
+      }
+    >
+  >({});
+  function openBulkReview(rows: OdooDay[]) {
+    setBulkRows(rows);
+    setBulkNote("");
+    setBulkDecisions(
+      Object.fromEntries(
+        rows.map((row) => [
+          row.id,
+          {
+            classification: row.review.classification || "",
+            retainedSourceRows: row.raw.map((source) => source.row),
+          },
+        ]),
+      ),
+    );
+  }
   function openRecord(record: OdooDay) {
     setDetail(record.id);
     setReview(record.review.status);
     setNote(record.review.note);
     setClassification(record.review.classification || "");
     setCorrectedInOdoo(!!record.review.correctedInOdoo);
-    setCorrectionNote(record.review.correctionNote || "");
     setRetainedSourceRows(
       record.review.duplicateResolution?.retainedSourceRows ||
         record.raw.map((source) => source.row),
     );
     setPendingClassification("");
+  }
+  function applySavedReview(update: ReviewUpdate) {
+    setBatch((current) =>
+      current ? mergeAttendanceReview(current, update) : current,
+    );
   }
   function beginClassification(
     record: OdooDay,
@@ -317,6 +359,38 @@ export function Timekeeping() {
     try {
       await action();
     } catch (e) {
+      if (
+        batch &&
+        [
+          "Saving review",
+          "Resolving employee attendance",
+          "Completing normal overtime",
+          "Resolving zero expected hours",
+        ].includes(label) &&
+        e instanceof RequestError &&
+        [0, 408, 409].includes(e.status)
+      ) {
+        try {
+          const latest = await requestJson<{ batch: OdooBatch }>(
+            `/api/timekeeping?batch=${encodeURIComponent(batch.id)}`,
+          );
+          setBatch((current) =>
+            current?.id === latest.batch.id ? latest.batch : current,
+          );
+          if (latest.batch.revision > batch.revision && e.status !== 409) {
+            setDetail("");
+            setBulkRows([]);
+            setConfirmSystemErrors(false);
+            setConfirmOvertimeCompletion(false);
+            notify(
+              "Latest saved attendance statuses loaded automatically. Check the records before retrying.",
+            );
+            return;
+          }
+        } catch {
+          // Preserve the original save error if its verification read also fails.
+        }
+      }
       const message = (e as Error).message;
       setError(message);
       notify(message, "error");
@@ -388,7 +462,14 @@ export function Timekeeping() {
         template: { rules: OdooRules } | null;
       }>("/api/timekeeping");
       setBatches(r.batches);
-      if (r.template) setRules(r.template.rules);
+      if (r.template)
+        setRules({
+          ...r.template.rules,
+          excessiveWorkedHours:
+            r.template.rules.excessiveWorkedHours === 14
+              ? 16
+              : (r.template.rules.excessiveWorkedHours ?? 16),
+        });
       const id = new URLSearchParams(window.location.search).get("batch");
       if (id) await load(id);
       const savedJob = sessionStorage.getItem("djc-timekeeping-job");
@@ -453,6 +534,22 @@ export function Timekeeping() {
       groups.set(key(record), [...(groups.get(key(record)) || []), record]);
     return groups;
   }, [records]);
+  const employeePendingRows = (allEmployeeRows.get(employee) || []).filter(
+    (row) => needsAction(row) || awaitsVerification(row),
+  );
+  const employeeIndex = employees.findIndex(([id]) => id === employee);
+  const detailEmployeeIndex = employees.findIndex(
+    ([id]) => selected && id === key(selected),
+  );
+  function moveEmployee(offset: number, inDetail = false) {
+    const target =
+      employees[(inDetail ? detailEmployeeIndex : employeeIndex) + offset];
+    if (!target) return;
+    setEmployee(target[0]);
+    setSelectedAttendanceIds([]);
+    setSelectedOvertimeIds([]);
+    if (inDetail) openRecord(target[1].find(needsAction) || target[1][0]);
+  }
   const selectedNormalOvertime = employeeRows.filter(
     (record) =>
       selectedOvertimeIds.includes(record.id) &&
@@ -463,6 +560,10 @@ export function Timekeeping() {
   );
   const cutoffOvertimeRows = records.filter(
     isNormalOvertimeForSeparateMonitoring,
+  );
+  const zeroExpectedRows = records.filter(
+    (row) =>
+      row.review.status === "For Review" && isZeroExpectedHoursSystemIssue(row),
   );
   const completionRows =
     overtimeScope === "cutoff" ? cutoffOvertimeRows : selectedNormalOvertime;
@@ -1309,6 +1410,29 @@ export function Timekeeping() {
                   {cutoffOvertimeRows.length})
                 </Button>
               </div>
+              <div className="timekeeping-employee-bulk-action">
+                <div>
+                  <strong>Zero expected hours · system errors</strong>
+                  <p className="muted">
+                    Resolve verified attendance with 0 expected hours as System
+                    / Data Issue. Zero worked hours and mixed attendance issues
+                    stay for individual review.
+                  </p>
+                </div>
+                <Button
+                  variant="secondary"
+                  disabled={!zeroExpectedRows.length || !!busy}
+                  onClick={() => {
+                    setSystemErrorNote(
+                      "System / Data Issue: Odoo reported 0 expected hours. Recorded working hours were verified.",
+                    );
+                    setConfirmSystemErrors(true);
+                  }}
+                >
+                  <CheckCircle2 size={16} /> Resolve all zero expected hours (
+                  {zeroExpectedRows.length})
+                </Button>
+              </div>
             </details>
           </section>
           <details className="card padded spaced timekeeping-source-details">
@@ -1441,15 +1565,77 @@ export function Timekeeping() {
             </div>
             {employee ? (
               <>
-                <Button variant="ghost" onClick={() => setEmployee("")}>
-                  <ArrowLeft size={16} />
-                  All employees
-                </Button>
+                <div className="button-row">
+                  <Button variant="ghost" onClick={() => setEmployee("")}>
+                    <ArrowLeft size={16} />
+                    All employees
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    disabled={!!busy || employeeIndex <= 0}
+                    onClick={() => moveEmployee(-1)}
+                  >
+                    <ArrowLeft size={16} /> Previous employee
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    disabled={
+                      !!busy ||
+                      employeeIndex < 0 ||
+                      employeeIndex >= employees.length - 1
+                    }
+                    onClick={() => moveEmployee(1)}
+                  >
+                    Next employee <ArrowRight size={16} />
+                  </Button>
+                </div>
                 <h3>{employeeRows[0]?.employee || employee}</h3>
                 <p className="muted">
                   {date(batch.period.start)} – {date(batch.period.end)} ·{" "}
                   {batch.rules.timezone}
                 </p>
+                <div className="timekeeping-employee-bulk-action">
+                  <div>
+                    <strong>Resolve employee attendance</strong>
+                    <p className="muted">
+                      Tick records to resolve together, or resolve all pending
+                      records for this employee across the cutoff.
+                    </p>
+                  </div>
+                  <div className="button-row">
+                    <Button
+                      variant="secondary"
+                      disabled={
+                        !!busy ||
+                        !employeePendingRows.some((row) =>
+                          selectedAttendanceIds.includes(row.id),
+                        )
+                      }
+                      onClick={() =>
+                        openBulkReview(
+                          employeePendingRows.filter((row) =>
+                            selectedAttendanceIds.includes(row.id),
+                          ),
+                        )
+                      }
+                    >
+                      Resolve selected (
+                      {
+                        employeePendingRows.filter((row) =>
+                          selectedAttendanceIds.includes(row.id),
+                        ).length
+                      }
+                      )
+                    </Button>
+                    <Button
+                      disabled={!!busy || !employeePendingRows.length}
+                      onClick={() => openBulkReview(employeePendingRows)}
+                    >
+                      <CheckCircle2 size={16} /> Resolve all for this employee (
+                      {employeePendingRows.length})
+                    </Button>
+                  </div>
+                </div>
                 <div className="timekeeping-employee-bulk-action">
                   <div>
                     <strong>Normal overtime completion</strong>
@@ -1489,6 +1675,7 @@ export function Timekeeping() {
                   <thead>
                     <tr>
                       {[
+                        "Resolve",
                         "Date",
                         "Time in / out",
                         "Worked / expected",
@@ -1504,6 +1691,25 @@ export function Timekeeping() {
                   <tbody>
                     {employeeRows.map((r) => (
                       <tr key={r.id}>
+                        <td>
+                          {needsAction(r) || awaitsVerification(r) ? (
+                            <input
+                              type="checkbox"
+                              disabled={!!busy}
+                              aria-label={`Select ${r.employee} on ${date(r.date)} to resolve`}
+                              checked={selectedAttendanceIds.includes(r.id)}
+                              onChange={(event) =>
+                                setSelectedAttendanceIds((current) =>
+                                  event.target.checked
+                                    ? [...new Set([...current, r.id])]
+                                    : current.filter((id) => id !== r.id),
+                                )
+                              }
+                            />
+                          ) : (
+                            <CheckCircle2 size={16} aria-label="Resolved" />
+                          )}
+                        </td>
                         <td>{date(r.date)}</td>
                         <td>
                           {r.raw.length
@@ -1552,6 +1758,12 @@ export function Timekeeping() {
                                 </Badge>
                               </button>
                             ))}
+                            {!!r.review.duplicateResolution?.disregardedRecords
+                              ?.length && (
+                              <Badge tone="green">
+                                Previously multiple entries · corrected
+                              </Badge>
+                            )}
                           </div>
                         </td>
                         <td>
@@ -1564,6 +1776,11 @@ export function Timekeeping() {
                           >
                             {r.review.status}
                           </Badge>
+                          {r.review.classification && (
+                            <Badge tone="neutral">
+                              {r.review.classification}
+                            </Badge>
+                          )}
                         </td>
                         <td>
                           {isNormalOvertimeForSeparateMonitoring(r) ? (
@@ -1845,7 +2062,7 @@ export function Timekeeping() {
             Entries, remain for review. Overtime approval stays in the separate
             monitoring process.
           </p>
-          <Field label="Completion note">
+          <Field label="Completion note (optional)">
             <RichTextEditor
               rows={3}
               maxLength={4000}
@@ -1861,11 +2078,7 @@ export function Timekeeping() {
               Cancel
             </Button>
             <Button
-              disabled={
-                !completionRows.length ||
-                !overtimeCompletionNote.trim() ||
-                !!busy
-              }
+              disabled={!completionRows.length || !!busy}
               onClick={() =>
                 void run("Completing normal overtime", async () => {
                   const result = await requestJson<{ batch: OdooBatch }>(
@@ -1901,6 +2114,196 @@ export function Timekeeping() {
           </div>
         </Modal>
       )}
+      {confirmSystemErrors && batch && (
+        <Modal
+          title="Resolve zero expected hours system errors"
+          onClose={() => {
+            if (!busy) setConfirmSystemErrors(false);
+          }}
+        >
+          <p>
+            Mark {zeroExpectedRows.length} records across this cutoff as
+            Resolved with System / Data Issue classification. This action
+            applies only to verified attendance with 0 expected hours.
+          </p>
+          <Field label="System error / verification note">
+            <RichTextEditor
+              value={systemErrorNote}
+              onChange={setSystemErrorNote}
+              maxLength={4000}
+              rows={3}
+            />
+          </Field>
+          <Button
+            disabled={!!busy || !zeroExpectedRows.length}
+            onClick={() =>
+              void run("Resolving zero expected hours", async () => {
+                const update = await requestJson<ReviewUpdate>(
+                  "/api/timekeeping",
+                  json({
+                    action: "resolve-zero-expected",
+                    compact: true,
+                    id: batch.id,
+                    revision: batch.revision,
+                    note: systemErrorNote,
+                  }),
+                );
+                applySavedReview(update);
+                setConfirmSystemErrors(false);
+                notify(
+                  `${zeroExpectedRows.length} zero expected hours records resolved as System / Data Issue.`,
+                );
+              })
+            }
+          >
+            <CheckCircle2 size={16} /> Resolve all zero expected hours
+          </Button>
+        </Modal>
+      )}
+      {bulkRows.length > 0 && batch && (
+        <Modal
+          title={`Resolve ${bulkRows.length} attendance records · ${bulkRows[0].employee}`}
+          onClose={() => {
+            if (!busy) setBulkRows([]);
+          }}
+        >
+          <p>
+            These records will be marked Resolved in one save. Confirm any
+            missing classifications and which duplicate entries to keep.
+          </p>
+          {bulkRows.map((row) => (
+            <Card key={row.id} className="spaced">
+              <strong>
+                {date(row.date)} · {row.results.join(" · ")}
+              </strong>
+              {classificationsFor(row).length > 0 && (
+                <Field label="Attendance classification">
+                  <Select
+                    value={bulkDecisions[row.id]?.classification || ""}
+                    onChange={(event) =>
+                      setBulkDecisions((current) => ({
+                        ...current,
+                        [row.id]: {
+                          ...current[row.id],
+                          classification: event.target.value as
+                            AttendanceClassification | "",
+                        },
+                      }))
+                    }
+                  >
+                    <option value="">Choose…</option>
+                    {classificationsFor(row).map((choice) => (
+                      <option key={choice}>{choice}</option>
+                    ))}
+                  </Select>
+                </Field>
+              )}
+              {row.results.includes("Multiple Entries") &&
+                row.raw.map((source) => (
+                  <label className="checkbox-label" key={source.row}>
+                    <input
+                      type="checkbox"
+                      checked={
+                        bulkDecisions[row.id]?.retainedSourceRows.includes(
+                          source.row,
+                        ) || false
+                      }
+                      onChange={(event) =>
+                        setBulkDecisions((current) => ({
+                          ...current,
+                          [row.id]: {
+                            ...current[row.id],
+                            retainedSourceRows: event.target.checked
+                              ? [
+                                  ...current[row.id].retainedSourceRows,
+                                  source.row,
+                                ]
+                              : current[row.id].retainedSourceRows.filter(
+                                  (id) => id !== source.row,
+                                ),
+                          },
+                        }))
+                      }
+                    />
+                    Keep row {source.row} ·{" "}
+                    {source.checkIn || "Missing time-in"} →{" "}
+                    {source.checkOut || "Missing time-out"} ·{" "}
+                    {hours(source.worked)} h
+                  </label>
+                ))}
+            </Card>
+          ))}
+          <Field label="Resolution / verification note (optional)">
+            <RichTextEditor
+              value={bulkNote}
+              onChange={setBulkNote}
+              maxLength={4000}
+              rows={2}
+            />
+          </Field>
+          <Button
+            disabled={
+              !!busy ||
+              bulkRows.some(
+                (row) =>
+                  (classificationsFor(row).length > 0 &&
+                    !bulkDecisions[row.id]?.classification) ||
+                  (row.results.includes("Multiple Entries") &&
+                    !bulkDecisions[row.id]?.retainedSourceRows.length),
+              )
+            }
+            onClick={() =>
+              void run("Resolving employee attendance", async () => {
+                const update = await requestJson<ReviewUpdate>(
+                  "/api/timekeeping",
+                  json({
+                    action: "resolve-employee",
+                    compact: true,
+                    id: batch.id,
+                    revision: batch.revision,
+                    employeeKey: key(bulkRows[0]),
+                    note: bulkNote,
+                    records: bulkRows.map((row) => ({
+                      recordId: row.id,
+                      classification:
+                        bulkDecisions[row.id].classification || undefined,
+                      duplicateResolution: row.results.includes(
+                        "Multiple Entries",
+                      )
+                        ? {
+                            retainedSourceRows:
+                              bulkDecisions[row.id].retainedSourceRows,
+                            disregardedSourceRows: row.raw
+                              .filter(
+                                (source) =>
+                                  !bulkDecisions[
+                                    row.id
+                                  ].retainedSourceRows.includes(source.row),
+                              )
+                              .map((source) => source.row),
+                          }
+                        : undefined,
+                    })),
+                  }),
+                );
+                const changed = new Map(
+                  update.records.map((row) => [row.id, row]),
+                );
+                applySavedReview(update);
+                setSelectedAttendanceIds((current) =>
+                  current.filter((id) => !changed.has(id)),
+                );
+                setBulkRows([]);
+                notify(
+                  `${update.records.length} attendance records resolved for ${bulkRows[0].employee}.`,
+                );
+              })
+            }
+          >
+            <CheckCircle2 size={16} /> Resolve {bulkRows.length} records
+          </Button>
+        </Modal>
+      )}
       {selected && batch && (
         <Modal
           title={`${selected.employee} · ${date(selected.date)}`}
@@ -1919,11 +2322,34 @@ export function Timekeeping() {
               </span>
             </div>
           )}
+          <div className="button-row">
+            <Button
+              variant="secondary"
+              disabled={!!busy || detailEmployeeIndex <= 0}
+              onClick={() => moveEmployee(-1, true)}
+            >
+              <ArrowLeft size={16} /> Previous employee
+            </Button>
+            <Button
+              variant="secondary"
+              disabled={
+                !!busy ||
+                detailEmployeeIndex < 0 ||
+                detailEmployeeIndex >= employees.length - 1
+              }
+              onClick={() => moveEmployee(1, true)}
+            >
+              Next employee <ArrowRight size={16} />
+            </Button>
+          </div>
           <p className="muted">
-            Odoo remains the source attendance record. Classification,
-            resolution, and correction are recorded separately; source
-            attendance is never changed here.
+            Review attendance and keep the main source entries when correcting
+            duplicates.
           </p>
+          {!!selected.review.duplicateResolution?.disregardedRecords
+            ?.length && (
+            <Badge tone="green">Previously multiple entries · corrected</Badge>
+          )}
           <div className="actions">
             {selected.results.map((s) => (
               <span className="timekeeping-status-with-help" key={s}>
@@ -1932,7 +2358,7 @@ export function Timekeeping() {
                   <HelpTip>
                     {issueExplanation(
                       selected,
-                      batch.rules.excessiveWorkedHours ?? 14,
+                      batch.rules.excessiveWorkedHours ?? 16,
                     )}
                   </HelpTip>
                 )}
@@ -2038,7 +2464,7 @@ export function Timekeeping() {
                     <strong>{pendingClassification}</strong>?
                   </p>
                   {pendingClassification === "Other" && (
-                    <Field label="HR note (required for Other)">
+                    <Field label="HR note (optional)">
                       <RichTextEditor
                         rows={2}
                         maxLength={4000}
@@ -2060,9 +2486,6 @@ export function Timekeeping() {
                       Cancel
                     </Button>
                     <Button
-                      disabled={
-                        pendingClassification === "Other" && !note.trim()
-                      }
                       onClick={() => {
                         setClassification(pendingClassification);
                         setPendingClassification("");
@@ -2087,9 +2510,9 @@ export function Timekeeping() {
               <>
                 {selected.raw.length > 1 && (
                   <p className="muted">
-                    Select every source row that should remain active. Unchecked
-                    rows are recorded as disregarded for this cutoff review; the
-                    original source is kept in the audit trail.
+                    Keep the main attendance entry, or the valid split-shift
+                    entries. When resolved, unchecked entries are removed from
+                    this active day and retained in correction history.
                   </p>
                 )}
                 <Table>
@@ -2157,7 +2580,7 @@ export function Timekeeping() {
               ))}
             </Select>
           </Field>
-          <Field label="Resolution / verification note">
+          <Field label="Resolution / verification note (optional)">
             <RichTextEditor
               rows={3}
               maxLength={4000}
@@ -2174,25 +2597,15 @@ export function Timekeeping() {
             />
             Corrected in Odoo
           </label>
-          {correctedInOdoo && (
-            <Field label="Odoo correction note">
-              <RichTextEditor
-                rows={2}
-                maxLength={4000}
-                value={correctionNote}
-                onChange={setCorrectionNote}
-                placeholder="Reference the Odoo correction or verification."
-              />
-            </Field>
-          )}
           <Button
-            disabled={!!busy || (!note.trim() && review !== "For Review")}
+            disabled={!!busy}
             onClick={() =>
               void run("Saving review", async () => {
-                const r = await requestJson<{ batch: OdooBatch }>(
+                const r = await requestJson<ReviewUpdate>(
                   "/api/timekeeping",
                   json({
                     action: "review",
+                    compact: true,
                     id: batch.id,
                     revision: batch.revision,
                     recordId: selected.id,
@@ -2200,7 +2613,6 @@ export function Timekeeping() {
                     note,
                     classification: classification || undefined,
                     correctedInOdoo,
-                    correctionNote,
                     duplicateResolution:
                       selected.raw.length > 1
                         ? {
@@ -2214,9 +2626,10 @@ export function Timekeeping() {
                         : undefined,
                   }),
                 );
-                setBatch(r.batch);
+                const updated = mergeAttendanceReview(batch, r);
+                applySavedReview(r);
                 const next = cutoffWorkflow(
-                  r.batch.records,
+                  updated.records,
                 ).actionRequired.find((record) => record.id !== selected.id);
                 notify(
                   next && reviewNext

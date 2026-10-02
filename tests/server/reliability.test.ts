@@ -129,6 +129,40 @@ test("latest 100 membership, promotion, indexed server pages and HR source prote
     new URLSearchParams({ tab: "Active", page: "2" }),
   );
   assert.equal(second.applications[0].id, "window-084");
+  const boundary = await listApplications(
+    new URLSearchParams({ tab: "Active", around: first.applications[19].id }),
+  );
+  assert.equal(boundary.neighbors?.position, 20);
+  assert.equal(boundary.neighbors?.nextId, second.applications[0].id);
+  assert.equal(boundary.neighbors?.previousId, first.applications[18].id);
+  assert.equal(
+    (
+      await listApplications(
+        new URLSearchParams({
+          tab: "Active",
+          around: first.applications[0].id,
+        }),
+      )
+    ).neighbors?.previousId,
+    null,
+  );
+  const filteredNeighbor = await listApplications(
+    new URLSearchParams({
+      tab: "Active",
+      q: "window-104",
+      around: "window-104",
+    }),
+  );
+  assert.equal(filteredNeighbor.neighbors?.total, 1);
+  assert.equal(filteredNeighbor.neighbors?.nextId, null);
+  assert.equal(
+    (
+      await listApplications(
+        new URLSearchParams({ tab: "Active", around: "window-000" }),
+      )
+    ).neighbors,
+    null,
+  );
   assert.equal(
     (await listApplications(new URLSearchParams({ tab: "Queued" }))).total,
     5,
@@ -155,6 +189,15 @@ test("latest 100 membership, promotion, indexed server pages and HR source prote
   );
   assert.equal(conversations.applications.length, 4);
   assert.equal(conversations.applications[0].id, "window-000");
+  const activityNeighbor = await listApplications(
+    new URLSearchParams({
+      tab: "All applications",
+      sort: "activity",
+      around: "window-000",
+    }),
+  );
+  assert.equal(activityNeighbor.neighbors?.previousId, null);
+  assert.equal(activityNeighbor.neighbors?.nextId, "window-104");
   assert.equal(
     conversations.applications[0].appliedAt,
     "2026-09-01T00:00:00.000Z",

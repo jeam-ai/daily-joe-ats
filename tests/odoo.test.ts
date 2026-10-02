@@ -5,6 +5,8 @@ import {
   parseOdooReports,
   defaultOdooRules,
   type OdooMatrix,
+  type OdooReports,
+  upgradeOdooAnalysis,
 } from "../lib/odoo";
 const raw: OdooMatrix = [
   [
@@ -112,8 +114,98 @@ test("negative attendance remains unclassified until HR confirms the cause", () 
   const absent = analysis.records.find(
     (r) => r.employee === "DEMO Alex" && r.date === "2026-09-02",
   )!;
-  assert.ok(absent.results.includes("No Attendance"));
-  assert.equal(absent.review.classification, undefined);
+  assert.ok(absent.results.includes("Leave"));
+  assert.equal(absent.review.classification, "Leave");
+});
+
+function attendanceWeek(
+  missing: number[],
+  workedHours = 8,
+  start = "2026-09-07",
+): OdooReports {
+  const dates = Array.from({ length: 7 }, (_, index) =>
+    new Date(Date.parse(start) + index * 86400000).toISOString().slice(0, 10),
+  );
+  return {
+    attendance: dates
+      .filter((_, index) => !missing.includes(index))
+      .map((date, index) => ({
+        row: index + 2,
+        employee: "QA Weekly",
+        employeeId: "qa-weekly",
+        checkIn: `${date} 08:00:00`,
+        checkOut: `${date} 16:00:00`,
+        worked: workedHours,
+        overtime: 0,
+        extra: 0,
+      })),
+    pivot: dates.map((date, index) => ({
+      row: index + 2,
+      employee: "QA Weekly",
+      date,
+      worked: missing.includes(index) ? 0 : workedHours,
+      expected: 8,
+      difference: missing.includes(index) ? -8 : workedHours - 8,
+      balance: 0,
+    })),
+    sources: [],
+    aliases: [],
+    warnings: [],
+    period: { start: dates[0], end: dates[6], title: "QA Week" },
+  };
+}
+
+test("one isolated missing day is Leave, while multiple or consecutive missing days keep HR choices", () => {
+  const single = analyzeOdoo(attendanceWeek([2]), defaultOdooRules).records[2];
+  assert.deepEqual(single.results, ["Leave"]);
+  assert.equal(single.review.classification, "Leave");
+  assert.equal(single.review.status, "For Review");
+  for (const missing of [
+    [1, 4],
+    [2, 3],
+  ]) {
+    const records = analyzeOdoo(
+      attendanceWeek(missing),
+      defaultOdooRules,
+    ).records;
+    for (const index of missing) {
+      assert.ok(records[index].results.includes("No Attendance"));
+      assert.equal(records[index].review.classification, undefined);
+    }
+  }
+  const crossWeek = analyzeOdoo(
+    attendanceWeek([2, 3], 8, "2026-09-11"),
+    defaultOdooRules,
+  ).records;
+  assert.ok(crossWeek[2].results.includes("No Attendance"));
+  assert.ok(crossWeek[3].results.includes("No Attendance"));
+  const inconsistent = attendanceWeek([2]);
+  inconsistent.pivot[2].worked = 8;
+  assert.ok(
+    analyzeOdoo(inconsistent, defaultOdooRules).records[2].results.includes(
+      "No Attendance",
+    ),
+  );
+});
+
+test("overtime starts at 9 worked hours and becomes excessive at 16", () => {
+  for (const hours of [8.99, 9, 14, 15.99, 16]) {
+    const day = analyzeOdoo(attendanceWeek([], hours), defaultOdooRules)
+      .records[0];
+    assert.equal(day.results.includes("Overtime"), hours >= 9 && hours < 16);
+    assert.equal(day.results.includes("Excessive Overtime"), hours >= 16);
+  }
+  const old = analyzeOdoo(attendanceWeek([], 14), {
+    ...defaultOdooRules,
+    excessiveWorkedHours: 14,
+  });
+  old.version = 5;
+  old.records[0].review.note = "Existing review";
+  const upgraded = upgradeOdooAnalysis(old);
+  assert.equal(upgraded.rules.excessiveWorkedHours, 16);
+  assert.ok(upgraded.records[0].results.includes("Overtime"));
+  assert.ok(!upgraded.records[0].results.includes("Excessive Overtime"));
+  assert.equal(upgraded.records[0].review.note, "Existing review");
 });
 test("Odoo floating-point rest-day residue and independently configured start times stay traceable", () => {
   const p = structuredClone(pivot);

@@ -151,6 +151,8 @@ export function Applications({ talent = false }: { talent?: boolean }) {
   const pageCount = Math.max(1, Math.ceil(total / 20)),
     currentPage = listing?.page || page,
     visible = rows;
+  const profileHref = (id: string) =>
+    `/applications/${encodeURIComponent(id)}?list=${encodeURIComponent(queryParams)}`;
   async function exportCsv() {
     setExporting(true);
     try {
@@ -518,7 +520,7 @@ export function Applications({ talent = false }: { talent?: boolean }) {
                     <td>
                       <Link
                         className="applicant-cell"
-                        href={`/applications/${a.id}`}
+                        href={profileHref(a.id)}
                         prefetch={false}
                       >
                         <ApplicantCard
@@ -624,7 +626,7 @@ export function Applications({ talent = false }: { talent?: boolean }) {
                         items={[
                           {
                             label: "View Applicant",
-                            onClick: () => router.push(`/applications/${a.id}`),
+                            onClick: () => router.push(profileHref(a.id)),
                           },
                           {
                             label: "Edit Applicant",

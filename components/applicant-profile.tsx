@@ -10,7 +10,7 @@ import {
 } from "@/lib/email-templates";
 import { EmailHistory, ViewEmail } from "./email-history";
 import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { canManage, canEdit } from "@/lib/data-policy";
 import { ApplicantEditor, DeleteApplicantDialog } from "./applicant-management";
 import { RichTextContent, RichTextEditor } from "./rich-text";
@@ -174,8 +174,47 @@ export function ApplicantProfile({ id }: { id: string }) {
     refresh,
     notify,
     saving: workspaceSaving,
+    dataset,
   } = useApp();
   const router = useRouter();
+  const params = useSearchParams();
+  const listContext =
+    params.get("list") || "sort=activity&tab=All+applications";
+  const [neighbors, setNeighbors] = useState<{
+    previousId: string | null;
+    nextId: string | null;
+    position: number;
+    total: number;
+  } | null>(null);
+  const [navigationLoading, setNavigationLoading] = useState(true);
+  const [navigationError, setNavigationError] = useState("");
+  useEffect(() => {
+    const abort = new AbortController();
+    const query = new URLSearchParams(listContext);
+    query.set("around", id);
+    setNavigationLoading(true);
+    setNeighbors(null);
+    setNavigationError("");
+    void requestJson<{ neighbors: typeof neighbors }>(
+      `/api/applications?${query}`,
+      { signal: abort.signal },
+    )
+      .then((result) => {
+        if (!abort.signal.aborted) setNeighbors(result.neighbors);
+      })
+      .catch(() => {
+        if (!abort.signal.aborted)
+          setNavigationError(
+            "Applicant navigation could not load. Refresh to retry.",
+          );
+      })
+      .finally(() => {
+        if (!abort.signal.aborted) setNavigationLoading(false);
+      });
+    return () => abort.abort();
+  }, [id, listContext, dataset]);
+  const neighborHref = (target: string) =>
+    `/applications/${encodeURIComponent(target)}?list=${encodeURIComponent(listContext)}`;
   const [editing, setEditing] = useState(false),
     [confirmEditing, setConfirmEditing] = useState(false),
     [deleting, setDeleting] = useState(false);
@@ -519,6 +558,43 @@ export function ApplicantProfile({ id }: { id: string }) {
         <ArrowLeft size={16} />
         Back to applications
       </Link>
+      <div
+        className="button-row applicant-profile-navigation"
+        aria-label="Applicant navigation"
+      >
+        <Button
+          variant="secondary"
+          disabled={
+            navigationLoading ||
+            !neighbors?.previousId ||
+            saving ||
+            workspaceSaving
+          }
+          onClick={() =>
+            neighbors?.previousId &&
+            router.push(neighborHref(neighbors.previousId))
+          }
+        >
+          <ArrowLeft size={16} /> Previous applicant
+        </Button>
+        {neighbors && (
+          <span className="muted">
+            {neighbors.position} of {neighbors.total}
+          </span>
+        )}
+        <Button
+          variant="secondary"
+          disabled={
+            navigationLoading || !neighbors?.nextId || saving || workspaceSaving
+          }
+          onClick={() =>
+            neighbors?.nextId && router.push(neighborHref(neighbors.nextId))
+          }
+        >
+          Next applicant <ArrowRight size={16} />
+        </Button>
+        {navigationError && <small role="status">{navigationError}</small>}
+      </div>
       <div className="profile-header">
         <div className="applicant-avatar-wrap">
           <Avatar

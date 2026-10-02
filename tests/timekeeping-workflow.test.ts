@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { OdooDay } from "../lib/odoo";
 import {
+  mergeAttendanceReview,
   cutoffWorkflow,
   employeeAttendanceSummary,
   isNormalOvertimeForSeparateMonitoring,
@@ -25,7 +26,7 @@ function record(
     checkOut: "",
     rawWorked: null,
     pivotWorked: null,
-    worked: results.includes("Excessive Overtime") ? 14.5 : null,
+    worked: results.includes("Excessive Overtime") ? 16.5 : null,
     expected: 8,
     difference: results.includes("Negative Attendance") ? -1 : null,
     pivotDifference: null,
@@ -95,7 +96,7 @@ test("employee cutoff summary represents no-attendance dates rather than droppin
 
 test("excessive overtime remains an HR verification issue, not an automatic approval", () => {
   const excessive = record("05", ["Excessive Overtime"]);
-  assert.match(issueExplanation(excessive), /14\+ hours/i);
+  assert.match(issueExplanation(excessive), /16\+ hours/i);
   assert.equal(cutoffWorkflow([excessive]).actionRequired.length, 1);
 });
 
@@ -134,5 +135,43 @@ test("overtime completion requires exactly one Overtime classification and an op
       record("10", ["Overtime"], { status: "Resolved" }),
     ),
     false,
+  );
+});
+
+test("save responses immediately refresh status and workflow, including corrected Odoo records", () => {
+  const original = record("01", ["Missing Time Out"]);
+  const batch = {
+    id: "cutoff",
+    revision: 1,
+    records: [original, record("02", ["Overtime"])],
+  };
+  const saved = record("01", ["Missing Time Out"], {
+    status: "Resolved",
+    correctedInOdoo: true,
+  });
+  const next = mergeAttendanceReview(batch, {
+    id: batch.id,
+    revision: 2,
+    records: [saved],
+  });
+  assert.equal(next.records[0].review.status, "Resolved");
+  assert.equal(cutoffWorkflow(next.records).remaining, 1);
+  assert.equal(cutoffWorkflow(next.records).awaitingVerification.length, 0);
+  assert.equal(next.records[1], batch.records[1]);
+  assert.equal(
+    mergeAttendanceReview(next, {
+      id: "other-cutoff",
+      revision: 3,
+      records: [original],
+    }),
+    next,
+  );
+  assert.equal(
+    mergeAttendanceReview(next, {
+      id: batch.id,
+      revision: 1,
+      records: [original],
+    }),
+    next,
   );
 });

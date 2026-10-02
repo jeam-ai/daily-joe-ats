@@ -9,6 +9,8 @@ import {
   completeNormalOvertimeForEmployee,
   getOdooBatch,
   reviewOdoo,
+  resolveEmployeeAttendance,
+  resolveZeroExpectedHours,
   type OdooBatch,
 } from "../../lib/server/odoo";
 import { deleteOdooCutoff } from "../../lib/server/timekeeping-delete";
@@ -244,6 +246,219 @@ test("single attendance review leaves unrelated exception projections untouched"
       readRecord(tx, "odoo_exceptions", `${value.id}:b`),
     ),
     { sentinel: "unchanged" },
+  );
+});
+
+test("a correction can be saved without verification or Odoo correction notes", async () => {
+  const value = batch("optional-notes");
+  await store(value);
+  const saved = await reviewOdoo(
+    {
+      id: value.id,
+      revision: 1,
+      recordId: "a",
+      status: "Resolved",
+      correctedInOdoo: true,
+    },
+    user,
+  );
+  assert.equal(saved.records[0].review.note, "");
+  assert.equal(saved.records[0].review.correctionNote, "");
+  assert.equal(saved.records[0].review.correctedInOdoo, true);
+  assert.equal(saved.records[0].review.history.length, 1);
+});
+
+test("keeping the main duplicate entry removes extras, recalculates hours and persists correction evidence", async () => {
+  const value = batch("duplicates");
+  const row = value.records[2];
+  row.raw = [2, 3].map((sourceRow) => ({
+    row: sourceRow,
+    employee: "QA A",
+    employeeId: "QA A",
+    checkIn: "2026-09-16 08:00:00",
+    checkOut: "2026-09-16 17:00:00",
+    worked: 9,
+    overtime: 1,
+    extra: 0,
+  }));
+  row.pivot = [
+    {
+      row: 2,
+      employee: "QA A",
+      date: row.date,
+      worked: 9,
+      expected: 8,
+      difference: 1,
+      balance: 1,
+    },
+  ];
+  row.worked = 18;
+  row.results.push("Excessive Overtime");
+  await store(value);
+  await assert.rejects(
+    reviewOdoo(
+      {
+        id: value.id,
+        revision: 1,
+        recordId: row.id,
+        status: "Resolved",
+        duplicateResolution: {
+          retainedSourceRows: [2],
+          disregardedSourceRows: [],
+        },
+      },
+      user,
+    ),
+    /every entry/,
+  );
+  const saved = await reviewOdoo(
+    {
+      id: value.id,
+      revision: 1,
+      recordId: row.id,
+      status: "Resolved",
+      duplicateResolution: {
+        retainedSourceRows: [2],
+        disregardedSourceRows: [3],
+      },
+    },
+    user,
+  );
+  const corrected = saved.records[2];
+  assert.equal(corrected.raw.length, 1);
+  assert.equal(corrected.raw[0].row, 2);
+  assert.equal(corrected.worked, 9);
+  assert.ok(!corrected.results.includes("Multiple Entries"));
+  assert.ok(!corrected.results.includes("Excessive Overtime"));
+  assert.ok(corrected.results.includes("Overtime"));
+  assert.equal(
+    corrected.review.duplicateResolution!.disregardedRecords![0].row,
+    3,
+  );
+  assert.deepEqual(
+    (await getOdooBatch(value.id, user)).records[2],
+    JSON.parse(JSON.stringify(corrected)),
+  );
+});
+
+test("employee bulk resolution is atomic, scoped to one employee and still requires ambiguous classifications", async () => {
+  const value = batch("resolve-employee");
+  value.records[2].results = ["No Attendance"];
+  await store(value);
+  for (const records of [
+    [{ recordId: "a" }, { recordId: "b" }],
+    [{ recordId: "a" }, { recordId: "mixed" }],
+  ]) {
+    await assert.rejects(
+      resolveEmployeeAttendance(
+        { id: value.id, revision: 1, employeeKey: "QA A", records },
+        user,
+      ),
+      /same employee|classification/,
+    );
+    assert.equal((await getOdooBatch(value.id, user)).revision, 1);
+  }
+  const saved = await resolveEmployeeAttendance(
+    {
+      id: value.id,
+      revision: 1,
+      employeeKey: "QA A",
+      records: [
+        { recordId: "a" },
+        { recordId: "mixed", classification: "Absent" },
+      ],
+    },
+    user,
+  );
+  assert.equal(saved.revision, 2);
+  assert.equal(saved.records[0].review.status, "Resolved");
+  assert.equal(saved.records[2].review.status, "Resolved");
+  assert.equal(saved.records[2].review.classification, "Absent");
+  assert.equal(saved.records[1].review.status, "For Review");
+  assert.equal(saved.records[0].review.note, "");
+  const index = await readTransaction((tx) =>
+    readRecord<{ flagged: number }>(tx, "odoo_index", value.id),
+  );
+  assert.equal(index!.flagged, 3);
+  await assert.rejects(
+    resolveEmployeeAttendance(
+      {
+        id: value.id,
+        revision: 1,
+        employeeKey: "QA A",
+        records: [{ recordId: "a" }],
+      },
+      user,
+    ),
+    /Another HR user/,
+  );
+});
+
+test("zero expected hours completion excludes zero worked hours and mixed attendance errors", async () => {
+  const value = batch("zero-expected");
+  const system = "System Error — Expected hours missing or zero";
+  const raw = {
+    row: 2,
+    employee: "QA A",
+    checkIn: "2026-09-16 08:00:00",
+    checkOut: "2026-09-16 17:00:00",
+    worked: 9,
+    overtime: 1,
+    extra: 0,
+  };
+  value.records[0] = {
+    ...value.records[0],
+    expected: 0,
+    results: [system, "Overtime"],
+    raw: [raw],
+  };
+  value.records[1] = {
+    ...value.records[1],
+    expected: 0,
+    worked: 0,
+    results: [system],
+    raw: [raw],
+  };
+  value.records[2] = {
+    ...value.records[2],
+    expected: 0,
+    results: [system, "Missing Time Out"],
+    raw: [raw],
+  };
+  value.records[3].worked = 0;
+  await store(value);
+  await assert.rejects(
+    resolveZeroExpectedHours(
+      { id: value.id, revision: 1 },
+      { ...user, role: "Viewer" },
+    ),
+    /access/,
+  );
+  const saved = await resolveZeroExpectedHours(
+    {
+      id: value.id,
+      revision: 1,
+      note: "Expected-hours formula error verified",
+    },
+    user,
+  );
+  assert.equal(saved.records[0].review.status, "Resolved");
+  assert.equal(saved.records[0].review.classification, "System / Data Issue");
+  assert.equal(
+    saved.records[0].review.note,
+    "Expected-hours formula error verified",
+  );
+  assert.equal(saved.records[0].expected, 0);
+  assert.equal(saved.records[0].worked, 9);
+  for (const row of saved.records.slice(1))
+    assert.equal(row.review.status, "For Review");
+  await assert.rejects(
+    resolveZeroExpectedHours({ id: value.id, revision: 1 }, user),
+    /Another HR user/,
+  );
+  await assert.rejects(
+    resolveZeroExpectedHours({ id: value.id, revision: 2 }, user),
+    /No zero expected hours/,
   );
 });
 test("bulk writes reduce 450 database round trips to three bounded upserts", async () => {
