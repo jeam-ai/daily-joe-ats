@@ -1,10 +1,16 @@
 import ExcelJS from "exceljs";
+import { createHash } from "node:crypto";
+import { z } from "zod";
 import { requireOrigin, requireUser } from "@/lib/auth/session";
 import { SafeError } from "@/lib/server/config";
 import { safeError } from "@/lib/server/response";
+import { issuanceEmployees } from "@/lib/issuance-employees";
+import { bulkIssue, bulkUpdateIssuance } from "@/lib/server/issuance-bulk";
 import {
   putRecord,
+  readRecord,
   transaction,
+  readTransaction,
   type Transaction,
 } from "@/lib/server/database";
 import { audit, getState } from "@/lib/server/repository";
@@ -38,6 +44,17 @@ const categories = new Set<IssuanceCategory>([
 
 function canManageIssuance(role: string) {
   return ["Admin", "Talent Acquisition", "HR Generalist"].includes(role);
+}
+function issuanceDate(value: unknown, label: string) {
+  const date = text(value, 20);
+  if (!date) return undefined;
+  if (
+    !/^\d{4}-\d{2}-\d{2}$/.test(date) ||
+    !Number.isFinite(Date.parse(date)) ||
+    new Date(date).toISOString().slice(0, 10) !== date
+  )
+    throw new SafeError(`Enter a valid ${label} date.`);
+  return date;
 }
 
 /**
@@ -402,6 +419,31 @@ export async function importIssuanceWorkbook(file: File, actor: string) {
   });
 }
 
+export async function GET(request: Request) {
+  try {
+    await requireUser();
+    if (request.headers.get("x-djc-dataset") === "demo")
+      return Response.json({ employees: [], applications: [] });
+    const state = await readTransaction(getState);
+    return Response.json(
+      {
+        employees: issuanceEmployees(state),
+        applications:
+          new URL(request.url).searchParams.get("onboarding") === "1"
+            ? state.applications.filter(
+                (a) =>
+                  !a.deletedAt &&
+                  !a.isDemo &&
+                  (a.status === "Hired" || a.stage === "Hired" || !!a.hiredAt),
+              )
+            : undefined,
+      },
+      { headers: { "Cache-Control": "no-store" } },
+    );
+  } catch (error) {
+    return safeError(error);
+  }
+}
 export async function POST(request: Request) {
   try {
     requireOrigin(request);
@@ -423,7 +465,14 @@ export async function POST(request: Request) {
       return Response.json(await importIssuanceWorkbook(file, user.email));
     }
     const body = await request.json();
+    if (body.action === "bulk-create")
+      return Response.json(await bulkIssue(body, user));
+    if (body.action === "bulk-update")
+      return Response.json(await bulkUpdateIssuance(body, user));
     if (body.action === "create") {
+      const requestId = body.requestId;
+      if (requestId !== undefined && !z.uuid().safeParse(requestId).success)
+        throw new SafeError("Refresh the issuance form before submitting.");
       const category = text(body.category) as IssuanceCategory;
       const status = text(body.status) as IssuanceStatus;
       const employeeName = text(body.employeeName);
@@ -434,7 +483,7 @@ export async function POST(request: Request) {
       if (!employeeName || !item || !Number.isInteger(quantity) || quantity < 1)
         throw new SafeError("Enter an employee, item, and whole quantity.");
       const now = new Date().toISOString();
-      const issuedAt = text(body.issuedAt, 20) || undefined;
+      const issuedAt = issuanceDate(body.issuedAt, "release");
       const record: IssuanceRecord = {
         id: crypto.randomUUID(),
         category,
@@ -448,9 +497,10 @@ export async function POST(request: Request) {
         condition: text(body.condition) || undefined,
         status: statusAfterReleaseDate(status, issuedAt),
         issuedAt,
-        receivedAt: text(body.receivedAt, 20) || undefined,
+        issuedBy: text(body.issuedBy, 254) || user.name || user.email,
+        receivedAt: issuanceDate(body.receivedAt, "receipt"),
         signed: body.signed === true,
-        returnedAt: text(body.returnedAt, 20) || undefined,
+        returnedAt: issuanceDate(body.returnedAt, "return"),
         remarks: text(body.remarks, 2000) || undefined,
         source: "HR entry",
         createdAt: now,
@@ -459,6 +509,37 @@ export async function POST(request: Request) {
       return Response.json(
         await transaction(async (tx) => {
           const state = await getState(tx);
+          const key = requestId ? `${user.email}:${requestId}` : undefined;
+          const payloadHash = createHash("sha256")
+            .update(
+              JSON.stringify({
+                ...record,
+                id: undefined,
+                createdAt: undefined,
+                updatedAt: undefined,
+              }),
+            )
+            .digest("hex");
+          const previous = key
+            ? await readRecord<{ record: IssuanceRecord; payloadHash: string }>(
+                tx,
+                "individual_issuance",
+                key,
+              )
+            : undefined;
+          if (previous) {
+            if (previous.payloadHash !== payloadHash)
+              throw new SafeError(
+                "This submission already recorded different issuance details. Refresh and check the saved record first.",
+                409,
+              );
+            return {
+              record:
+                state.issuance?.find((r) => r.id === previous.record.id) ||
+                previous.record,
+              inventory: state.issuanceInventory,
+            };
+          }
           state.issuance = [...(state.issuance || []), record];
           state.issuanceInventory = reconcileInventory(
             state.issuanceInventory || [],
@@ -472,7 +553,13 @@ export async function POST(request: Request) {
             issuanceId: record.id,
             category: record.category,
             item: record.item,
+            issuedBy: record.issuedBy,
           });
+          if (key)
+            await putRecord(tx, "individual_issuance", key, {
+              record,
+              payloadHash,
+            });
           return { record, inventory: state.issuanceInventory };
         }),
       );
@@ -607,6 +694,7 @@ export async function POST(request: Request) {
             condition: record.condition,
             status: record.status,
             issuedAt: record.issuedAt,
+            issuedBy: record.issuedBy,
             receivedAt: record.receivedAt,
             returnedAt: record.returnedAt,
             signed: record.signed,
@@ -620,11 +708,15 @@ export async function POST(request: Request) {
           record.size = text(body.size) || undefined;
           record.quantity = quantity;
           record.condition = text(body.condition) || undefined;
-          record.issuedAt = text(body.issuedAt, 20) || undefined;
+          record.issuedAt = issuanceDate(body.issuedAt, "release");
+          record.issuedBy = text(body.issuedBy, 254) || record.issuedBy;
           record.status = statusAfterReleaseDate(status, record.issuedAt);
           record.signed = body.signed === true;
-          record.receivedAt = text(body.receivedAt, 20) || undefined;
-          record.returnedAt = text(body.returnedAt, 20) || undefined;
+          record.receivedAt = issuanceDate(body.receivedAt, "receipt");
+          record.returnedAt =
+            previous.status === "Returned" && record.status !== "Returned"
+              ? undefined
+              : issuanceDate(body.returnedAt, "return");
           record.remarks = text(body.remarks, 2000) || undefined;
           record.updatedAt = new Date().toISOString();
           state.issuanceInventory = reconcileInventory(
@@ -650,6 +742,7 @@ export async function POST(request: Request) {
               condition: record.condition,
               status: record.status,
               issuedAt: record.issuedAt,
+              issuedBy: record.issuedBy,
               receivedAt: record.receivedAt,
               returnedAt: record.returnedAt,
               signed: record.signed,

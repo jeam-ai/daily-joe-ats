@@ -5,7 +5,11 @@ import type { Application, HiringNeed, User } from "@/types";
 import { canManage } from "@/lib/data-policy";
 import { changed, ruleSchema } from "@/lib/domain";
 import { SafeError } from "@/lib/server/config";
-import { putRecord, transaction, type Transaction } from "@/lib/server/database";
+import {
+  putRecord,
+  transaction,
+  type Transaction,
+} from "@/lib/server/database";
 import { audit, getState } from "@/lib/server/repository";
 
 const needSchema = z.object({
@@ -150,8 +154,10 @@ export async function saveHiringNeed(input: unknown, user: User) {
     const index = values.id
       ? state.hiringNeeds.findIndex((need) => need.id === values.id)
       : -1;
-    if (values.id && index < 0) throw new SafeError("Hiring need not found.", 404);
-    const before = index >= 0 ? structuredClone(state.hiringNeeds[index]) : undefined;
+    if (values.id && index < 0)
+      throw new SafeError("Hiring need not found.", 404);
+    const before =
+      index >= 0 ? structuredClone(state.hiringNeeds[index]) : undefined;
     const openedAt = values.openedAt
       ? normalizedOpeningDate(values.openedAt)
       : before?.openedAt || new Date().toISOString();
@@ -190,10 +196,16 @@ export async function saveHiringNeed(input: unknown, user: User) {
           next,
           user.email,
         );
-        await audit(tx, user.email, "screening.criteria_changed", application.id, {
-          previous: previousScreening,
-          next: application.screening,
-        });
+        await audit(
+          tx,
+          user.email,
+          "screening.criteria_changed",
+          application.id,
+          {
+            previous: previousScreening,
+            next: application.screening,
+          },
+        );
         resetApplications.push(application);
       }
     }
@@ -209,7 +221,10 @@ export async function saveHiringNeed(input: unknown, user: User) {
   });
 }
 
-export async function setRealHiringNeedsOpeningDate(input: unknown, user: User) {
+export async function setRealHiringNeedsOpeningDate(
+  input: unknown,
+  user: User,
+) {
   if (!canManage(user))
     throw new SafeError("A recruitment manager must edit hiring needs.", 403);
   const parsed = openingDateSchema.safeParse(input);
@@ -222,7 +237,8 @@ export async function setRealHiringNeedsOpeningDate(input: unknown, user: User) 
     const affected = state.hiringNeeds.filter(
       (need) => !need.isDemo && need.openedAt !== openedAt,
     );
-    if (!affected.length) return { updated: 0, hiringNeeds: [] as HiringNeed[] };
+    if (!affected.length)
+      return { updated: 0, hiringNeeds: [] as HiringNeed[] };
     for (const need of affected) need.openedAt = openedAt;
     await audit(tx, user.email, "hiring.open_dates_updated", undefined, {
       openedAt,
@@ -231,5 +247,54 @@ export async function setRealHiringNeedsOpeningDate(input: unknown, user: User) 
     });
     await persistHiringNeedChanges(tx, state, affected);
     return { updated: affected.length, hiringNeeds: structuredClone(affected) };
+  });
+}
+
+export async function bulkHiringNeeds(input: unknown, user: User) {
+  if (!canManage(user))
+    throw new SafeError("A recruitment manager must edit hiring needs.", 403);
+  const body = z
+    .object({
+      ids: z.array(z.string()).min(1).max(10000),
+      revision: z.number().int(),
+      filter: z.enum(["Open", "Paused", "Filled", "Closed", "All"]),
+      status: z.enum(["Open", "Paused", "Filled", "Closed"]),
+      confirmed: z.literal(true),
+    })
+    .safeParse(input);
+  if (!body.success || new Set(body.data.ids).size !== body.data.ids.length)
+    throw new SafeError("Confirm the hiring needs and status.");
+  return transaction(async (tx) => {
+    const state = await getState(tx),
+      values = body.data;
+    if (state.revision !== values.revision)
+      throw new SafeError(
+        "The workspace changed. Refresh the selection before confirming.",
+        409,
+      );
+    const rows = state.hiringNeeds.filter(
+      (n) =>
+        values.ids.includes(n.id) &&
+        !n.isDemo &&
+        (values.filter === "All" || n.status === values.filter),
+    );
+    if (rows.length !== values.ids.length)
+      throw new SafeError(
+        "A selected hiring need no longer matches these filters.",
+        409,
+      );
+    for (const row of rows) {
+      const previous = structuredClone(row);
+      row.status = values.status;
+      await audit(tx, user.email, "hiring.updated", undefined, {
+        entityType: "hiringNeeds",
+        entityId: row.id,
+        previous,
+        next: row,
+        bulk: true,
+      });
+    }
+    await persistHiringNeedChanges(tx, state, rows);
+    return { hiringNeeds: structuredClone(rows) };
   });
 }

@@ -5,6 +5,7 @@ import { canonicalLocationName, nearbyConfiguredBranch } from "./locations";
 import type { Location } from "@/types";
 export interface IntakeEvidence {
   name: string;
+  email?: string;
   position: string;
   location: string;
   residence: string;
@@ -66,16 +67,14 @@ const safeResumeHeaderName = (value: string) => {
   const cleaned = cleanOcrName(value)
     .replace(/^\s*(?:name|full name)\s*[:|–—-]\s*/i, "")
     .trim();
-  return (
-    cleaned &&
+  return cleaned &&
     plausiblePersonName(cleaned) &&
     !genericProfileName(cleaned) &&
     !/\b(?:resume|curriculum|vitae|address|contact|profile|personal|information|experience|education|skills|objective|university|college|school|bachelor|barista|cashier|supervisor|leader|accounting|analyst|manager|staff|assistant|engineer|developer|administrator|intern|clerk|officer|executive|representative|specialist|recruitment|human resources|street|barangay|camarines|philippines|city|summary|references|career|history|employment|certification|achievement|to obtain|seeking|applying|dear|thank you|place of birth|single)\b/i.test(
       cleaned,
     )
-      ? cleaned
-      : ""
-  );
+    ? cleaned
+    : "";
 };
 export function intakeEvidence(input: {
   subject: string;
@@ -251,11 +250,17 @@ export function intakeEvidence(input: {
       return undefined;
     return cleaned;
   };
-  const subjectName = subject
+  const subjectCandidate = subject
     .match(
       /^\s*([\p{L}][\p{L} .,'’-]{3,80}?)\s*[-–—|]\s*(?:resume|cv|curriculum vitae|job application)\b/iu,
     )?.[1]
     ?.trim();
+  const subjectName =
+    subjectCandidate &&
+    !!safeResumeHeaderName(subjectCandidate) &&
+    !genericProfileName(subjectCandidate)
+      ? subjectCandidate
+      : undefined;
   const headingLines = resume
     .split(/\n/)
     .map((l) => l.trim())
@@ -273,8 +278,7 @@ export function intakeEvidence(input: {
     .map(cleanOcrName)
     .find(
       (l) =>
-        /^[\p{L}][\p{L} .,'’-]{4,80}$/u.test(l) &&
-        !!safeResumeHeaderName(l),
+        /^[\p{L}][\p{L} .,'’-]{4,80}$/u.test(l) && !!safeResumeHeaderName(l),
     );
   // Some PDF/DOCX extractors flatten the resume header onto one line. Recover
   // only the leading name before a phone, email, label, or visual separator;
@@ -282,13 +286,13 @@ export function intakeEvidence(input: {
   const resumeOpening = resume.replace(/\r/g, "").slice(0, 420);
   const inlineHeaderName = [
     resumeOpening.split(/\n|[|•·]/)[0],
-    resumeOpening.split(/\b(?:email|e-mail|mobile|phone|contact(?:\s+(?:number|details))?|address)\b/i)[0],
+    resumeOpening.split(
+      /\b(?:email|e-mail|mobile|phone|contact(?:\s+(?:number|details))?|address)\b/i,
+    )[0],
     resumeOpening.split(phonePattern)[0],
     resumeOpening.split(/[^\s@]+@[^\s@]+\.[^\s@]+/i)[0],
   ]
-    .map(
-      (candidate) => candidate?.replace(/[|•·]+$/g, "").trim() || "",
-    )
+    .map((candidate) => candidate?.replace(/[|•·]+$/g, "").trim() || "")
     .map(safeResumeHeaderName)
     .find(Boolean);
   const explicitResumeName = named(resume);
@@ -429,27 +433,55 @@ export function intakeEvidence(input: {
     }
   }
   const displayName = senderName(input.from || "");
+  const validDisplayName =
+    !!safeResumeHeaderName(displayName) &&
+    !/\b(?:recruitment|careers|human resources|daily joe|hr team)\b/i.test(
+      displayName,
+    );
   const senderEmail = (input.from || "")
     .match(/<([^<>\s]+@[^<>\s]+)>|\b([^\s<>]+@[^\s<>]+\.[^\s<>]+)\b/i)
     ?.slice(1)
     .find(Boolean)
     ?.toLowerCase();
-  if (senderEmail && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(senderEmail)) {
-    evidence.email = `Gmail sender: ${senderEmail}`;
-    provenance.email = "Gmail sender";
+  const emailPattern =
+    /[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+/i;
+  // Restrict resume email recovery to its header/contact area so reference
+  // contacts later in the document cannot become the applicant's address.
+  const resumeContact = resume
+    .split(
+      /\b(?:references|work experience|employment history|education)\b/i,
+    )[0]
+    .slice(0, 1500);
+  const resumeEmail = resumeContact.match(emailPattern)?.[0]?.toLowerCase();
+  const bodyEmail = body
+    .match(
+      /(?:^|\n)\s*(?:email|e-mail|email address)\s*[:–—-]\s*([^\s<>]+)/i,
+    )?.[1]
+    ?.match(emailPattern)?.[0]
+    ?.toLowerCase();
+  const email = resumeEmail || bodyEmail || senderEmail || "";
+  if (email) {
+    evidence.email = `${resumeEmail ? "Resume" : bodyEmail ? "Email body" : "Gmail sender"}: ${email}`;
+    provenance.email = resumeEmail
+      ? "Resume"
+      : bodyEmail
+        ? "Email body"
+        : "Gmail sender";
   }
   const name = normalizeName(
     resumeName ||
       submittedName ||
-      subjectName ||
       safeFilenameName ||
-      displayName,
+      (validDisplayName ? displayName : "") ||
+      subjectName ||
+      "Applicant name was not clearly stated in the submitted application.",
   );
   if (resumeName) evidence.name = `Resume: ${resumeName}`;
   else if (submittedName) evidence.name = `Email body: ${submittedName}`;
-  else if (subjectName) evidence.name = `Email subject: ${subjectName}`;
   else if (safeFilenameName)
     evidence.name = `Attachment filename: ${safeFilenameName}`;
+  else if (validDisplayName) evidence.name = "Gmail sender display name";
+  else if (subjectName) evidence.name = `Email subject: ${subjectName}`;
   else if (
     name !==
     "Applicant name was not clearly stated in the submitted application."
@@ -459,7 +491,7 @@ export function intakeEvidence(input: {
     resumeName &&
     displayName !==
       "Applicant name was not clearly stated in the submitted application." &&
-    plausiblePersonName(displayName) &&
+    validDisplayName &&
     normalizeName(resumeName).toLowerCase() !== displayName.toLowerCase()
   )
     warnings.push(
@@ -732,6 +764,7 @@ export function intakeEvidence(input: {
     warnings.push("Multiple preferred branches require HR verification.");
   return {
     name,
+    email,
     residence: formalFact("residence", residence),
     residenceLocation,
     phone,

@@ -175,6 +175,8 @@ export async function proceedApplicant(
     confirmed?: boolean;
   },
   user: User,
+  existingTransaction?: Transaction,
+  existingState?: AppState,
 ) {
   if (!canManage(user))
     throw new SafeError(
@@ -184,14 +186,14 @@ export async function proceedApplicant(
   if (!input.confirmed)
     throw new SafeError("Confirm the stage change and configured email first.");
   const key = hash(`${id}:${input.expectedStage}:proceed`);
-  return transaction(async (tx) => {
+  const execute = async (tx: Transaction) => {
     const previous = await readRecord<{ emailId?: string; stage: string }>(
       tx,
       "transitions",
       key,
     );
     if (previous) return previous;
-    const state = await getState(tx),
+    const state = existingState || (await getState(tx)),
       a = state.applications.find((a) => a.id === id && !a.deletedAt);
     if (!a) throw new SafeError("Applicant not found.", 404);
     if (a.stage !== input.expectedStage)
@@ -282,7 +284,7 @@ export async function proceedApplicant(
         });
       }
     }
-    await saveState(tx, state, { sync: !a.isDemo });
+    if (!existingState) await saveState(tx, state, { sync: !a.isDemo });
     const result = {
       stage: a.isDemo ? next.stage : a.stage,
       emailId,
@@ -290,7 +292,10 @@ export async function proceedApplicant(
     };
     await putRecord(tx, "transitions", key, result);
     return result;
-  });
+  };
+  return existingTransaction
+    ? execute(existingTransaction)
+    : transaction(execute);
 }
 export async function emailHistory(applicationId: string, user: User) {
   return readTransaction(async (tx) => {

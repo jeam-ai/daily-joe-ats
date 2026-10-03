@@ -3,6 +3,7 @@ import { formalFact } from "@/lib/formal-facts";
 import { queueExtraction } from "./ai-extraction";
 import { recordIssue } from "./diagnostics";
 import "server-only";
+import { applicantFieldProtected } from "@/lib/applicant-information";
 import type {
   Application,
   HiringNeed,
@@ -280,7 +281,7 @@ export async function enrichApplicants(user: User, ids: string[]) {
         "position",
         "location",
       ] as const) {
-        if (a.information.fields[key]?.verifiedBy) continue;
+        if (applicantFieldProtected(a, key)) continue;
         const value = p.evidence[key];
         if (!value || /requires review|not verified/i.test(value)) continue;
         if (key === "position" || key === "location")

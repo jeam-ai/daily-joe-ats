@@ -15,6 +15,7 @@ import { canManage, canEdit } from "@/lib/data-policy";
 import { ApplicantEditor, DeleteApplicantDialog } from "./applicant-management";
 import { RichTextContent, RichTextEditor } from "./rich-text";
 import { ActionMenu } from "./action-menu";
+import { ApplicantReprocess } from "./applicant-reprocess";
 import {
   ArrowLeft,
   Mail,
@@ -622,38 +623,57 @@ export function ApplicantProfile({ id }: { id: string }) {
             <h1>{applicantDisplayName(a)}</h1>
             <StatusBadge status={a.status} />
             {a.isDemo && <Badge tone="amber">DEMO DATA</Badge>}
-            {manager && (
+            {(manager || editable) && (
               <div
                 className="profile-quick-actions"
                 aria-label="Applicant actions"
               >
-                <Button
-                  variant="secondary"
-                  disabled={!isActive(a) || workspaceSaving}
-                  onClick={() => {
-                    setError("");
-                    setDecision("Reject");
-                  }}
-                >
-                  <X size={14} /> Reject
-                </Button>
-                <Button
-                  variant="secondary"
-                  disabled={!isActive(a) || workspaceSaving}
-                  onClick={() => {
-                    setError("");
-                    setDecision("Withdraw");
-                  }}
-                >
-                  <ArrowRight size={14} /> Withdraw
-                </Button>
-                <Button
-                  variant="secondary"
-                  disabled={workspaceSaving}
-                  onClick={() => setDeleting(true)}
-                >
-                  <Trash2 size={14} /> Delete
-                </Button>
+                <ActionMenu
+                  label={`Actions for ${applicantDisplayName(a)}`}
+                  items={[
+                    {
+                      label: "Edit Applicant",
+                      onClick: requestEdit,
+                      disabled: !editable || workspaceSaving,
+                    },
+                    ...(
+                      [
+                        "Proceed",
+                        "Review",
+                        "Reject",
+                        "Withdraw",
+                        "Talent Pool",
+                      ] as Decision[]
+                    ).map((action) => ({
+                      label:
+                        action === "Proceed"
+                          ? "Proceed · move to next stage"
+                          : action === "Talent Pool"
+                            ? "Move to Talent Pool"
+                            : action,
+                      onClick: () => {
+                        setError("");
+                        setDecision(action);
+                      },
+                      disabled: !manager || !isActive(a) || workspaceSaving,
+                      danger: action === "Reject",
+                    })),
+                    {
+                      label: "Add Note",
+                      onClick: () =>
+                        document
+                          .querySelector<HTMLElement>('[aria-label="HR Notes"]')
+                          ?.focus(),
+                      disabled: !editable || workspaceSaving,
+                    },
+                    {
+                      label: "Delete Applicant",
+                      onClick: () => setDeleting(true),
+                      disabled: !manager || workspaceSaving,
+                      danger: true,
+                    },
+                  ]}
+                />
               </div>
             )}
           </div>
@@ -681,6 +701,9 @@ export function ApplicantProfile({ id }: { id: string }) {
         editable={editable}
         onEdit={requestEdit}
       />
+      {manager && !a.isDemo && (
+        <ApplicantReprocess ids={[a.id]} disabled={workspaceSaving} />
+      )}
       {a.retentionExpiresAt &&
         ["outside_live_queue", "terminal"].includes(
           a.retentionCategory || "",
@@ -1097,48 +1120,6 @@ export function ApplicantProfile({ id }: { id: string }) {
                 >
                   Proceed <ArrowRight size={16} />
                 </Button>
-                <ActionMenu
-                  items={[
-                    {
-                      label: "Edit Applicant",
-                      onClick: requestEdit,
-                      disabled: !editable,
-                    },
-                    {
-                      label: "Add Note",
-                      onClick: () =>
-                        document
-                          .querySelector<HTMLElement>('[aria-label="HR Notes"]')
-                          ?.focus(),
-                      disabled: !editable,
-                    },
-                    ...(
-                      [
-                        "Review",
-                        "Reject",
-                        "Withdraw",
-                        "Talent Pool",
-                      ] as Decision[]
-                    ).map((action) => ({
-                      label:
-                        action === "Talent Pool"
-                          ? "Move to Talent Pool"
-                          : action,
-                      onClick: () => {
-                        setError("");
-                        setDecision(action);
-                      },
-                      disabled: !manager || !isActive(a),
-                      danger: action === "Reject",
-                    })),
-                    {
-                      label: "Delete Applicant",
-                      onClick: () => setDeleting(true),
-                      disabled: !manager,
-                      danger: true,
-                    },
-                  ]}
-                />
               </div>
               <p className="fine-print">
                 Decisions require confirmation. Emails are previewed and sent

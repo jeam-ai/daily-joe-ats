@@ -1,7 +1,7 @@
 // Run against the local dev server. No credentials are supplied, so every send
 // request must fail before it can reach Gmail. This never makes a real send.
 import assert from "node:assert/strict";
-const base = "http://localhost:3000";
+const base = process.env.SMOKE_BASE_URL || "http://localhost:3000";
 for (const path of [
   "/",
   "/applications",
@@ -17,6 +17,9 @@ for (const path of [
   "/settings/users",
   "/settings/preferences",
   "/timekeeping",
+  "/people",
+  "/issuance",
+  "/search",
   "/settings/system",
   "/settings/health",
   "/settings/diagnostics",
@@ -85,6 +88,7 @@ for (const path of [
   "/api/applicants",
   "/api/timekeeping",
   "/api/applications",
+  "/api/issuance",
   "/api/system/extraction",
   "/api/applicants/not-authorized/emails",
   "/api/intake/sync",
@@ -109,6 +113,10 @@ for (const path of [
   "/api/applicants/not-authorized/resume",
   "/api/communications",
   "/api/integrations/sheets",
+  "/api/applicants/bulk",
+  "/api/applicants/reprocess",
+  "/api/issuance",
+  "/api/hiring-needs",
 ]) {
   assert.equal(
     (

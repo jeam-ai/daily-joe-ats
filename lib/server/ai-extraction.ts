@@ -1,4 +1,5 @@
 import "server-only";
+import { applicantFieldProtected } from "@/lib/applicant-information";
 import { plausiblePersonName } from "@/lib/names";
 import { formalFact } from "@/lib/formal-facts";
 import { GoogleGenAI } from "@google/genai";
@@ -374,7 +375,7 @@ export async function runExtractionJobs(
         for (const f of result.fields) {
           if (
             f.confidence !== "Confident" ||
-            a.information.fields[f.field]?.verifiedBy
+            applicantFieldProtected(a, f.field)
           )
             continue;
           const key = f.field === "residence" ? "location" : f.field;

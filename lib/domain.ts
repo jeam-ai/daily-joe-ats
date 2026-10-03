@@ -1,4 +1,11 @@
-export class DomainError extends Error {}
+export class DomainError extends Error {
+  constructor(
+    message: string,
+    public status = 400,
+  ) {
+    super(message);
+  }
+}
 import { z } from "zod";
 import type { AppState, Application, User } from "@/types";
 import { stages } from "./recruitment";
@@ -11,6 +18,9 @@ export const ruleSchema = z.object({
   absenceFails: z.boolean(),
 });
 export const issuanceSchema = z.object({
+  applicationId: id.optional(),
+  issuedBy: text.optional(),
+  batchId: id.optional(),
   id,
   category: z.enum(["Uniform", "Welcome Kit", "Other"]),
   employeeName: text,
@@ -348,13 +358,14 @@ export const changed = (a: unknown, b: unknown) =>
   canonicalJson(a) !== canonicalJson(b);
 export function assertEditor(user: User, application?: Application) {
   if (user.role === "Viewer")
-    throw new DomainError("Your account has read-only access.");
+    throw new DomainError("Your account has read-only access.", 403);
   if (
     user.role === "Office Assistant" &&
     (!application || application.assignedTo !== user.email)
   )
     throw new DomainError(
       "This action requires an assigned application or a recruitment manager.",
+      403,
     );
 }
 export function validateApplicationChange(
@@ -420,10 +431,16 @@ export function validateApplicationChange(
   if (consequence && !confirmed)
     throw new DomainError("Confirm this consequential action before saving.");
   if (
-    ["Rejected", "Withdrawn", "Talent Pool", "Hired"].includes(before.status) &&
+    (["Rejected", "Withdrawn", "Hired"].includes(before.status) ||
+      (before.status === "Talent Pool" &&
+        !["Talent Pool", "New", "For Review"].includes(after.status))) &&
     (after.status !== before.status || after.stage !== before.stage)
   )
     throw new DomainError("Closed application history cannot be changed.");
+  if (before.status === "Talent Pool" && after.stage !== before.stage)
+    throw new DomainError(
+      "Return the applicant to recruitment at their existing stage first.",
+    );
   if (before.stage !== after.stage) {
     if (stages.indexOf(after.stage) !== stages.indexOf(before.stage) + 1)
       throw new DomainError("Complete each recruitment stage in order.");

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   CheckCircle2,
   Clock3,
@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import { useApp } from "./provider";
 import { clientFetch } from "@/lib/client-request";
-import { formatDate } from "@/lib/dates";
+import { formatDate, dayKey } from "@/lib/dates";
 import { releasedForStock, statusAfterReleaseDate } from "@/lib/issuance-stock";
 import type {
   IssuanceCategory,
@@ -37,6 +37,9 @@ import {
   Tabs,
 } from "./ui";
 import { RichTextEditor } from "./rich-text";
+import { BulkIssuance } from "./bulk-issuance";
+import { BulkActions } from "./bulk-actions";
+import { requestJson } from "@/lib/client-request";
 
 const statuses: IssuanceStatus[] = [
   "Issued",
@@ -47,7 +50,6 @@ const statuses: IssuanceStatus[] = [
 ];
 const categories: IssuanceCategory[] = ["Uniform", "Welcome Kit", "Other"];
 type IssuanceSort = "latest-updated" | "latest-issued" | "employee-a-z";
-const today = () => new Date().toISOString().slice(0, 10);
 
 function employeeCount(records: IssuanceRecord[]) {
   return new Set(records.map((record) => record.employeeName.toLowerCase()))
@@ -56,6 +58,8 @@ function employeeCount(records: IssuanceRecord[]) {
 
 export function EmployeeIssuance() {
   const { state, notify, refresh, patchState, dataset } = useApp();
+  const today = () => dayKey(Date.now(), state?.preferences.timezone);
+  const individualRequestId = useRef("");
   const [view, setView] = useState("All issuance");
   const [statusFilter, setStatusFilter] = useState<"All" | IssuanceStatus>(
     "All",
@@ -79,6 +83,10 @@ export function EmployeeIssuance() {
     IssuanceInventory | "new" | null
   >(null);
   const [busy, setBusy] = useState("");
+  const [selectedIds, setSelectedIds] = useState<string[]>([]),
+    [bulkAction, setBulkAction] = useState("");
+  const bulkRequestId = useRef("");
+  useEffect(() => setSelectedIds([]), [view, statusFilter, query, dataset]);
   const file = useRef<HTMLInputElement>(null);
   const records = state?.issuance || [];
   const inventory = state?.issuanceInventory || [];
@@ -208,6 +216,7 @@ export function EmployeeIssuance() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "create",
+          requestId: individualRequestId.current,
           category: form.get("category"),
           employeeName: form.get("employeeName"),
           employeeId: form.get("employeeId"),
@@ -219,6 +228,7 @@ export function EmployeeIssuance() {
           condition: form.get("condition"),
           status: form.get("status"),
           issuedAt: form.get("issuedAt"),
+          issuedBy: form.get("issuedBy"),
           receivedAt: form.get("receivedAt"),
           signed: form.get("signed") === "on",
           returnedAt: form.get("returnedAt"),
@@ -231,7 +241,10 @@ export function EmployeeIssuance() {
       const record = result.record as IssuanceRecord;
       patchState((current) => ({
         ...current,
-        issuance: [...(current.issuance || []), record],
+        issuance: [
+          ...(current.issuance || []).filter((r) => r.id !== record.id),
+          record,
+        ],
         issuanceInventory:
           (result.inventory as IssuanceInventory[] | undefined) ||
           current.issuanceInventory,
@@ -268,6 +281,7 @@ export function EmployeeIssuance() {
           condition: form.get("condition"),
           status: form.get("status"),
           issuedAt: form.get("issuedAt"),
+          issuedBy: form.get("issuedBy"),
           signed: form.get("signed") === "on",
           receivedAt: form.get("receivedAt"),
           returnedAt: form.get("returnedAt"),
@@ -359,6 +373,7 @@ export function EmployeeIssuance() {
             Employee asset and acknowledgment records
           </span>
           <div className="button-row">
+            <BulkIssuance />
             <input
               className="sr-only"
               ref={file}
@@ -386,6 +401,7 @@ export function EmployeeIssuance() {
                 !editable ? "An authorized HR role is required" : undefined
               }
               onClick={() => {
+                individualRequestId.current = crypto.randomUUID();
                 setNewStatus("Issued");
                 setNewReleasedAt(today());
                 setAdding(true);
@@ -632,10 +648,49 @@ export function EmployeeIssuance() {
             />
           </div>
         </div>
+        {editable && (
+          <BulkActions
+            count={filtered.filter((r) => selectedIds.includes(r.id)).length}
+            total={filtered.length}
+            allSelected={
+              !!filtered.length &&
+              filtered.every((r) => selectedIds.includes(r.id))
+            }
+            onSelectAll={() =>
+              setSelectedIds(
+                filtered.every((r) => selectedIds.includes(r.id))
+                  ? []
+                  : filtered.map((r) => r.id),
+              )
+            }
+            onClear={() => setSelectedIds([])}
+            busy={!!busy}
+          >
+            <Button
+              variant="secondary"
+              onClick={() => {
+                bulkRequestId.current = crypto.randomUUID();
+                setBulkAction("status");
+              }}
+            >
+              Change status
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                bulkRequestId.current = crypto.randomUUID();
+                setBulkAction("note");
+              }}
+            >
+              Add note
+            </Button>
+          </BulkActions>
+        )}
         {filtered.length ? (
           <Table>
             <thead>
               <tr>
+                <th>Select</th>
                 <th>Employee</th>
                 <th>Issuance</th>
                 <th>Size / quantity</th>
@@ -647,6 +702,21 @@ export function EmployeeIssuance() {
             <tbody>
               {filtered.map((record) => (
                 <tr key={record.id}>
+                  <td>
+                    <input
+                      type="checkbox"
+                      aria-label={`Select ${record.employeeName} · ${record.item}`}
+                      disabled={!editable || !!busy}
+                      checked={selectedIds.includes(record.id)}
+                      onChange={(e) =>
+                        setSelectedIds((ids) =>
+                          e.target.checked
+                            ? [...new Set([...ids, record.id])]
+                            : ids.filter((id) => id !== record.id),
+                        )
+                      }
+                    />
+                  </td>
                   <td>
                     <strong>{record.employeeName}</strong>
                     <small className="cell-secondary">
@@ -683,6 +753,11 @@ export function EmployeeIssuance() {
                         ? `Received ${formatDate(record.receivedAt, state.preferences)}`
                         : "Receipt pending"}
                     </small>
+                    {record.issuedBy && (
+                      <small className="cell-secondary">
+                        Issued by {record.issuedBy}
+                      </small>
+                    )}
                   </td>
                   <td>
                     <StatusBadge status={record.status} />
@@ -784,6 +859,15 @@ export function EmployeeIssuance() {
               </Field>
               <Field label="Condition">
                 <Input name="condition" placeholder="New, used, replacement" />
+              </Field>
+              <Field label="Issued by">
+                <Input
+                  name="issuedBy"
+                  defaultValue={
+                    state.currentUser?.name || state.currentUser?.email
+                  }
+                  required
+                />
               </Field>
               <Field label="Status">
                 <Select
@@ -943,6 +1027,9 @@ export function EmployeeIssuance() {
                   defaultValue={editing.condition || ""}
                 />
               </Field>
+              <Field label="Issued by">
+                <Input name="issuedBy" defaultValue={editing.issuedBy || ""} />
+              </Field>
               <Field label="Status">
                 <Select
                   name="status"
@@ -1025,6 +1112,87 @@ export function EmployeeIssuance() {
               </Button>
               <Button type="submit" disabled={!!busy}>
                 Save update
+              </Button>
+            </div>
+          </form>
+        </Modal>
+      )}
+      {bulkAction && (
+        <Modal
+          title={`Confirm bulk issuance ${bulkAction}`}
+          busy={!!busy}
+          onClose={() => setBulkAction("")}
+        >
+          <form
+            className="form-stack"
+            onSubmit={async (e) => {
+              e.preventDefault();
+              const data = new FormData(e.currentTarget);
+              setBusy("Updating selected issuance");
+              try {
+                const r = await requestJson<{
+                  records: IssuanceRecord[];
+                  inventory: IssuanceInventory[];
+                }>("/api/issuance", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    action: "bulk-update",
+                    requestId: bulkRequestId.current,
+                    operation: bulkAction,
+                    rows: filtered
+                      .filter((r) => selectedIds.includes(r.id))
+                      .map((r) => ({ id: r.id, updatedAt: r.updatedAt })),
+                    status: data.get("status") || undefined,
+                    note: String(data.get("note") || ""),
+                    confirmed: true,
+                  }),
+                });
+                patchState((s) => ({
+                  ...s,
+                  issuance: (s.issuance || []).map(
+                    (v) => r.records.find((n) => n.id === v.id) || v,
+                  ),
+                  issuanceInventory: r.inventory,
+                }));
+                setBulkAction("");
+                setSelectedIds([]);
+                notify(`${r.records.length} issuance records updated.`);
+              } catch (error) {
+                notify((error as Error).message, "error");
+              } finally {
+                setBusy("");
+              }
+            }}
+          >
+            <p>
+              Apply this {bulkAction} to {selectedIds.length} selected release
+              records. Individual audit entries are retained.
+            </p>
+            {bulkAction === "status" ? (
+              <Field label="Status">
+                <Select name="status">
+                  {statuses.map((s) => (
+                    <option key={s}>{s}</option>
+                  ))}
+                </Select>
+              </Field>
+            ) : (
+              <Field label="Note">
+                <Input name="note" required maxLength={2000} />
+              </Field>
+            )}
+            <div className="modal-actions">
+              <Button
+                variant="secondary"
+                type="button"
+                disabled={!!busy}
+                onClick={() => setBulkAction("")}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" disabled={!!busy}>
+                {busy ? "Saving…" : "Confirm update"}
               </Button>
             </div>
           </form>

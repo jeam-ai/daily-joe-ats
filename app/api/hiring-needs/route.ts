@@ -2,6 +2,7 @@ import { requireOrigin, requireUser } from "@/lib/auth/session";
 import {
   saveHiringNeed,
   setRealHiringNeedsOpeningDate,
+  bulkHiringNeeds,
 } from "@/lib/server/hiring-needs";
 import { safeError } from "@/lib/server/response";
 
@@ -12,7 +13,10 @@ export async function POST(request: Request) {
   try {
     requireOrigin(request);
     const user = await requireUser();
-    const hiringNeed = await saveHiringNeed(await request.json(), user);
+    const body = await request.json();
+    if (body.action === "bulk-status")
+      return Response.json(await bulkHiringNeeds(body, user));
+    const hiringNeed = await saveHiringNeed(body, user);
     return Response.json({
       hiringNeed,
       syncStatus: hiringNeed.isDemo

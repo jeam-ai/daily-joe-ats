@@ -330,7 +330,7 @@ test("keeping the main duplicate entry removes extras, recalculates hours and pe
   assert.equal(corrected.worked, 9);
   assert.ok(!corrected.results.includes("Multiple Entries"));
   assert.ok(!corrected.results.includes("Excessive Overtime"));
-  assert.ok(corrected.results.includes("Overtime"));
+  assert.ok(corrected.results.includes("Normal"));
   assert.equal(
     corrected.review.duplicateResolution!.disregardedRecords![0].row,
     3,

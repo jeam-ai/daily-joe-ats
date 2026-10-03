@@ -1,12 +1,13 @@
 "use client";
 import Link from "next/link";
 import { useSearchParams, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Search,
   SlidersHorizontal,
   ArrowUpRight,
   Download,
+  LoaderCircle,
 } from "lucide-react";
 import { useApp } from "./provider";
 import {
@@ -28,8 +29,17 @@ import { canManage, canEdit, INTAKE_QUEUE_LIMIT } from "@/lib/data-policy";
 import { requestJson, downloadFile } from "@/lib/client-request";
 import { ApplicantEditor, DeleteApplicantDialog } from "./applicant-management";
 import { ActionMenu } from "./action-menu";
-import { formatDate, monthKey } from "@/lib/dates";
+import {
+  formatDate,
+  monthKey,
+  dayKey,
+  monthStartIso,
+  scheduledIso,
+} from "@/lib/dates";
 import { applicantDisplayName } from "@/lib/applicant-information";
+import { BulkActions } from "./bulk-actions";
+import { ApplicantBulkDialog } from "./applicant-bulk-dialog";
+import { ApplicantReprocess } from "./applicant-reprocess";
 const daysUntil = (timestamp: number) =>
   Math.max(0, Math.ceil((timestamp - Date.now()) / 86400000));
 function talentRetentionWarning(application: Application) {
@@ -76,6 +86,11 @@ export function Applications({ talent = false }: { talent?: boolean }) {
   const [employmentStatus, setEmploymentStatus] = useState("");
   const [urgency, setUrgency] = useState("");
   const [exporting, setExporting] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [selecting, setSelecting] = useState(false);
+  const [allSelected, setAllSelected] = useState(false);
+  const [bulkAction, setBulkAction] = useState("");
+  const selectionRequest = useRef<AbortController | null>(null);
   useEffect(() => {
     setQ(params.get("q") || "");
     setNeedFilter(params.get("need") || "");
@@ -111,15 +126,24 @@ export function Applications({ talent = false }: { talent?: boolean }) {
     talent: talent ? "1" : "0",
     since:
       date === "week"
-        ? new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10)
+        ? scheduledIso(
+            `${dayKey(Date.now() - 7 * 86400000, state?.preferences.timezone)}T00:00`,
+            state?.preferences.timezone,
+          )
         : date === "month"
-          ? new Date(
-              new Date().getFullYear(),
-              new Date().getMonth(),
-              1,
-            ).toISOString()
+          ? monthStartIso(Date.now(), state?.preferences.timezone)
           : "",
   }).toString();
+  const filterParams = new URLSearchParams(queryParams);
+  filterParams.delete("page");
+  const selectionFilters = filterParams.toString();
+  useEffect(() => {
+    selectionRequest.current?.abort();
+    setSelecting(false);
+    setSelectedIds([]);
+    setAllSelected(false);
+    return () => selectionRequest.current?.abort();
+  }, [selectionFilters, dataset]);
   useEffect(() => {
     const abort = new AbortController();
     setListLoading(true);
@@ -148,11 +172,36 @@ export function Applications({ talent = false }: { talent?: boolean }) {
   const selectedNeed = state.hiringNeeds.find((need) => need.id === needFilter);
   const rows = listing?.applications || [],
     total = listing?.total ?? 0;
+  const resultsUnavailable = listLoading || selecting || !!listError;
   const pageCount = Math.max(1, Math.ceil(total / 20)),
     currentPage = listing?.page || page,
     visible = rows;
   const profileHref = (id: string) =>
     `/applications/${encodeURIComponent(id)}?list=${encodeURIComponent(queryParams)}`;
+  async function toggleAllFiltered() {
+    if (allSelected) {
+      setSelectedIds([]);
+      setAllSelected(false);
+      return;
+    }
+    const abort = new AbortController();
+    selectionRequest.current = abort;
+    setSelecting(true);
+    try {
+      const result = await requestJson<{ ids: string[] }>(
+        `/api/applications?${selectionFilters}&selection=ids`,
+        { signal: abort.signal },
+      );
+      if (!abort.signal.aborted) {
+        setSelectedIds(result.ids);
+        setAllSelected(true);
+      }
+    } catch (e) {
+      if (!abort.signal.aborted) notify((e as Error).message, "error");
+    } finally {
+      if (!abort.signal.aborted) setSelecting(false);
+    }
+  }
   async function exportCsv() {
     setExporting(true);
     try {
@@ -295,7 +344,7 @@ export function Applications({ talent = false }: { talent?: boolean }) {
             <Search size={17} />
             <Input
               aria-label="Search applications"
-              placeholder="Search name or email"
+              placeholder="Search name, email, phone, role, or branch"
               value={q}
               onChange={(e) => {
                 setQ(e.target.value);
@@ -494,6 +543,61 @@ export function Applications({ talent = false }: { talent?: boolean }) {
             </Button>
           </div>
         )}
+        <div className="search-feedback" role="status" aria-live="polite">
+          {listLoading ? (
+            <>
+              <LoaderCircle size={16} className="loading-spinner" /> Searching
+              applicants…
+            </>
+          ) : listError ? (
+            "Search could not complete. Retry to refresh results."
+          ) : (
+            `${total} applicant${total === 1 ? "" : "s"} found${q ? ` for “${q}”` : ""}`
+          )}
+        </div>
+        {canManage(state.currentUser) && (
+          <BulkActions
+            count={selectedIds.length}
+            total={total}
+            allSelected={allSelected}
+            onSelectAll={() => void toggleAllFiltered()}
+            onClear={() => {
+              setSelectedIds([]);
+              setAllSelected(false);
+            }}
+            busy={resultsUnavailable}
+          >
+            <Select
+              aria-label="Applicant bulk action"
+              disabled={resultsUnavailable}
+              value=""
+              onChange={(e) => setBulkAction(e.target.value)}
+            >
+              <option value="">Choose bulk action…</option>
+              {[
+                ["proceed", "Move to next stage"],
+                ["reject", "Reject"],
+                ["withdraw", "Withdraw"],
+                ["talent", "Move to talent pool"],
+                ["assign", "Assign hiring need"],
+                ["status", "Change status"],
+                ["note", "Add note"],
+                ["export", "Export selected"],
+                ["delete", "Delete"],
+              ].map(([v, l]) => (
+                <option key={v} value={v}>
+                  {l}
+                </option>
+              ))}
+            </Select>
+            {dataset === "real" && (
+              <ApplicantReprocess
+                ids={selectedIds}
+                disabled={resultsUnavailable}
+              />
+            )}
+          </BulkActions>
+        )}
         {listLoading && !rows.length ? (
           <LoadingSkeleton />
         ) : rows.length ? (
@@ -502,6 +606,7 @@ export function Applications({ talent = false }: { talent?: boolean }) {
               <thead>
                 <tr>
                   {[
+                    "Select",
                     "Applicant",
                     "Role / urgency",
                     "Qualifications",
@@ -517,6 +622,24 @@ export function Applications({ talent = false }: { talent?: boolean }) {
               <tbody>
                 {visible.map((a) => (
                   <tr key={a.id}>
+                    <td>
+                      <input
+                        type="checkbox"
+                        aria-label={`Select ${applicantDisplayName(a)}`}
+                        checked={selectedIds.includes(a.id)}
+                        disabled={
+                          resultsUnavailable || !canManage(state.currentUser)
+                        }
+                        onChange={(e) => {
+                          setAllSelected(false);
+                          setSelectedIds((ids) =>
+                            e.target.checked
+                              ? [...new Set([...ids, a.id])]
+                              : ids.filter((id) => id !== a.id),
+                          );
+                        }}
+                      />
+                    </td>
                     <td>
                       <Link
                         className="applicant-cell"
@@ -650,14 +773,29 @@ export function Applications({ talent = false }: { talent?: boolean }) {
         ) : (
           <EmptyState
             title={
-              talent ? "No talent pool candidates" : "No applications found"
+              q
+                ? `No applicants found for “${q}”`
+                : talent
+                  ? "No talent pool candidates"
+                  : "No applications found"
             }
             description={
-              talent
-                ? "Candidates you save to the talent pool will appear here for future openings."
-                : total > 0
-                  ? "No applicants match these filters. Clear filters to see all applications."
-                  : "Import applications from Daily Joe Careers Gmail or add an applicant manually to get started."
+              q ||
+              position ||
+              location ||
+              status ||
+              stage ||
+              screening ||
+              urgency ||
+              date ||
+              needFilter ||
+              experience
+                ? "Adjust the search or clear filters to see more applicants."
+                : talent
+                  ? "Candidates you save to the talent pool will appear here for future openings."
+                  : total > 0
+                    ? "No applicants match these filters. Clear filters to see all applications."
+                    : "Import applications from Daily Joe Careers Gmail or add an applicant manually to get started."
             }
           />
         )}
@@ -669,7 +807,7 @@ export function Applications({ talent = false }: { talent?: boolean }) {
           <div className="pagination-controls" aria-label="Application pages">
             <Button
               variant="secondary"
-              disabled={currentPage <= 1}
+              disabled={listLoading || currentPage <= 1}
               onClick={() => setPage(currentPage - 1)}
             >
               ← Previous
@@ -684,6 +822,7 @@ export function Applications({ talent = false }: { talent?: boolean }) {
                 variant={currentPage === i + 1 ? "primary" : "ghost"}
                 aria-current={currentPage === i + 1 ? "page" : undefined}
                 aria-label={`Page ${i + 1}`}
+                disabled={listLoading}
                 onClick={() => setPage(i + 1)}
               >
                 {i + 1}
@@ -691,7 +830,7 @@ export function Applications({ talent = false }: { talent?: boolean }) {
             ))}
             <Button
               variant="secondary"
-              disabled={currentPage >= pageCount}
+              disabled={listLoading || currentPage >= pageCount}
               onClick={() => setPage(currentPage + 1)}
             >
               Next →
@@ -702,6 +841,21 @@ export function Applications({ talent = false }: { talent?: boolean }) {
           </Badge>
         </div>
       </Card>
+      {bulkAction && (
+        <ApplicantBulkDialog
+          action={bulkAction}
+          ids={selectedIds}
+          allFiltered={allSelected}
+          filters={selectionFilters}
+          onClose={() => setBulkAction("")}
+          onDone={() => {
+            setBulkAction("");
+            setSelectedIds([]);
+            setAllSelected(false);
+            setReload((v) => v + 1);
+          }}
+        />
+      )}
       {editing && (
         <ApplicantEditor
           application={editing === "new" ? undefined : editing}

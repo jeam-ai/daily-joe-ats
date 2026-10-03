@@ -38,6 +38,10 @@ import {
   timekeepingCutoffExpiresAt,
 } from "@/lib/timekeeping-retention";
 import { isNormalOvertimeForSeparateMonitoring } from "@/lib/timekeeping-workflow";
+import {
+  matchesAttendance,
+  refreshAttendanceAutomation,
+} from "@/lib/attendance-automation";
 export const odooRulesSchema = z.object({
   timezone: z.enum(["Asia/Manila", "Asia/Singapore", "UTC"]),
   start: z.union([
@@ -50,6 +54,7 @@ export const odooRulesSchema = z.object({
   ]),
   graceMinutes: z.number().min(0).max(120),
   overtimeMinutes: z.number().min(0).max(240),
+  overtimeRounding: z.enum(["nearest", "completed"]).default("nearest"),
   excessiveWorkedHours: z.number().min(9).max(24).default(16),
   discrepancyMinutes: z.number().min(0).max(120),
   expectedHours: z.number().min(0).max(24).nullable(),
@@ -95,6 +100,9 @@ function exceptionEntries(batch: OdooBatch, records: OdooDay[]) {
       results: r.results,
       issues: r.issues,
       worked: r.worked,
+      severity: r.severity,
+      calculation: r.calculation,
+      automationReason: r.automationReason,
       expected: r.expected,
       status: r.review.status,
       review: r.review,
@@ -409,7 +417,11 @@ export async function analyzeOdooUpload(
             const saved = reviews.get(
               `${record.employeeId || record.employee}|${record.date}`,
             );
-            if (saved?.history.length || saved?.classification || saved?.note)
+            if (
+              saved?.history.length ||
+              saved?.note ||
+              (saved?.reviewer && saved.reviewer !== "System")
+            )
               record.review = structuredClone(saved);
             const correction = saved?.duplicateResolution;
             if (
@@ -461,6 +473,11 @@ export async function analyzeOdooUpload(
           (await cutoffRetentionDeadline(tx, analysis.period.end)) || undefined,
         previousBatchId: previousBatchId || undefined,
       };
+      for (const record of batch.records) {
+        if (record.review.reviewer === "System" && !record.review.reviewedAt)
+          record.review.reviewedAt = now;
+        refreshAttendanceAutomation(record, batch.rules);
+      }
       await putRecord(
         tx,
         "odoo_batches",
@@ -596,7 +613,7 @@ function applyAttendanceReview(
       ? ["Absent", "Day Off", "Leave", "System / Data Issue", "Other"]
       : isZeroExpectedHoursSystemIssue(row)
         ? ["System / Data Issue"]
-        : [];
+        : ["System / Data Issue", "Other"];
   if (
     body.classification &&
     !permittedClassifications.includes(body.classification)
@@ -606,7 +623,9 @@ function applyAttendanceReview(
       409,
     );
   if (
-    permittedClassifications.length &&
+    (row.results.includes("Negative Attendance") ||
+      row.results.includes("No Attendance") ||
+      isZeroExpectedHoursSystemIssue(row)) &&
     body.status !== "For Review" &&
     !body.classification &&
     !row.review.classification
@@ -640,7 +659,143 @@ function applyAttendanceReview(
       },
     ],
   };
+  refreshAttendanceAutomation(row, batch.rules);
   return previous;
+}
+
+/** Resolve the entire filtered selection in one audited, revision-checked transaction. */
+export async function bulkReviewAttendance(input: unknown, user: User) {
+  requireTimekeeping(user);
+  const body = z
+    .object({
+      id: z.string(),
+      revision: z.number().int(),
+      recordIds: z.array(z.string()).max(20000).optional(),
+      filters: z
+        .object({
+          query: z.string().optional(),
+          status: z.string().optional(),
+          result: z.string().optional(),
+          date: z.string().optional(),
+          department: z.string().optional(),
+          location: z.string().optional(),
+          severity: z.string().optional(),
+          schedule: z.string().optional(),
+          employee: z.string().optional(),
+        })
+        .optional(),
+      allFiltered: z.boolean().default(false),
+      expectedCount: z.number().int().positive(),
+      operation: z.enum([
+        "resolve",
+        "confirm-overtime",
+        "correction",
+        "reason",
+        "note",
+        "reopen",
+      ]),
+      classification: z.enum(attendanceClassifications).optional(),
+      note: z.string().trim().max(4000).default(""),
+      confirmed: z.literal(true),
+    })
+    .safeParse(input);
+  if (!body.success)
+    throw new SafeError("Confirm a valid attendance selection and action.");
+  const data = body.data;
+  if (
+    !data.allFiltered &&
+    (!data.recordIds?.length ||
+      new Set(data.recordIds).size !== data.recordIds.length)
+  )
+    throw new SafeError("Select attendance records once.");
+  if (["note", "correction"].includes(data.operation) && !data.note)
+    throw new SafeError("Enter a note for this action.");
+  if (data.operation === "reason" && !data.classification)
+    throw new SafeError("Choose an attendance reason.");
+  return transaction(async (tx) => {
+    const { batch, index } = await readReviewBatch(tx, data.id);
+    if (batch.revision !== data.revision)
+      throw new SafeError(
+        "This cutoff changed. Reload before applying the bulk action.",
+        409,
+      );
+    const ids = new Set(data.recordIds);
+    const rows = batch.records.filter((r) =>
+      data.allFiltered
+        ? matchesAttendance(r, data.filters || {})
+        : ids.has(r.id),
+    );
+    if (
+      rows.length !== data.expectedCount ||
+      (!data.allFiltered && rows.length !== ids.size)
+    )
+      throw new SafeError(
+        "The selection changed. Review the current filtered records.",
+        409,
+      );
+    if (
+      data.operation === "confirm-overtime" &&
+      rows.some(
+        (r) =>
+          !r.results.includes("Overtime") ||
+          r.results.some(
+            (v) => !["Overtime", "Normal", "Late", "Early Out"].includes(v),
+          ) ||
+          r.issues.length,
+      )
+    )
+      throw new SafeError(
+        "Select valid overtime records. Data errors and excessive overtime need validation first.",
+        409,
+      );
+    const now = new Date().toISOString();
+    const reviews = rows.map((row) => {
+      const previousReview = structuredClone(row.review);
+      applyAttendanceReview(
+        row,
+        {
+          id: data.id,
+          revision: data.revision,
+          recordId: row.id,
+          status:
+            data.operation === "reopen" || data.operation === "correction"
+              ? "For Review"
+              : ["resolve", "confirm-overtime"].includes(data.operation)
+                ? "Resolved"
+                : row.review.status,
+          note: data.note
+            ? [row.review.note, data.note].filter(Boolean).join("\n")
+            : row.review.note,
+          classification: data.classification,
+        },
+        batch,
+        user,
+        now,
+      );
+      return {
+        collection: "odoo_reviews",
+        id: crypto.randomUUID(),
+        value: {
+          batchId: batch.id,
+          recordId: row.id,
+          previousReview,
+          review: row.review,
+          operation: data.operation,
+          reviewer: user.email,
+          createdAt: now,
+        },
+      };
+    });
+    batch.revision++;
+    await persistReviewBatch(tx, batch, index, rows, reviews);
+    await audit(tx, user.email, "timekeeping.bulk_reviewed", undefined, {
+      batchId: batch.id,
+      operation: data.operation,
+      recordIds: rows.map((r) => r.id),
+      note: data.note,
+    });
+    return batch;
+  });
 }
 
 async function readReviewBatch(tx: Transaction, id: string) {
@@ -1010,6 +1165,7 @@ export async function completeNormalOvertimeForEmployee(
           },
         ],
       };
+      refreshAttendanceAutomation(row, batch.rules);
       reviews.push({
         id: crypto.randomUUID(),
         value: {
@@ -1097,6 +1253,12 @@ export async function exportOdoo(batch: OdooBatch, csv: boolean) {
     "Source Files",
     "Review Notes",
     "Duplicate Correction History",
+    "Severity",
+    "Schedule",
+    "Exact attendance (minutes)",
+    "Credited overtime (minutes)",
+    "Additional minutes",
+    "Calculation / classification reason",
   ];
   const localTime = (iso: string) =>
     iso
@@ -1142,6 +1304,12 @@ export async function exportOdoo(batch: OdooBatch, csv: boolean) {
     r.review.duplicateResolution?.disregardedRecords?.length
       ? `Previously multiple entries; corrected. Removed source rows: ${r.review.duplicateResolution.disregardedSourceRows.join(", ")}`
       : "",
+    r.severity,
+    r.schedule,
+    r.calculation?.totalMinutes,
+    r.calculation?.creditedMinutes,
+    r.calculation?.additionalMinutes,
+    r.automationReason,
   ]);
   const safe = (v: unknown) => {
     const text = String(v ?? "");

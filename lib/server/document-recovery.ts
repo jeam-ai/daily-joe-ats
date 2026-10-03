@@ -34,8 +34,7 @@ const sparse = (warnings?: string[]) =>
     /very little readable text was extracted/i.test(warning),
   );
 const OCR_UPGRADE = "bundled-english-v1";
-const EVIDENCE_PARSER_VERSION =
-  "residence-preference-clean-education-qualification-v9";
+const EVIDENCE_PARSER_VERSION = "identity-provenance-priority-v10";
 
 // Re-evaluate saved text after a deterministic parser improvement. This does
 // not fetch Gmail, write files, call AI, or touch HR-verified fields/stages.

@@ -95,6 +95,8 @@ const schema = [
   "CREATE TABLE IF NOT EXISTS hiring_needs (id TEXT PRIMARY KEY, payload TEXT NOT NULL)",
   "CREATE TABLE IF NOT EXISTS applications (id TEXT PRIMARY KEY, applicant_id TEXT NOT NULL REFERENCES applicants(id), hiring_need_id TEXT REFERENCES hiring_needs(id), resume_id TEXT REFERENCES resumes(id), gmail_message_id TEXT UNIQUE, gmail_thread_id TEXT, stage TEXT NOT NULL CHECK(stage IN ('Screening','Initial Interview','Final Interview','Requirements','Onboarding','Hired')), status TEXT NOT NULL CHECK(status IN ('New','For Review','Approved','In Progress','Hired','Rejected','Withdrawn','No Response','Talent Pool')), payload TEXT NOT NULL)",
   "CREATE INDEX IF NOT EXISTS applications_thread_idx ON applications(gmail_thread_id)",
+  "CREATE INDEX IF NOT EXISTS applications_workflow_idx ON applications(status,stage,hiring_need_id)",
+  "CREATE INDEX IF NOT EXISTS applications_need_idx ON applications(hiring_need_id)",
   "CREATE TABLE IF NOT EXISTS talent_pool_memberships (applicant_id TEXT PRIMARY KEY REFERENCES applicants(id), started_at TEXT NOT NULL, expires_at TEXT NOT NULL, grace_expires_at TEXT NOT NULL, updated_by TEXT)",
   "CREATE INDEX IF NOT EXISTS talent_pool_membership_expiry_idx ON talent_pool_memberships(grace_expires_at)",
   "CREATE TABLE IF NOT EXISTS intake_window (application_id TEXT PRIMARY KEY REFERENCES applications(id), state TEXT NOT NULL, received_at TEXT NOT NULL)",

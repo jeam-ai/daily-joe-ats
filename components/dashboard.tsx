@@ -72,6 +72,10 @@ export function Dashboard() {
   const [showAllNeeds, setShowAllNeeds] = useState(false);
   const [retention, setRetention] = useState<RetentionSnapshot | null>(null);
   const [mailActivity, setMailActivity] = useState<GmailThreadActivity[]>([]);
+  const [conversationsError, setConversationsError] = useState("");
+  const [mailError, setMailError] = useState("");
+  const [retentionError, setRetentionError] = useState("");
+  const [retry, setRetry] = useState(0);
   const [recentConversations, setRecentConversations] = useState<
     Application[] | null
   >(null);
@@ -83,15 +87,25 @@ export function Dashboard() {
         "/api/applications?tab=All%20applications&sort=activity&limit=4",
         { signal: abort.signal },
       )
-        .then((result) => setRecentConversations(result.applications))
-        .catch(() => {});
+        .then((result) => {
+          setRecentConversations(result.applications);
+          setConversationsError("");
+        })
+        .catch((error) => {
+          if (!abort.signal.aborted)
+            setConversationsError(
+              error instanceof Error
+                ? error.message
+                : "Recent conversations could not be loaded.",
+            );
+        });
     void load();
     const interval = setInterval(load, 60000);
     return () => {
       abort.abort();
       clearInterval(interval);
     };
-  }, [dataset, state?.revision]);
+  }, [dataset, state?.revision, retry]);
   useEffect(() => {
     if (dataset !== "real") return;
     const abort = new AbortController();
@@ -99,15 +113,25 @@ export function Dashboard() {
       requestJson<{ events: GmailThreadActivity[] }>("/api/gmail-activity", {
         signal: abort.signal,
       })
-        .then((result) => setMailActivity(result.events))
-        .catch(() => {});
+        .then((result) => {
+          setMailActivity(result.events);
+          setMailError("");
+        })
+        .catch((error) => {
+          if (!abort.signal.aborted)
+            setMailError(
+              error instanceof Error
+                ? error.message
+                : "Recent Gmail activity could not be loaded.",
+            );
+        });
     void load();
     const interval = setInterval(load, 60000);
     return () => {
       abort.abort();
       clearInterval(interval);
     };
-  }, [dataset, state?.revision]);
+  }, [dataset, state?.revision, retry]);
   useEffect(() => {
     if (state?.currentUser?.role !== "Admin") return;
     const abort = new AbortController();
@@ -132,10 +156,18 @@ export function Dashboard() {
         );
       }
       setRetention(snapshot);
+      setRetentionError("");
     };
-    void load().catch(() => undefined);
+    void load().catch((error) => {
+      if (!abort.signal.aborted)
+        setRetentionError(
+          error instanceof Error
+            ? error.message
+            : "Retention information could not be loaded.",
+        );
+    });
     return () => abort.abort();
-  }, [state?.currentUser?.role, state?.revision]);
+  }, [state?.currentUser?.role, state?.revision, retry]);
   if (!state) return <LoadingSkeleton />;
   const now = new Date();
   const timezone = state.preferences.timezone || "Asia/Manila";
@@ -404,9 +436,22 @@ export function Dashboard() {
                   <ArrowUpRight size={16} />
                 </Link>
               ))}
-              {dataset === "real" && !recentConversations && (
-                <p className="padded muted">Loading recent conversations…</p>
+              {conversationsError && (
+                <div className="padded error-banner" role="alert">
+                  {conversationsError}{" "}
+                  <button
+                    className="btn btn-secondary"
+                    onClick={() => setRetry((r) => r + 1)}
+                  >
+                    Retry recent conversations
+                  </button>
+                </div>
               )}
+              {dataset === "real" &&
+                !recentConversations &&
+                !conversationsError && (
+                  <p className="padded muted">Loading recent conversations…</p>
+                )}
             </div>
           </Card>
           {dataset === "real" && (
@@ -421,7 +466,17 @@ export function Dashboard() {
                   </p>
                 </div>
               </div>
-              {mailActivity.length ? (
+              {mailError ? (
+                <div className="padded error-banner" role="alert">
+                  {mailError}{" "}
+                  <button
+                    className="btn btn-secondary"
+                    onClick={() => setRetry((r) => r + 1)}
+                  >
+                    Retry Gmail activity
+                  </button>
+                </div>
+              ) : mailActivity.length ? (
                 <div className="recent-list">
                   {mailActivity.map((event) => (
                     <Link
@@ -502,6 +557,17 @@ export function Dashboard() {
           )}
           {state.currentUser?.role === "Admin" && (
             <Card className="retention-card">
+              {retentionError && (
+                <div className="padded error-banner" role="alert">
+                  {retentionError}{" "}
+                  <button
+                    className="btn btn-secondary"
+                    onClick={() => setRetry((r) => r + 1)}
+                  >
+                    Retry retention information
+                  </button>
+                </div>
+              )}
               {retention ? (
                 <>
                   <div className="card-heading">
@@ -590,7 +656,7 @@ export function Dashboard() {
                     ) && <span>No cleanup actions recorded this month.</span>}
                   </div>
                 </>
-              ) : (
+              ) : !retentionError ? (
                 <div className="retention-loading" role="status">
                   <Database size={18} aria-hidden="true" />
                   <div>
@@ -598,7 +664,7 @@ export function Dashboard() {
                     <span>Loading retention health…</span>
                   </div>
                 </div>
-              )}
+              ) : null}
             </Card>
           )}
           <Card className="attention-card">

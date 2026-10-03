@@ -1,5 +1,12 @@
 import { attendanceTimestamp, defaultAttendanceRules } from "./timekeeping";
-export const ODOO_ANALYSIS_VERSION = 6;
+import {
+  attendanceCalculation,
+  refreshAttendanceAutomation,
+  scheduleFromSource,
+  type AttendanceSchedule,
+  type AttendanceSeverity,
+} from "./attendance-automation";
+export const ODOO_ANALYSIS_VERSION = 7;
 
 export type OdooCell = string | number | null;
 export type OdooMatrix = OdooCell[][];
@@ -10,6 +17,8 @@ export type OdooSource = {
   rows: number;
 };
 export type RawAttendance = {
+  schedule?: AttendanceSchedule;
+  date?: string;
   row: number;
   employee: string;
   employeeId?: string;
@@ -22,6 +31,7 @@ export type RawAttendance = {
   extra: number | null;
 };
 export type PivotDay = {
+  schedule?: AttendanceSchedule;
   row: number;
   employee: string;
   date: string;
@@ -39,6 +49,7 @@ export type OdooReports = {
   aliases: { source: string; candidate: string }[];
 };
 export type OdooRules = {
+  overtimeRounding?: "nearest" | "completed";
   timezone: "Asia/Manila" | "Asia/Singapore" | "UTC";
   start: string;
   end: string;
@@ -54,7 +65,8 @@ export const defaultOdooRules: OdooRules = {
   start: "",
   end: "",
   graceMinutes: 0,
-  overtimeMinutes: 0,
+  overtimeMinutes: 30,
+  overtimeRounding: "nearest",
   excessiveWorkedHours: 16,
   discrepancyMinutes: 1,
   expectedHours: null,
@@ -106,6 +118,11 @@ export type OdooReview = {
   }[];
 };
 export type OdooDay = {
+  attendanceMinutes?: number;
+  schedule?: AttendanceSchedule;
+  severity?: AttendanceSeverity;
+  calculation?: ReturnType<typeof attendanceCalculation>;
+  automationReason?: string;
   id: string;
   employee: string;
   employeeId?: string;
@@ -225,6 +242,8 @@ export function parseOdooReports(
     employeeId: column(raw[h], ["employeeid", "employeeexternalid"]),
     department: column(raw[h], ["department"]),
     location: column(raw[h], ["location", "branch"]),
+    schedule: column(raw[h], ["schedule", "daytype", "attendancestatus"]),
+    date: column(raw[h], ["date", "workdate"]),
   };
   if (
     [cols.checkOut, cols.worked, cols.overtime, cols.extra].some((v) => v < 0)
@@ -236,12 +255,12 @@ export function parseOdooReports(
   const warnings: string[] = [];
   raw.slice(h + 1).forEach((row, i) => {
     if (!row.some((v) => clean(v))) return;
-    const employee = clean(row[cols.employee]);
-    if (!employee) {
+    const employee =
+      clean(row[cols.employee]) || `Unmatched employee (row ${h + i + 2})`;
+    if (!clean(row[cols.employee])) {
       warnings.push(
         `Attendance row ${h + i + 2} has no employee name and needs correction.`,
       );
-      return;
     }
     attendance.push({
       row: h + i + 2,
@@ -254,6 +273,8 @@ export function parseOdooReports(
       employeeId: clean(row[cols.employeeId]) || undefined,
       department: clean(row[cols.department]) || undefined,
       location: clean(row[cols.location]) || undefined,
+      schedule: scheduleFromSource(clean(row[cols.schedule])),
+      date: odooDate(clean(row[cols.date])) || undefined,
     });
   });
   const ph = pivot
@@ -272,6 +293,7 @@ export function parseOdooReports(
     expected: column(pivot[ph], ["expectedhours"]),
     difference: column(pivot[ph], ["difference"]),
     balance: column(pivot[ph], ["balance"]),
+    schedule: column(pivot[ph], ["schedule", "daytype", "attendancestatus"]),
   };
   if (pc.difference < 0 || pc.balance < 0)
     throw Error(
@@ -296,6 +318,7 @@ export function parseOdooReports(
         expected: number(row[pc.expected]),
         difference: number(row[pc.difference]),
         balance: number(row[pc.balance]),
+        schedule: scheduleFromSource(clean(row[pc.schedule])),
       });
     } else {
       if (/^\d/.test(label))
@@ -313,7 +336,7 @@ export function parseOdooReports(
   const workDates = [
     ...days.map((r) => r.date),
     ...attendance
-      .map((r) => odooDate(r.checkIn) || odooDate(r.checkOut))
+      .map((r) => r.date || odooDate(r.checkIn) || odooDate(r.checkOut))
       .filter((d): d is string => !!d),
   ].sort();
   const start = workDates[0],
@@ -321,7 +344,7 @@ export function parseOdooReports(
   if (Date.parse(end) - Date.parse(start) > 93 * 86400000)
     throw Error("Choose reports covering no more than 93 days per analysis.");
   const rawDates = attendance
-      .map((r) => odooDate(r.checkIn) || odooDate(r.checkOut))
+      .map((r) => r.date || odooDate(r.checkIn) || odooDate(r.checkOut))
       .filter((v): v is string => !!v)
       .sort(),
     pivotDates = days.map((r) => r.date).sort();
@@ -452,7 +475,7 @@ function* analyzeOdooSteps(
     dates.push(new Date(d).toISOString().slice(0, 10));
   for (const [key, g] of groups) {
     const undated = g.raw.filter(
-      (r) => !odooDate(r.checkIn) && !odooDate(r.checkOut),
+      (r) => !r.date && !odooDate(r.checkIn) && !odooDate(r.checkOut),
     );
     const days = undated.length ? [...dates, "Unknown date"] : dates;
     for (const date of days) {
@@ -460,8 +483,10 @@ function* analyzeOdooSteps(
         yield { processed: records.length, total: groups.size * days.length };
       const raw = g.raw.filter(
           (r) =>
-            (odooDate(r.checkIn) || odooDate(r.checkOut) || "Unknown date") ===
-            date,
+            (r.date ||
+              odooDate(r.checkIn) ||
+              odooDate(r.checkOut) ||
+              "Unknown date") === date,
         ),
         pivot = g.pivot.filter((r) => r.date === date),
         results: string[] = [],
@@ -484,6 +509,7 @@ function* analyzeOdooSteps(
         rules.workDays.includes(new Date(date).getUTCDay())
       )
         expected = rules.expectedHours;
+      if (expected === null && raw.length && pivot.length === 1) expected = 9;
       const overtime = total(raw.map((r) => r.overtime)),
         extra = total(raw.map((r) => r.extra));
       const difference =
@@ -493,6 +519,19 @@ function* analyzeOdooSteps(
         start: stamp(r.checkIn),
         end: stamp(r.checkOut),
       }));
+      const attendanceMinutes =
+        instants.length &&
+        instants.every(
+          (r) =>
+            r.start !== null &&
+            r.end !== null &&
+            r.end >= r.start &&
+            r.end - r.start <= 86400000,
+        )
+          ? Math.round(
+              instants.reduce((sum, r) => sum + (r.end! - r.start!) / 60000, 0),
+            )
+          : undefined;
       const starts = instants
           .map((r) => r.start)
           .filter((v): v is number => v !== null)
@@ -529,6 +568,22 @@ function* analyzeOdooSteps(
         ) ||
         raw.some((r) => r.worked === null) ||
         date === "Unknown date";
+      if (/^Unmatched employee/.test(g.name))
+        results.push("Unmatched Employee");
+      if (worked !== null && worked < 0) {
+        results.push("Invalid Attendance");
+        issues.push("Reported duration is negative; verify source attendance.");
+      }
+      if (
+        attendanceMinutes !== undefined &&
+        rawWorked !== null &&
+        rawWorked * 60 > attendanceMinutes + rules.discrepancyMinutes + 1e-7
+      ) {
+        results.push("Data Discrepancy");
+        issues.push(
+          "Reported worked hours exceed calculated attendance duration. Source values and punches are retained.",
+        );
+      }
       if (incomplete) {
         results.push("Incomplete Attendance");
         issues.push(
@@ -579,29 +634,40 @@ function* analyzeOdooSteps(
       const negativeAttendance =
         raw.length > 0 &&
         !incomplete &&
-        difference !== null &&
-        difference < -1e-7;
+        worked !== null &&
+        (attendanceMinutes ?? Math.round(worked * 60)) < 480;
       if (negativeAttendance) {
         results.push("Negative Attendance");
         issues.push(
-          "Negative attendance is ambiguous from Odoo data. HR must confirm Late, Undertime, or Early Out; no classification was selected automatically.",
+          "Attendance is below the minimum 8-hour threshold; classified as Undertime for HR validation. Schedule observations and raw punches are retained.",
         );
       }
       const excessiveThreshold = rules.excessiveWorkedHours ?? 16;
-      if (worked !== null && worked >= excessiveThreshold) {
+      const durationHours =
+        attendanceMinutes !== undefined ? attendanceMinutes / 60 : worked;
+      if (
+        !incomplete &&
+        expected !== null &&
+        expected > 9.5 &&
+        durationHours !== null &&
+        (expected - durationHours) * 60 > rules.discrepancyMinutes
+      ) {
+        results.push("Schedule Mismatch");
+        issues.push(
+          `The imported schedule expects ${expected}h, beyond the standard 9-hour shift. Recorded attendance is ${durationHours.toFixed(2)}h; validate this schedule variance.`,
+        );
+      }
+      if (durationHours !== null && durationHours >= excessiveThreshold) {
         results.push("Excessive Overtime");
         issues.push(
           `Total worked time meets the ${excessiveThreshold}-hour excessive-overtime threshold. A forgotten time-out is possible; HR must verify before treating this as actual overtime.`,
         );
-      } else if (worked !== null && worked >= 9) {
+      } else if (attendanceCalculation(durationHours, rules)?.overtime) {
         results.push("Overtime");
       }
       let lateMinutes: number | null = null,
         earlyMinutes: number | null = null;
-      if (!rules.start || !rules.end)
-        issues.push(
-          "Schedule information unavailable — late and early-out results require HR schedule configuration.",
-        );
+      // Optional schedule times do not make otherwise normal attendance an exception.
       if (
         date !== "Unknown date" &&
         starts.length &&
@@ -622,18 +688,14 @@ function* analyzeOdooSteps(
           end === null
             ? null
             : Math.max(0, Math.round((end - ends.at(-1)!) / 60000));
-        // A negative variance cannot establish whether time was lost through
-        // lateness, undertime, or an early out. Preserve timing observations,
-        // but leave the visible classification to HR confirmation.
-        if (!negativeAttendance) {
-          if (lateMinutes) results.push("Late");
-          if (earlyMinutes) results.push("Early Out");
-        }
+        if (lateMinutes) results.push("Late");
+        if (earlyMinutes) results.push("Early Out");
       }
       if (!results.length)
         results.push(issues.length ? "Review Required" : "Normal");
       records.push({
         id: `${key}|${date}`,
+        attendanceMinutes,
         employee: g.name,
         employeeId: key.startsWith("id:") ? key.slice(3) : undefined,
         sourceNames: [...g.names],
@@ -675,7 +737,10 @@ function* analyzeOdooSteps(
       });
     }
   }
-  classifySingleWeeklyLeave(records);
+  for (const record of records) {
+    applyScheduleClassification(record, rules);
+    refreshAttendanceAutomation(record, rules);
+  }
   for (const record of records)
     if (isZeroExpectedHoursSystemIssue(record))
       record.review.classification = "System / Data Issue";
@@ -690,46 +755,85 @@ function* analyzeOdooSteps(
   };
 }
 
-/** One isolated missing day in a Monday–Sunday week is treated as leave. */
+/** A missing day is leave only when the source explicitly establishes leave. */
 export function classifySingleWeeklyLeave(records: OdooDay[]) {
-  const weeks = new Map<string, OdooDay[]>();
-  const missingDates = new Set<string>();
-  for (const record of records) {
-    if (!record.results.includes("No Attendance") || !odooDate(record.date))
-      continue;
-    const identity = record.employeeId || employeeKey(record.employee);
-    const day = new Date(`${record.date}T00:00:00Z`);
-    day.setUTCDate(day.getUTCDate() - ((day.getUTCDay() + 6) % 7));
-    const week = `${identity}|${day.toISOString().slice(0, 10)}`;
-    weeks.set(week, [...(weeks.get(week) || []), record]);
-    missingDates.add(`${identity}|${record.date}`);
-  }
-  for (const rows of weeks.values()) {
-    if (rows.length !== 1) continue;
-    const record = rows[0];
-    const identity = record.employeeId || employeeKey(record.employee);
-    const adjacentMissing = [-1, 1].some((offset) =>
-      missingDates.has(
-        `${identity}|${new Date(Date.parse(record.date) + offset * 86400000).toISOString().slice(0, 10)}`,
-      ),
-    );
+  for (const record of records)
     if (
-      adjacentMissing ||
-      (record.pivotWorked ?? 0) > 0 ||
-      record.review.classification
-    )
-      continue;
-    record.results = record.results.map((result) =>
-      result === "No Attendance" ? "Leave" : result,
-    );
-    record.issues = record.issues.filter(
-      (issue) => !issue.startsWith("No attendance"),
-    );
+      record.pivot.some((day) => day.schedule === "Leave") &&
+      !record.raw.length &&
+      !(record.worked && record.worked > 0)
+    ) {
+      record.schedule = "Leave";
+      record.results = ["Leave"];
+      record.issues = [];
+      record.review.classification ||= "Leave";
+      record.review.status = "Resolved";
+    }
+}
+
+function applyScheduleClassification(record: OdooDay, rules: OdooRules) {
+  const schedules = [
+    ...new Set(
+      [...record.raw, ...record.pivot].map((r) => r.schedule).filter(Boolean),
+    ),
+  ];
+  record.schedule =
+    schedules[0] ||
+    (record.expected !== null && record.expected > 0
+      ? "Workday"
+      : rules.workDays.length &&
+          odooDate(record.date) &&
+          !rules.workDays.includes(new Date(record.date).getUTCDay())
+        ? "Rest Day"
+        : undefined);
+  if (schedules.length > 1) {
+    record.results.push("Invalid Schedule");
     record.issues.push(
-      "Single missing attendance day in this Monday–Sunday week: classified as Leave.",
+      "Contradictory schedule classifications in the source reports.",
     );
-    record.review.classification = "Leave";
   }
+  const noWork =
+    !record.raw.some((r) => r.checkIn || r.checkOut || (r.worked ?? 0) > 0) &&
+    !(record.worked && record.worked > 0);
+  if (
+    noWork &&
+    record.schedule === "Workday" &&
+    record.results.includes("No Attendance")
+  )
+    record.results.push("Unverified Absence");
+  if (
+    noWork &&
+    schedules.length <= 1 &&
+    ["Leave", "Rest Day", "Absent"].includes(record.schedule || "")
+  ) {
+    record.results = [
+      record.schedule === "Rest Day" ? "Rest Day / Day Off" : record.schedule!,
+    ];
+    record.issues = [];
+    record.review.classification =
+      record.schedule === "Rest Day"
+        ? "Day Off"
+        : record.schedule === "Absent"
+          ? "Absent"
+          : "Leave";
+  } else if (
+    !noWork &&
+    ["Leave", "Rest Day", "Absent"].includes(record.schedule || "")
+  ) {
+    record.results.push("Schedule Mismatch");
+    record.issues.push(
+      "Attendance exists on a source leave, rest, or absence day; verify the schedule.",
+    );
+  }
+  const normal =
+    record.issues.length === 0 &&
+    record.results.every((r) =>
+      ["Normal", "Rest Day / Day Off", "Leave", "Absent"].includes(r),
+    );
+  if (record.results.includes("Negative Attendance"))
+    record.review.classification = "Undertime";
+  record.review.status = normal ? "Resolved" : "For Review";
+  if (normal) record.review.reviewer = "System";
 }
 
 /** Apply the new defaults to older saved cutoffs without discarding HR history. */
@@ -767,7 +871,34 @@ export function upgradeOdooAnalysis<T extends OdooAnalysis>(analysis: T): T {
         );
     }
   }
-  classifySingleWeeklyLeave(analysis.records);
+  // Recompute from retained source rows using the current rules. Human reviews
+  // remain protected; heuristic leave classifications without HR history do not.
+  const fresh = analyzeOdoo(
+    {
+      attendance: analysis.records.flatMap((r) => r.raw),
+      pivot: analysis.records.flatMap((r) => r.pivot),
+      period: analysis.period,
+      sources: analysis.sources,
+      warnings: analysis.warnings,
+      aliases: [],
+    },
+    analysis.rules,
+    analysis.aliases,
+  );
+  const byId = new Map(fresh.records.map((r) => [r.id, r]));
+  for (const record of analysis.records) {
+    const next = byId.get(record.id);
+    if (!next || (!record.raw.length && !record.pivot.length)) continue;
+    const saved = record.review;
+    Object.assign(record, next);
+    if (
+      saved.history.length ||
+      saved.note ||
+      (saved.reviewer && saved.reviewer !== "System")
+    )
+      record.review = saved;
+    refreshAttendanceAutomation(record, analysis.rules);
+  }
   for (const record of analysis.records)
     if (isZeroExpectedHoursSystemIssue(record) && !record.review.classification)
       record.review.classification = "System / Data Issue";

@@ -1,5 +1,12 @@
 # Daily Joe Careers — production implementation validation
 
+## October 3, 2026 — full-system QA and workflow optimization
+
+- Full results, repaired bugs, calculation matrix, browser evidence and unexecuted live checks are in [QA_REPORT.md](QA_REPORT.md). Final verification passed 108 unit tests, 101 server tests, 21 grouped authenticated API checks, TypeScript and the production build. The existing protected-route/OAuth/origin/scheduler smoke suite also passed against the local production build.
+- Browser QA covered all existing modules, filtered selection across pages, applicant search/error recovery, protected reprocessing previews, 45-employee bulk issuance, timekeeping review, responsive layouts and persistence. All mutations used fictional isolated databases; no live HR records were changed or applicants emailed.
+- Eleven reproduced workflow/data/feedback issues were repaired and retested. Changed/new files pass formatting; repository-wide formatting still flags 17 unchanged files.
+- **Not production-ready for final sign-off:** the current change is not deployed, and the configured Gmail refresh returns HTTP 401 / `invalid_client`. Live Google login, mailbox intake/delivery, Sheets and scheduler acceptance remain unverified. A read-only configured-database probe succeeded but does not certify the deployed target/schema. Earlier deployment entries below describe historical releases, not this working tree.
+
 ## October 1, 2026 — label-free Gmail detection, release status and desktop Settings
 
 - Gmail intake now searches incoming application wording and attachments without requiring `HR - Applications`. The former shipped label/subject filter migrates automatically, while deliberate custom filters survive. Queue version 4 restarts unimported search cursors and retains existing applications and Gmail-ID duplicate protection.

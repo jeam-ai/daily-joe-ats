@@ -198,6 +198,9 @@ export type IssuanceStatus =
  * from applicant profiles and is only written by the issuance API.
  */
 export interface IssuanceRecord {
+  applicationId?: string;
+  issuedBy?: string;
+  batchId?: string;
   id: string;
   category: IssuanceCategory;
   employeeName: string;
@@ -243,7 +246,11 @@ export interface IssuanceCatalogItem {
 export interface SavedReport {
   id: string;
   name: string;
-  scope: "Recruitment" | "Timekeeping" | "Employee requirements" | "Employee issuance";
+  scope:
+    | "Recruitment"
+    | "Timekeeping"
+    | "Employee requirements"
+    | "Employee issuance";
   href: string;
   createdAt: string;
 }

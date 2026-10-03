@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { after } from "next/server";
 import { SafeError } from "./config";
+import { DomainError } from "@/lib/domain";
 import { bufferFailure, isDatabaseFailure } from "./diagnostic-buffer";
 import { reportIssue } from "./diagnostics";
 
@@ -33,6 +34,9 @@ function safeFailureSummary(error: unknown) {
 }
 
 export function safeError(error: unknown) {
+  // Domain validation is expected input feedback, not an internal server failure.
+  if (error instanceof DomainError)
+    error = new SafeError(error.message, error.status);
   const databaseFailure = isDatabaseFailure(error);
   const unexpected = databaseFailure || !(error instanceof SafeError);
   const diagnosticId = unexpected

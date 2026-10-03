@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import {
   Plus,
@@ -36,6 +36,7 @@ import type { QualificationRule } from "@/types";
 import { canManage } from "@/lib/data-policy";
 import { RichTextEditor } from "./rich-text";
 import { requestJson } from "@/lib/client-request";
+import { BulkActions } from "./bulk-actions";
 
 function operationalUrgency(need: HiringNeed) {
   if (need.status !== "Open") return need.urgency;
@@ -57,6 +58,9 @@ export function HiringNeeds() {
   const [filter, setFilter] = useState("Open");
   const [savingNeed, setSavingNeed] = useState(false);
   const [confirmOpeningDates, setConfirmOpeningDates] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]),
+    [bulkStatus, setBulkStatus] = useState("");
+  useEffect(() => setSelectedIds([]), [filter, dataset]);
   if (!state) return <LoadingSkeleton />;
   const existing = state.hiringNeeds.find((n) => n.id === editing);
   const rows = state.hiringNeeds.filter(
@@ -81,8 +85,7 @@ export function HiringNeeds() {
     0,
   );
   const needsOpeningDateStandardization = state.hiringNeeds.filter(
-    (need) =>
-      !need.isDemo && need.openedAt !== "2026-09-20T00:00:00.000Z",
+    (need) => !need.isDemo && need.openedAt !== "2026-09-20T00:00:00.000Z",
   );
   async function save(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -132,7 +135,10 @@ export function HiringNeeds() {
       }));
       setEditing(null);
       setRules(null);
-      notify("Hiring need saved and the staffing plan was refreshed.", "success");
+      notify(
+        "Hiring need saved and the staffing plan was refreshed.",
+        "success",
+      );
     } catch (error) {
       notify((error as Error).message, "error");
     } finally {
@@ -150,7 +156,9 @@ export function HiringNeeds() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ openedAt: "2026-09-20", confirmed: true }),
       });
-      const updated = new Map(result.hiringNeeds.map((need) => [need.id, need]));
+      const updated = new Map(
+        result.hiringNeeds.map((need) => [need.id, need]),
+      );
       if (updated.size)
         patchState((current) => ({
           ...current,
@@ -186,7 +194,9 @@ export function HiringNeeds() {
           <div className="button-row">
             <Button
               disabled={
-                !canManage(state.currentUser) || savingNeed || dataset === "demo"
+                !canManage(state.currentUser) ||
+                savingNeed ||
+                dataset === "demo"
               }
               title={
                 dataset === "demo"
@@ -214,8 +224,10 @@ export function HiringNeeds() {
             <h2>Confirm opening dates</h2>
             <p>
               {needsOpeningDateStandardization.length} real hiring request
-              {needsOpeningDateStandardization.length === 1 ? " is" : "s are"} not
-              yet recorded as opened on Sep 20, 2026.
+              {needsOpeningDateStandardization.length === 1
+                ? " is"
+                : "s are"}{" "}
+              not yet recorded as opened on Sep 20, 2026.
             </p>
           </div>
           <Button
@@ -276,10 +288,56 @@ export function HiringNeeds() {
           ))}
         </Select>
       </div>
+      {canManage(state.currentUser) && dataset === "real" && (
+        <BulkActions
+          count={
+            selectedIds.filter((id) => rows.some((n) => n.id === id)).length
+          }
+          total={rows.length}
+          allSelected={
+            !!rows.length && rows.every((n) => selectedIds.includes(n.id))
+          }
+          onSelectAll={() =>
+            setSelectedIds(
+              rows.every((n) => selectedIds.includes(n.id))
+                ? []
+                : rows.map((n) => n.id),
+            )
+          }
+          onClear={() => setSelectedIds([])}
+          busy={savingNeed}
+        >
+          <Select
+            aria-label="Bulk hiring need status"
+            value=""
+            onChange={(e) => setBulkStatus(e.target.value)}
+          >
+            <option value="">Change status…</option>
+            {["Open", "Paused", "Filled", "Closed"].map((s) => (
+              <option key={s}>{s}</option>
+            ))}
+          </Select>
+        </BulkActions>
+      )}
       <div className="needs-grid">
         {rows.map((n) => (
           <Card key={n.id} className="need-card hiring-need-card">
             <div className="section-heading need-card-top">
+              {dataset === "real" && (
+                <input
+                  type="checkbox"
+                  aria-label={`Select ${n.position} at ${n.location}`}
+                  checked={selectedIds.includes(n.id)}
+                  disabled={savingNeed || !canManage(state.currentUser)}
+                  onChange={(e) =>
+                    setSelectedIds((ids) =>
+                      e.target.checked
+                        ? [...new Set([...ids, n.id])]
+                        : ids.filter((id) => id !== n.id),
+                    )
+                  }
+                />
+              )}
               <span className="job-icon">
                 <UsersRound size={24} />
               </span>
@@ -500,7 +558,8 @@ export function HiringNeeds() {
                   icon={<CircleHelp size={15} aria-hidden />}
                 >
                   This is the date the vacancy was declared open. It drives the
-                  Days open badge and is not the date HR last edited the request.
+                  Days open badge and is not the date HR last edited the
+                  request.
                 </HelpTip>
               </Field>
               <Field label="Status">
@@ -569,8 +628,8 @@ export function HiringNeeds() {
             <p>
               Set the opened-on date to <strong>Sep 20, 2026</strong> for all
               real hiring needs. This changes only the days-open reference;
-              roles, locations, vacancies, qualifications, and target dates
-              stay unchanged.
+              roles, locations, vacancies, qualifications, and target dates stay
+              unchanged.
             </p>
             <div className="modal-actions">
               <Button
@@ -589,6 +648,65 @@ export function HiringNeeds() {
                 {savingNeed ? "Saving…" : "Confirm date update"}
               </Button>
             </div>
+          </div>
+        </Modal>
+      )}
+      {bulkStatus && (
+        <Modal
+          title="Confirm hiring need status"
+          busy={savingNeed}
+          onClose={() => setBulkStatus("")}
+        >
+          <p>
+            Change {selectedIds.length} selected hiring needs to{" "}
+            <strong>{bulkStatus}</strong>?
+          </p>
+          <div className="modal-actions">
+            <Button
+              variant="secondary"
+              disabled={savingNeed}
+              onClick={() => setBulkStatus("")}
+            >
+              Cancel
+            </Button>
+            <Button
+              disabled={savingNeed}
+              onClick={async () => {
+                setSavingNeed(true);
+                try {
+                  const r = await requestJson<{ hiringNeeds: HiringNeed[] }>(
+                    "/api/hiring-needs",
+                    {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        action: "bulk-status",
+                        ids: selectedIds,
+                        filter,
+                        revision: state.revision,
+                        status: bulkStatus,
+                        confirmed: true,
+                      }),
+                    },
+                  );
+                  patchState((s) => ({
+                    ...s,
+                    hiringNeeds: s.hiringNeeds.map(
+                      (n) => r.hiringNeeds.find((v) => v.id === n.id) || n,
+                    ),
+                  }));
+                  setBulkStatus("");
+                  setSelectedIds([]);
+                  notify(`${r.hiringNeeds.length} hiring needs updated.`);
+                } catch (e) {
+                  notify((e as Error).message, "error");
+                } finally {
+                  setSavingNeed(false);
+                }
+              }}
+            >
+              {savingNeed ? "Saving…" : "Confirm status change"}
+            </Button>
           </div>
         </Modal>
       )}

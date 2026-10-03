@@ -43,10 +43,35 @@ export function monthKey(
   }).formatToParts(new Date(value));
   return `${parts.find((p) => p.type === "year")?.value}-${parts.find((p) => p.type === "month")?.value}`;
 }
+/** Date-only business values must use the workspace timezone, never UTC truncation. */
+export function dayKey(
+  value: string | number | Date = Date.now(),
+  timezone = "Asia/Manila",
+) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date(value));
+  const get = (type: string) => parts.find((p) => p.type === type)?.value;
+  return `${get("year")}-${get("month")}-${get("day")}`;
+}
+export function monthStartIso(
+  value: string | number | Date = Date.now(),
+  timezone = "Asia/Manila",
+) {
+  return scheduledIso(`${monthKey(value, timezone)}-01T00:00`, timezone);
+}
 export function scheduledIso(local: string, timezone = "Asia/Manila") {
   if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(local))
     throw Error("Enter a valid interview date and time.");
   const wall = Date.parse(local + "Z");
+  if (
+    !Number.isFinite(wall) ||
+    new Date(wall).toISOString().slice(0, 16) !== local
+  )
+    throw Error("Enter a valid interview date and time.");
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: timezone,
     year: "numeric",

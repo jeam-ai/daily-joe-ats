@@ -2,22 +2,54 @@ import "server-only";
 import type { Application } from "@/types";
 import { transaction, readTransaction, postgresConfigured } from "./database";
 import { getState, saveState } from "./repository";
+let readModelReady: Promise<void> | undefined;
 export async function listApplications(params: URLSearchParams, demo = false) {
   // Backfill the indexed read model once for workspaces created before the queue.
-  const counts = await readTransaction(async (tx) => ({
-    apps: Number(
-      (await tx.query("SELECT COUNT(*) AS n FROM applications"))[0].n,
-    ),
-    window: Number(
-      (await tx.query("SELECT COUNT(*) AS n FROM intake_window"))[0].n,
-    ),
-  }));
-  if (counts.apps !== counts.window)
-    await transaction(async (tx) =>
-      saveState(tx, await getState(tx), { sync: false }),
-    );
-  const page = Math.max(1, Math.min(100000, Number(params.get("page")) || 1));
-  const limit = Math.max(1, Math.min(20, Number(params.get("limit")) || 20));
+  readModelReady ||= (async () => {
+    const counts = await readTransaction(async (tx) => ({
+      apps: Number(
+        (await tx.query("SELECT COUNT(*) AS n FROM applications"))[0].n,
+      ),
+      window: Number(
+        (await tx.query("SELECT COUNT(*) AS n FROM intake_window"))[0].n,
+      ),
+    }));
+    if (counts.apps !== counts.window)
+      await transaction(async (tx) =>
+        saveState(tx, await getState(tx), { sync: false }),
+      );
+  })().catch((error) => {
+    readModelReady = undefined;
+    throw error;
+  });
+  await readModelReady;
+  const query = applicationListQuery(params, demo);
+  const { page, values, from } = query;
+  return readTransaction(async (tx) => {
+    if (params.get("selection") === "ids")
+      return {
+        applications: [] as Application[],
+        total: 0,
+        page,
+        neighbors: null,
+        ids: (
+          await tx.query(
+            `SELECT a.id ${from} ORDER BY w.received_at DESC,a.id DESC`,
+            values,
+          )
+        ).map((r) => String(r.id)),
+      };
+    return readApplicationPage(tx, params, query);
+  });
+}
+
+export function applicationListQuery(params: URLSearchParams, demo = false) {
+  const page = Math.floor(
+    Math.max(1, Math.min(100000, Number(params.get("page")) || 1)),
+  );
+  const limit = Math.floor(
+    Math.max(1, Math.min(20, Number(params.get("limit")) || 20)),
+  );
   const activitySort = !demo && params.get("sort") === "activity";
   const values: unknown[] = [];
   const bind = (v: unknown) => {
@@ -75,11 +107,11 @@ export async function listApplications(params: URLSearchParams, demo = false) {
   eq("screening", json("a", "screening.outcome"));
   eq("urgency", json("n", "urgency"));
   eq("employment", `COALESCE(${json("a", "employment.status")},'Active')`);
-  const q = params.get("q")?.trim().toLowerCase();
+  const q = params.get("q")?.trim().replace(/\s+/g, " ").toLowerCase();
   if (q) {
     const p = bind(`%${q.replace(/[\\%_]/g, "\\$&")}%`);
     where.push(
-      `(LOWER(${json("a", "applicant.name")}) LIKE ${p} ESCAPE '\\' OR LOWER(${json("a", "applicant.email")}) LIKE ${p} ESCAPE '\\' OR LOWER(a.id) LIKE ${p} ESCAPE '\\')`,
+      `(${["applicant.name", "applicant.email", "applicant.phone", "position", "location"].map((field) => `LOWER(${json("a", field)}) LIKE ${p} ESCAPE '\\'`).join(" OR ")} OR LOWER(a.id) LIKE ${p} ESCAPE '\\')`,
     );
   }
   const experience = Number(params.get("experience"));
@@ -92,81 +124,120 @@ export async function listApplications(params: URLSearchParams, demo = false) {
     where.push(`w.received_at>=${bind(since)}`);
   const joins = `FROM applications a JOIN intake_window w ON w.application_id=a.id LEFT JOIN hiring_needs n ON n.id=a.hiring_need_id LEFT JOIN application_retention r ON r.application_id=a.id LEFT JOIN talent_pool_memberships tp ON tp.applicant_id=a.applicant_id`;
   const from = `${joins} WHERE ${where.join(" AND ")}`;
-  const listFrom = `${joins}${activitySort ? " LEFT JOIN (SELECT application_id,MAX(occurred_at) AS latest_at FROM gmail_thread_events GROUP BY application_id) g ON g.application_id=a.id" : ""} WHERE ${where.join(" AND ")}`;
+  const latest =
+    "(SELECT MAX(occurred_at) FROM gmail_thread_events WHERE application_id=a.id)";
+  const listFrom = from;
   const order = activitySort
-    ? "CASE WHEN g.latest_at>w.received_at THEN g.latest_at ELSE w.received_at END DESC,w.received_at DESC,a.id DESC"
+    ? `CASE WHEN ${latest}>w.received_at THEN ${latest} ELSE w.received_at END DESC,w.received_at DESC,a.id DESC`
     : "w.received_at DESC,a.id DESC";
-  return readTransaction(async (tx) => {
-    const around = params.get("around");
-    if (around) {
-      const sequence = await tx.query(
-        `SELECT id,previous_id,next_id,position,total FROM (
+  return {
+    page,
+    limit,
+    activitySort,
+    values,
+    bind,
+    from,
+    listFrom,
+    order,
+    latest,
+  };
+}
+async function readApplicationPage(
+  tx: import("./database").Transaction,
+  params: URLSearchParams,
+  query: ReturnType<typeof applicationListQuery>,
+) {
+  const {
+    page,
+    limit,
+    activitySort,
+    values,
+    bind,
+    from,
+    listFrom,
+    order,
+    latest,
+  } = query;
+  const around = params.get("around");
+  if (around) {
+    const sequence = await tx.query(
+      `SELECT id,previous_id,next_id,position,total FROM (
           SELECT a.id,LAG(a.id) OVER (ORDER BY ${order}) AS previous_id,
             LEAD(a.id) OVER (ORDER BY ${order}) AS next_id,
             ROW_NUMBER() OVER (ORDER BY ${order}) AS position,COUNT(*) OVER() AS total
           ${listFrom}
         ) sequence WHERE id=${bind(around)}`,
-        values,
-      );
-      const row = sequence[0];
-      return {
-        applications: [] as Application[],
-        total: Number(row?.total || 0),
-        page,
-        neighbors: row
-          ? {
-              previousId: row.previous_id ? String(row.previous_id) : null,
-              nextId: row.next_id ? String(row.next_id) : null,
-              position: Number(row.position),
-              total: Number(row.total),
-            }
-          : null,
-      };
-    }
-    const total = Number(
-      (await tx.query(`SELECT COUNT(*) AS n ${from}`, values))[0].n,
-    );
-    const actual = Math.min(page, Math.max(1, Math.ceil(total / limit)));
-    const rows = await tx.query(
-      `SELECT a.payload,r.category AS retention_category,r.started_at AS retention_started_at,r.expires_at AS retention_expires_at,r.reason AS retention_reason,tp.expires_at AS talent_pool_expires_at,tp.grace_expires_at AS talent_pool_grace_expires_at,${activitySort ? "g.latest_at" : "NULL"} AS gmail_activity_at ${listFrom} ORDER BY ${order} LIMIT ${limit} OFFSET ${bind((actual - 1) * limit)}`,
       values,
     );
+    const row = sequence[0];
     return {
-      applications: rows.map((r) => {
-        const application = JSON.parse(String(r.payload)) as Application;
-        delete application.retentionCategory;
-        delete application.retentionStartedAt;
-        delete application.retentionExpiresAt;
-        delete application.retentionReason;
-        delete application.talentPoolExpiresAt;
-        delete application.talentPoolGraceExpiresAt;
-        delete application.gmailActivityAt;
-        if (r.gmail_activity_at) {
-          application.gmailActivityAt = String(r.gmail_activity_at);
-          if (application.gmailActivityAt > application.lastActivity)
-            application.lastActivity = application.gmailActivityAt;
-        }
-        if (r.retention_category) {
-          application.retentionCategory = String(r.retention_category);
-          application.retentionStartedAt = String(r.retention_started_at);
-          application.retentionExpiresAt = String(r.retention_expires_at);
-          application.retentionReason = String(r.retention_reason);
-        }
-        if (
-          r.talent_pool_expires_at &&
-          application.status === "Talent Pool" &&
-          !application.talentPoolExpiredAt
-        ) {
-          application.talentPoolExpiresAt = String(r.talent_pool_expires_at);
-          application.talentPoolGraceExpiresAt = String(
-            r.talent_pool_grace_expires_at,
-          );
-        }
-        return application;
-      }),
-      total,
-      page: actual,
-      neighbors: null,
+      applications: [] as Application[],
+      total: Number(row?.total || 0),
+      page,
+      neighbors: row
+        ? {
+            previousId: row.previous_id ? String(row.previous_id) : null,
+            nextId: row.next_id ? String(row.next_id) : null,
+            position: Number(row.position),
+            total: Number(row.total),
+          }
+        : null,
     };
-  });
+  }
+  const total = Number(
+    (await tx.query(`SELECT COUNT(*) AS n ${from}`, values))[0].n,
+  );
+  const actual = Math.min(page, Math.max(1, Math.ceil(total / limit)));
+  const rows = await tx.query(
+    `SELECT a.payload,r.category AS retention_category,r.started_at AS retention_started_at,r.expires_at AS retention_expires_at,r.reason AS retention_reason,tp.expires_at AS talent_pool_expires_at,tp.grace_expires_at AS talent_pool_grace_expires_at,${activitySort ? latest : "NULL"} AS gmail_activity_at ${listFrom} ORDER BY ${order} LIMIT ${limit} OFFSET ${bind((actual - 1) * limit)}`,
+    values,
+  );
+  return {
+    applications: rows.map((r) => {
+      const application = JSON.parse(String(r.payload)) as Application;
+      delete application.retentionCategory;
+      delete application.retentionStartedAt;
+      delete application.retentionExpiresAt;
+      delete application.retentionReason;
+      delete application.talentPoolExpiresAt;
+      delete application.talentPoolGraceExpiresAt;
+      delete application.gmailActivityAt;
+      if (r.gmail_activity_at) {
+        application.gmailActivityAt = String(r.gmail_activity_at);
+        if (application.gmailActivityAt > application.lastActivity)
+          application.lastActivity = application.gmailActivityAt;
+      }
+      if (r.retention_category) {
+        application.retentionCategory = String(r.retention_category);
+        application.retentionStartedAt = String(r.retention_started_at);
+        application.retentionExpiresAt = String(r.retention_expires_at);
+        application.retentionReason = String(r.retention_reason);
+      }
+      if (
+        r.talent_pool_expires_at &&
+        application.status === "Talent Pool" &&
+        !application.talentPoolExpiredAt
+      ) {
+        application.talentPoolExpiresAt = String(r.talent_pool_expires_at);
+        application.talentPoolGraceExpiresAt = String(
+          r.talent_pool_grace_expires_at,
+        );
+      }
+      return application;
+    }),
+    total,
+    page: actual,
+    neighbors: null,
+  };
+}
+
+export async function filteredApplicationIds(
+  tx: import("./database").Transaction,
+  params: URLSearchParams,
+  demo = false,
+) {
+  const { from, values } = applicationListQuery(params, demo);
+  return (await tx.query(`SELECT a.id ${from}`, values)).map((r) =>
+    String(r.id),
+  );
 }

@@ -27,6 +27,7 @@ import {
   reviewOdoo,
   resolveEmployeeAttendance,
   resolveZeroExpectedHours,
+  bulkReviewAttendance,
   odooRulesSchema,
 } from "@/lib/server/odoo";
 import { putRecord } from "@/lib/server/database";
@@ -113,8 +114,11 @@ export async function POST(request: Request) {
       return Response.json({ job }, { status: 202 });
     }
     const text = await request.text();
-    if (text.length > 64000) throw new SafeError("The request is too large.");
+    if (text.length > 2 * 1024 * 1024)
+      throw new SafeError("The request is too large.");
     const body = JSON.parse(text);
+    if (body.action === "bulk-review")
+      return Response.json({ batch: await bulkReviewAttendance(body, user) });
     if (body.action === "analyze") {
       const aliases = z
         .record(z.string().max(200), z.string().max(200))
@@ -209,6 +213,10 @@ export async function POST(request: Request) {
     if (body.action === "export") {
       const batch = await getOdooBatch(String(body.id), user),
         csv = body.format === "csv";
+      if (body.recordIds) {
+        const ids = z.array(z.string()).min(1).max(20000).parse(body.recordIds);
+        batch.records = batch.records.filter((r) => ids.includes(r.id));
+      }
       const output = await exportOdoo(batch, csv);
       await transaction((tx) =>
         audit(tx, user.email, "timekeeping.exported", undefined, {

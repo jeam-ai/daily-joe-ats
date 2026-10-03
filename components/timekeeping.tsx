@@ -26,6 +26,13 @@ import {
   HelpTip,
 } from "./ui";
 import { RichTextContent, RichTextEditor } from "./rich-text";
+import { BulkActions } from "./bulk-actions";
+import {
+  attendanceSeverities,
+  attendanceSeverity,
+  matchesAttendance,
+  type AttendanceFilters,
+} from "@/lib/attendance-automation";
 import { requestJson, downloadFile, RequestError } from "@/lib/client-request";
 import {
   defaultOdooRules,
@@ -123,6 +130,41 @@ const clockTime = (
         timeZone: timezone,
       });
 };
+function SeverityBadge({
+  record,
+  severity,
+}: {
+  record?: OdooDay;
+  severity?: string;
+}) {
+  const value = severity || (record ? attendanceSeverity(record) : "Low");
+  return (
+    <Badge
+      tone={
+        value === "Critical"
+          ? "red"
+          : value === "High"
+            ? "orange"
+            : value === "Medium"
+              ? "amber"
+              : "green"
+      }
+    >
+      {value}
+    </Badge>
+  );
+}
+function AttendanceCalculation({ record }: { record: OdooDay }) {
+  return (
+    <div className="attendance-calculation">
+      {record.calculation?.notes.map((note) => (
+        <small className="cell-secondary" key={note}>
+          {note}
+        </small>
+      ))}
+    </div>
+  );
+}
 export function AttendanceRulesEditor({
   rules,
   onChange,
@@ -140,6 +182,20 @@ export function AttendanceRulesEditor({
         schedule shared by these employees.
       </p>
       <div className="form-grid">
+        <Field label="Overtime credit">
+          <Select
+            value={rules.overtimeRounding || "nearest"}
+            onChange={(e) =>
+              set("overtimeRounding", e.target.value as "nearest" | "completed")
+            }
+          >
+            <option value="nearest">Nearest whole hour (9h31 → 1h)</option>
+            <option value="completed">Completed whole hours</option>
+          </Select>
+          <small>
+            8h–9h30 is normal. Exact minutes remain in every record.
+          </small>
+        </Field>
         <Field label="Odoo export timezone">
           <Select
             value={rules.timezone}
@@ -169,7 +225,6 @@ export function AttendanceRulesEditor({
         {(
           [
             ["graceMinutes", "Late grace (minutes)"],
-            ["overtimeMinutes", "Overtime allowance (minutes)"],
             ["discrepancyMinutes", "Reconciliation tolerance (minutes)"],
           ] as const
         ).map(([k, label]) => (
@@ -177,7 +232,7 @@ export function AttendanceRulesEditor({
             <Input
               type="number"
               min={0}
-              max={k === "overtimeMinutes" ? 240 : 120}
+              max={120}
               value={rules[k]}
               onChange={(e) => set(k, Number(e.target.value))}
             />
@@ -195,9 +250,9 @@ export function AttendanceRulesEditor({
             }
           />
           <small>
-            Normal overtime starts at 9 worked hours; excessive overtime
-            defaults to 16 hours or more. This flags an HR review and possible
-            forgotten time-out; it does not define payroll entitlement.
+            Overtime starts at 9h31 attendance; excessive overtime defaults to
+            16 hours or more. This flags an HR review and possible forgotten
+            time-out; it does not define payroll entitlement.
           </small>
         </Field>
         <Field label="Fallback expected hours (optional)">
@@ -265,7 +320,7 @@ export function Timekeeping() {
   const [busy, setBusy] = useState(""),
     [error, setError] = useState(""),
     [query, setQuery] = useState(""),
-    [reviewFilter, setReviewFilter] = useState(""),
+    [reviewFilter, setReviewFilter] = useState("For Review"),
     [reviewedOnly, setReviewedOnly] = useState(false),
     [resultFilter, setResultFilter] = useState(""),
     [dayFilter, setDayFilter] = useState(""),
@@ -294,9 +349,12 @@ export function Timekeeping() {
   const [confirmDeleteCutoff, setConfirmDeleteCutoff] = useState(false);
   const [confirmSystemErrors, setConfirmSystemErrors] = useState(false);
   const [systemErrorNote, setSystemErrorNote] = useState("");
-  const [selectedAttendanceIds, setSelectedAttendanceIds] = useState<string[]>(
-    [],
-  );
+  const [severityFilter, setSeverityFilter] = useState("");
+  const [scheduleFilter, setScheduleFilter] = useState("");
+  const [globalIds, setGlobalIds] = useState<string[]>([]);
+  const [bulkOperation, setBulkOperation] = useState("");
+  const [globalReason, setGlobalReason] = useState("");
+  const [globalNote, setGlobalNote] = useState("");
   const [bulkRows, setBulkRows] = useState<OdooDay[]>([]);
   const [bulkNote, setBulkNote] = useState("");
   const [bulkDecisions, setBulkDecisions] = useState<
@@ -366,6 +424,7 @@ export function Timekeeping() {
           "Resolving employee attendance",
           "Completing normal overtime",
           "Resolving zero expected hours",
+          "Saving bulk attendance review",
         ].includes(label) &&
         e instanceof RequestError &&
         [0, 408, 409].includes(e.status)
@@ -490,13 +549,17 @@ export function Timekeeping() {
     () =>
       records.filter(
         (r) =>
-          (!query || r.employee.toLowerCase().includes(query.toLowerCase())) &&
-          (!reviewFilter || r.review.status === reviewFilter) &&
-          (!reviewedOnly || r.review.status !== "For Review") &&
-          (!resultFilter || r.results.includes(resultFilter)) &&
-          (!dayFilter || r.date === dayFilter) &&
-          (!department || r.department === department) &&
-          (!location || r.location === location),
+          matchesAttendance(r, {
+            query,
+            status: reviewFilter,
+            result: resultFilter,
+            date: dayFilter,
+            department,
+            location,
+            severity: severityFilter,
+            schedule: scheduleFilter,
+          }) &&
+          (!reviewedOnly || r.review.status !== "For Review"),
       ),
     [
       records,
@@ -507,14 +570,22 @@ export function Timekeeping() {
       dayFilter,
       department,
       location,
+      severityFilter,
+      scheduleFilter,
     ],
   );
   const employees = useMemo(() => {
     const groups = new Map<string, OdooDay[]>();
     for (const r of filtered)
       groups.set(key(r), [...(groups.get(key(r)) || []), r]);
-    return [...groups].sort((a, b) =>
-      a[1][0].employee.localeCompare(b[1][0].employee),
+    const rank = (rows: OdooDay[]) =>
+      Math.min(
+        ...rows.map((r) => attendanceSeverities.indexOf(attendanceSeverity(r))),
+      );
+    return [...groups].sort(
+      (a, b) =>
+        rank(a[1]) - rank(b[1]) ||
+        a[1][0].employee.localeCompare(b[1][0].employee),
     );
   }, [filtered]);
   const pages = Math.max(1, Math.ceil(employees.length / 20)),
@@ -534,7 +605,7 @@ export function Timekeeping() {
       groups.set(key(record), [...(groups.get(key(record)) || []), record]);
     return groups;
   }, [records]);
-  const employeePendingRows = (allEmployeeRows.get(employee) || []).filter(
+  const employeePendingRows = employeeRows.filter(
     (row) => needsAction(row) || awaitsVerification(row),
   );
   const employeeIndex = employees.findIndex(([id]) => id === employee);
@@ -546,7 +617,7 @@ export function Timekeeping() {
       employees[(inDetail ? detailEmployeeIndex : employeeIndex) + offset];
     if (!target) return;
     setEmployee(target[0]);
-    setSelectedAttendanceIds([]);
+    setGlobalIds([]);
     setSelectedOvertimeIds([]);
     if (inDetail) openRecord(target[1].find(needsAction) || target[1][0]);
   }
@@ -555,6 +626,42 @@ export function Timekeeping() {
       selectedOvertimeIds.includes(record.id) &&
       isNormalOvertimeForSeparateMonitoring(record),
   );
+  const bulkFilters: AttendanceFilters = {
+    query,
+    status: reviewFilter,
+    result: resultFilter,
+    date: dayFilter,
+    department,
+    location,
+    severity: severityFilter,
+    schedule: scheduleFilter,
+    employee,
+  };
+  const selectableRows = filtered.filter(
+    (r) => !employee || key(r) === employee,
+  );
+  const selectedGlobalRows = selectableRows.filter((r) =>
+    globalIds.includes(r.id),
+  );
+  const allGlobalSelected =
+    selectableRows.length > 0 &&
+    selectedGlobalRows.length === selectableRows.length;
+  useEffect(() => {
+    setGlobalIds([]);
+    setPage(1);
+  }, [
+    batch?.id,
+    query,
+    reviewFilter,
+    resultFilter,
+    dayFilter,
+    department,
+    location,
+    severityFilter,
+    scheduleFilter,
+    employee,
+    reviewedOnly,
+  ]);
   const normalOvertimeRows = employeeRows.filter(
     isNormalOvertimeForSeparateMonitoring,
   );
@@ -613,7 +720,9 @@ export function Timekeeping() {
     resultFilter ||
     dayFilter ||
     department ||
-    location,
+    location ||
+    severityFilter ||
+    scheduleFilter,
   );
   function clearReviewFilters() {
     setQuery("");
@@ -623,6 +732,8 @@ export function Timekeeping() {
     setDayFilter("");
     setDepartment("");
     setLocation("");
+    setSeverityFilter("");
+    setScheduleFilter("");
     setPage(1);
   }
   if (dataset === "demo")
@@ -1188,6 +1299,25 @@ export function Timekeeping() {
               </Button>
             </div>
             <div className="timekeeping-work-queue-summary">
+              {attendanceSeverities.map((severity) => (
+                <button
+                  type="button"
+                  className="text-link"
+                  key={severity}
+                  onClick={() => {
+                    setSeverityFilter(severity);
+                    setReviewFilter("For Review");
+                    setEmployee("");
+                  }}
+                >
+                  <SeverityBadge severity={severity} />{" "}
+                  {
+                    workflow.actionRequired.filter(
+                      (r) => attendanceSeverity(r) === severity,
+                    ).length
+                  }
+                </button>
+              ))}
               <span>
                 <strong>{workflow.actionRequired.length}</strong> action
                 required
@@ -1477,6 +1607,28 @@ export function Timekeeping() {
               </Badge>
             </div>
             <div className="odoo-filters">
+              <Field label="Severity">
+                <Select
+                  value={severityFilter}
+                  onChange={(e) => setSeverityFilter(e.target.value)}
+                >
+                  <option value="">All severity levels</option>
+                  {attendanceSeverities.map((s) => (
+                    <option key={s}>{s}</option>
+                  ))}
+                </Select>
+              </Field>
+              <Field label="Schedule">
+                <Select
+                  value={scheduleFilter}
+                  onChange={(e) => setScheduleFilter(e.target.value)}
+                >
+                  <option value="">All schedules</option>
+                  {["Workday", "Leave", "Rest Day", "Absent"].map((s) => (
+                    <option key={s}>{s}</option>
+                  ))}
+                </Select>
+              </Field>
               <Field label="Employee">
                 <Input
                   placeholder="Search employees"
@@ -1563,6 +1715,61 @@ export function Timekeeping() {
                 </Button>
               )}
             </div>
+            <BulkActions
+              count={selectedGlobalRows.length}
+              total={selectableRows.length}
+              allSelected={allGlobalSelected}
+              onSelectAll={() =>
+                setGlobalIds(
+                  allGlobalSelected ? [] : selectableRows.map((r) => r.id),
+                )
+              }
+              onClear={() => setGlobalIds([])}
+              busy={!!busy}
+            >
+              <Select
+                aria-label="Attendance bulk action"
+                value=""
+                onChange={(e) => {
+                  setBulkOperation(e.target.value);
+                  setGlobalReason("");
+                  setGlobalNote("");
+                }}
+              >
+                <option value="">Choose bulk action…</option>
+                {[
+                  ["resolve", "Mark resolved"],
+                  ["confirm-overtime", "Confirm overtime"],
+                  ["correction", "Mark for correction"],
+                  ["reason", "Assign reason"],
+                  ["note", "Add note"],
+                  ["reopen", "Reopen for review"],
+                ].map(([v, label]) => (
+                  <option key={v} value={v}>
+                    {label}
+                  </option>
+                ))}
+              </Select>
+              <Button
+                variant="secondary"
+                disabled={!!busy}
+                onClick={() =>
+                  void run("Exporting selected attendance", async () => {
+                    await downloadFile(
+                      "/api/timekeeping",
+                      "Daily-Joe-selected-attendance.xlsx",
+                      json({
+                        action: "export",
+                        id: batch.id,
+                        recordIds: selectedGlobalRows.map((r) => r.id),
+                      }),
+                    );
+                  })
+                }
+              >
+                Export selected
+              </Button>
+            </BulkActions>
             {employee ? (
               <>
                 <div className="button-row">
@@ -1599,7 +1806,7 @@ export function Timekeeping() {
                     <strong>Resolve employee attendance</strong>
                     <p className="muted">
                       Tick records to resolve together, or resolve all pending
-                      records for this employee across the cutoff.
+                      records for this employee in the current filters.
                     </p>
                   </div>
                   <div className="button-row">
@@ -1608,13 +1815,13 @@ export function Timekeeping() {
                       disabled={
                         !!busy ||
                         !employeePendingRows.some((row) =>
-                          selectedAttendanceIds.includes(row.id),
+                          globalIds.includes(row.id),
                         )
                       }
                       onClick={() =>
                         openBulkReview(
                           employeePendingRows.filter((row) =>
-                            selectedAttendanceIds.includes(row.id),
+                            globalIds.includes(row.id),
                           ),
                         )
                       }
@@ -1622,7 +1829,7 @@ export function Timekeeping() {
                       Resolve selected (
                       {
                         employeePendingRows.filter((row) =>
-                          selectedAttendanceIds.includes(row.id),
+                          globalIds.includes(row.id),
                         ).length
                       }
                       )
@@ -1697,17 +1904,31 @@ export function Timekeeping() {
                               type="checkbox"
                               disabled={!!busy}
                               aria-label={`Select ${r.employee} on ${date(r.date)} to resolve`}
-                              checked={selectedAttendanceIds.includes(r.id)}
-                              onChange={(event) =>
-                                setSelectedAttendanceIds((current) =>
+                              checked={globalIds.includes(r.id)}
+                              onChange={(event) => {
+                                setGlobalIds((ids) =>
                                   event.target.checked
-                                    ? [...new Set([...current, r.id])]
-                                    : current.filter((id) => id !== r.id),
-                                )
-                              }
+                                    ? [...new Set([...ids, r.id])]
+                                    : ids.filter((id) => id !== r.id),
+                                );
+                              }}
                             />
                           ) : (
-                            <CheckCircle2 size={16} aria-label="Resolved" />
+                            <label className="checkbox-label">
+                              <input
+                                type="checkbox"
+                                aria-label={`Select ${r.employee} on ${r.date}`}
+                                checked={globalIds.includes(r.id)}
+                                onChange={(e) =>
+                                  setGlobalIds((ids) =>
+                                    e.target.checked
+                                      ? [...new Set([...ids, r.id])]
+                                      : ids.filter((id) => id !== r.id),
+                                  )
+                                }
+                              />
+                              <CheckCircle2 size={16} aria-label="Resolved" />
+                            </label>
                           )}
                         </td>
                         <td>{date(r.date)}</td>
@@ -1736,8 +1957,10 @@ export function Timekeeping() {
                         </td>
                         <td>
                           {hours(r.worked)} / {hours(r.expected)} h
+                          <AttendanceCalculation record={r} />
                         </td>
                         <td>
+                          <SeverityBadge record={r} />
                           <div className="actions">
                             {r.results.map((s) => (
                               <button
@@ -1870,6 +2093,44 @@ export function Timekeeping() {
                         return (
                           <tr key={id}>
                             <td>
+                              <input
+                                type="checkbox"
+                                aria-label={`Select filtered attendance for ${rows[0].employee}`}
+                                checked={rows.every((r) =>
+                                  globalIds.includes(r.id),
+                                )}
+                                disabled={!!busy}
+                                onChange={(e) =>
+                                  setGlobalIds((ids) =>
+                                    e.target.checked
+                                      ? [
+                                          ...new Set([
+                                            ...ids,
+                                            ...rows.map((r) => r.id),
+                                          ]),
+                                        ]
+                                      : ids.filter(
+                                          (selectedId) =>
+                                            !rows.some(
+                                              (r) => r.id === selectedId,
+                                            ),
+                                        ),
+                                  )
+                                }
+                              />
+                              <SeverityBadge
+                                record={
+                                  [...rows].sort(
+                                    (a, b) =>
+                                      attendanceSeverities.indexOf(
+                                        attendanceSeverity(a),
+                                      ) -
+                                      attendanceSeverities.indexOf(
+                                        attendanceSeverity(b),
+                                      ),
+                                  )[0]
+                                }
+                              />
                               <strong>{rows[0].employee}</strong>
                               <small className="muted">
                                 {rows[0].employeeId || "Matched by source name"}
@@ -1880,6 +2141,10 @@ export function Timekeeping() {
                               <small className="muted">
                                 {summary.recordedDays} recorded ·{" "}
                                 {summary.normalDays} normal
+                                {" · "}
+                                {summary.leaveDays} leave ·{" "}
+                                {summary.absenceDays} absence ·{" "}
+                                {summary.restDays} rest
                               </small>
                             </td>
                             <td>
@@ -2160,6 +2425,84 @@ export function Timekeeping() {
           </Button>
         </Modal>
       )}
+      {bulkOperation && batch && (
+        <Modal
+          title={`${selectedGlobalRows.length} records · ${bulkOperation}`}
+          onClose={() => !busy && setBulkOperation("")}
+        >
+          <p>
+            This action applies to all selected records across the current
+            filtered results. Source attendance and previous reviews remain in
+            the audit trail.
+          </p>
+          <Field label="Reason (required for unclassified missing / short attendance)">
+            <Select
+              value={globalReason}
+              onChange={(e) => setGlobalReason(e.target.value)}
+            >
+              <option value="">Keep existing classification</option>
+              {[
+                "Late",
+                "Undertime",
+                "Early Out",
+                "Absent",
+                "Day Off",
+                "Leave",
+                "System / Data Issue",
+                "Other",
+              ].map((s) => (
+                <option key={s}>{s}</option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="Note">
+            <Input
+              value={globalNote}
+              onChange={(e) => setGlobalNote(e.target.value)}
+            />
+          </Field>
+          <div className="modal-actions">
+            <Button
+              variant="secondary"
+              disabled={!!busy}
+              onClick={() => setBulkOperation("")}
+            >
+              Cancel
+            </Button>
+            <Button
+              disabled={!!busy || !selectedGlobalRows.length}
+              onClick={() =>
+                void run("Saving bulk attendance review", async () => {
+                  const result = await requestJson<{ batch: OdooBatch }>(
+                    "/api/timekeeping",
+                    json({
+                      action: "bulk-review",
+                      id: batch.id,
+                      revision: batch.revision,
+                      allFiltered: allGlobalSelected && !reviewedOnly,
+                      filters: bulkFilters,
+                      recordIds: selectedGlobalRows.map((r) => r.id),
+                      expectedCount: selectedGlobalRows.length,
+                      operation: bulkOperation,
+                      classification: globalReason || undefined,
+                      note: globalNote,
+                      confirmed: true,
+                    }),
+                  );
+                  setBatch(result.batch);
+                  setGlobalIds([]);
+                  setBulkOperation("");
+                  notify(
+                    `${selectedGlobalRows.length} attendance records updated.`,
+                  );
+                })
+              }
+            >
+              {busy || "Confirm bulk action"}
+            </Button>
+          </div>
+        </Modal>
+      )}
       {bulkRows.length > 0 && batch && (
         <Modal
           title={`Resolve ${bulkRows.length} attendance records · ${bulkRows[0].employee}`}
@@ -2290,7 +2633,7 @@ export function Timekeeping() {
                   update.records.map((row) => [row.id, row]),
                 );
                 applySavedReview(update);
-                setSelectedAttendanceIds((current) =>
+                setGlobalIds((current) =>
                   current.filter((id) => !changed.has(id)),
                 );
                 setBulkRows([]);
@@ -2365,6 +2708,8 @@ export function Timekeeping() {
               </span>
             ))}
           </div>
+          <SeverityBadge record={selected} />
+          <AttendanceCalculation record={selected} />
           <div className="review-next-facts">
             <span>
               <strong>Employee ID</strong>

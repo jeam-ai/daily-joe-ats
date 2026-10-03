@@ -10,6 +10,25 @@ export const missingInformation = (value?: string) =>
   /requires review|needs verification|not verified|not clearly stated|not confirmed from submitted information|^unknown$/i.test(
     value,
   );
+export function applicantFieldProtected(
+  application: Application,
+  field: string,
+) {
+  const provenance = application.information?.fields[field];
+  const current =
+    field === "position" || field === "location" || field === "assignedBranch"
+      ? application[field]
+      : (application.applicant as unknown as Record<string, unknown>)[
+          field === "residence" ? "location" : field
+        ];
+  return (
+    !!provenance?.verifiedBy ||
+    /^(?:HR|Manual)/i.test(provenance?.source || "") ||
+    (!!application.editedBy &&
+      !provenance &&
+      !missingInformation(String(current || "")))
+  );
+}
 export function applicantDisplayName(application: Application) {
   const name = application.applicant.name;
   if (
@@ -38,7 +57,9 @@ export function evidenceInformation(
                   ? "Attachment filename"
                   : evidence.startsWith("Email body:")
                     ? "Email body"
-                    : "Gmail display name"
+                    : evidence.startsWith("Email subject:")
+                      ? "Email subject"
+                      : "Gmail display name"
               : e.sources?.[key] || "Submitted evidence";
           const uncertain =
             source === "Residence match" ||
@@ -69,13 +90,13 @@ export function applyRecoveredResumeEvidence(
   // A resume identity is stronger than an unverified email sentence or sender
   // display name. HR-verified names always take precedence.
   if (
-    ["Resume", "Attachment filename"].includes(
+    ["Resume", "Email body", "Attachment filename"].includes(
       incoming.fields.name?.source || "",
     ) &&
-    !fields.name?.verifiedBy &&
+    !applicantFieldProtected(application, "name") &&
     evidence.name &&
     !missingInformation(evidence.name) &&
-    (incoming.fields.name?.source === "Resume" ||
+    (["Resume", "Email body"].includes(incoming.fields.name?.source || "") ||
       missingInformation(application.applicant.name) ||
       genericProfileName(application.applicant.name) ||
       /\b(?:applying|writing|interest|job|position|post|opportunity)\b/i.test(
@@ -86,6 +107,7 @@ export function applyRecoveredResumeEvidence(
     fields.name = incoming.fields.name;
   }
   for (const [key, value] of [
+    ["email", evidence.email],
     ["phone", evidence.phone],
     ["education", evidence.education],
     ["availability", evidence.availability],
@@ -96,7 +118,11 @@ export function applyRecoveredResumeEvidence(
     ["position", evidence.position],
     ["location", evidence.location],
   ] as const) {
-    if (!value || missingInformation(value) || fields[key]?.verifiedBy)
+    if (
+      !value ||
+      missingInformation(value) ||
+      applicantFieldProtected(application, key)
+    )
       continue;
     const current =
       key === "position" || key === "location"
@@ -199,7 +225,7 @@ export function applyRecoveredResumeEvidence(
     evidence.residenceLocation &&
     (!application.assignedBranch ||
       /^unassigned$/i.test(application.assignedBranch)) &&
-    !fields.assignedBranch?.verifiedBy
+    !applicantFieldProtected(application, "assignedBranch")
   ) {
     application.assignedBranch = evidence.residenceLocation;
     if (incoming.fields.assignedBranch)

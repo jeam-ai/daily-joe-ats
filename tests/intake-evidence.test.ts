@@ -1,6 +1,30 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { intakeEvidence } from "../lib/intake-evidence";
+
+test("resume identity and contact details outrank email subject and sender metadata", () => {
+  const evidence = intakeEvidence({
+    subject: "Application for Barista Position",
+    from: "Recruitment Team <forwarder@example.invalid>",
+    filename: "Application for Barista.pdf",
+    body: "Please review the attached application.",
+    resume:
+      "Juan Dela Cruz\nEmail: JUAN@example.invalid\nPhone: 09181112222\nEducation\nCollege Graduate\nReferences\nMaria Santos\nmaria@example.invalid",
+  });
+  assert.equal(evidence.name, "Juan Dela Cruz");
+  assert.equal(evidence.email, "juan@example.invalid");
+  assert.equal(evidence.sources.email, "Resume");
+  const fallback = intakeEvidence({
+    subject: "Application for Barista Position",
+    from: "Juan Dela Cruz <juan@example.invalid>",
+  });
+  assert.equal(fallback.name, "Juan Dela Cruz");
+  const missing = intakeEvidence({
+    subject: "Application for Barista Position",
+    from: "careers@example.invalid",
+  });
+  assert.match(missing.name, /not clearly stated/i);
+});
 import { evidenceInformation } from "../lib/applicant-information";
 test("applied position and branch do not depend on a configured hiring need", () => {
   const r = intakeEvidence({

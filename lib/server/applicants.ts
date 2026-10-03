@@ -3,7 +3,12 @@ import { formalName } from "@/lib/names";
 import { z } from "zod";
 import type { Application, ScreeningCriterion, User } from "@/types";
 import { canEdit, canManage } from "@/lib/data-policy";
-import { transaction, readRecord, putRecord, type Transaction } from "./database";
+import {
+  transaction,
+  readRecord,
+  putRecord,
+  type Transaction,
+} from "./database";
 import { getState, saveState, audit } from "./repository";
 import { config, SafeError } from "./config";
 import { purgeDemoApplication } from "./demo";
@@ -273,6 +278,35 @@ export async function updateApplicantWorkflow(
     next.information = structuredClone(
       before.information || { fields: {}, conflicts: [] },
     );
+    for (const key of [
+      "name",
+      "email",
+      "phone",
+      "education",
+      "availability",
+      "experienceDetails",
+      "skills",
+      "certifications",
+      "residence",
+      "position",
+      "location",
+    ] as const) {
+      const value =
+        key === "position" || key === "location"
+          ? next[key]
+          : next.applicant[key === "residence" ? "location" : key];
+      const prior =
+        key === "position" || key === "location"
+          ? before[key]
+          : before.applicant[key === "residence" ? "location" : key];
+      if (value !== prior)
+        next.information.fields[key] = {
+          source: "HR edit",
+          evidence: String(value || ""),
+          confidence: "Confident",
+          verifiedBy: user.email,
+        };
+    }
     next.editedBy = user.email;
     next.editedAt = now;
     next.lastActivity = now;
@@ -505,7 +539,8 @@ export async function updateApplicant(id: string, input: unknown, user: User) {
     // possible; only reject an edit that tries to *change* it to another
     // applicant's address.
     if (
-      application.applicant.email.toLowerCase() !== values.email.toLowerCase() &&
+      application.applicant.email.toLowerCase() !==
+        values.email.toLowerCase() &&
       state.applications.some(
         (item) =>
           item.id !== application.id &&

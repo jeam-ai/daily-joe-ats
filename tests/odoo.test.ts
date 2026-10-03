@@ -93,7 +93,7 @@ test("explicit schedule supports late/early-out and tolerance preserves discrepa
   assert.equal(day.rawWorked, 8.5);
   assert.equal(day.pivotWorked, 7);
 });
-test("negative attendance remains unclassified until HR confirms the cause", () => {
+test("8+ hours is normal duration and only explicit schedule rules flag late or early-out", () => {
   const p = structuredClone(pivot);
   // Raw time is late and early, but the negative result alone cannot establish
   // which explanation HR should record.
@@ -106,16 +106,16 @@ test("negative attendance remains unclassified until HR confirms the cause", () 
   const day = analysis.records.find(
     (r) => r.employee === "DEMO Alex" && r.date === "2026-09-01",
   )!;
-  assert.ok(day.results.includes("Negative Attendance"));
-  assert.ok(!day.results.includes("Late"));
-  assert.ok(!day.results.includes("Early Out"));
+  assert.ok(!day.results.includes("Negative Attendance"));
+  assert.ok(day.results.includes("Late"));
+  assert.ok(day.results.includes("Early Out"));
   assert.ok(!day.results.includes("Undertime"));
   assert.equal(day.review.classification, undefined);
   const absent = analysis.records.find(
     (r) => r.employee === "DEMO Alex" && r.date === "2026-09-02",
   )!;
-  assert.ok(absent.results.includes("Leave"));
-  assert.equal(absent.review.classification, "Leave");
+  assert.ok(absent.results.includes("No Attendance"));
+  assert.equal(absent.review.classification, undefined);
 });
 
 function attendanceWeek(
@@ -134,7 +134,13 @@ function attendanceWeek(
         employee: "QA Weekly",
         employeeId: "qa-weekly",
         checkIn: `${date} 08:00:00`,
-        checkOut: `${date} 16:00:00`,
+        checkOut: new Date(
+          Date.parse(`${date}T08:00:00Z`) +
+            Math.round(workedHours * 60) * 60000,
+        )
+          .toISOString()
+          .replace("T", " ")
+          .slice(0, 19),
         worked: workedHours,
         overtime: 0,
         extra: 0,
@@ -155,10 +161,10 @@ function attendanceWeek(
   };
 }
 
-test("one isolated missing day is Leave, while multiple or consecutive missing days keep HR choices", () => {
+test("missing days need evidence for leave and remain unverified without a source schedule", () => {
   const single = analyzeOdoo(attendanceWeek([2]), defaultOdooRules).records[2];
-  assert.deepEqual(single.results, ["Leave"]);
-  assert.equal(single.review.classification, "Leave");
+  assert.deepEqual(single.results, ["No Attendance", "Unverified Absence"]);
+  assert.equal(single.review.classification, undefined);
   assert.equal(single.review.status, "For Review");
   for (const missing of [
     [1, 4],
@@ -188,11 +194,14 @@ test("one isolated missing day is Leave, while multiple or consecutive missing d
   );
 });
 
-test("overtime starts at 9 worked hours and becomes excessive at 16", () => {
-  for (const hours of [8.99, 9, 14, 15.99, 16]) {
+test("overtime starts at 9h31 and becomes excessive at 16", () => {
+  for (const hours of [8.99, 9, 9.5, 9 + 31 / 60, 14, 15.99, 16]) {
     const day = analyzeOdoo(attendanceWeek([], hours), defaultOdooRules)
       .records[0];
-    assert.equal(day.results.includes("Overtime"), hours >= 9 && hours < 16);
+    assert.equal(
+      day.results.includes("Overtime"),
+      Math.round(hours * 60) > 570 && hours < 16,
+    );
     assert.equal(day.results.includes("Excessive Overtime"), hours >= 16);
   }
   const old = analyzeOdoo(attendanceWeek([], 14), {

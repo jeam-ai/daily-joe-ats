@@ -1,4 +1,8 @@
 import type { OdooDay } from "./odoo";
+import {
+  attendanceSeverity,
+  attendanceSeverities,
+} from "./attendance-automation";
 
 export type TimekeepingQueueGroupId =
   | "missing-time-out"
@@ -17,7 +21,12 @@ export type TimekeepingQueueGroup = {
   description: string;
 };
 
-const normalResults = new Set(["Normal", "Rest Day / Day Off"]);
+const normalResults = new Set([
+  "Normal",
+  "Rest Day / Day Off",
+  "Leave",
+  "Absent",
+]);
 
 export const needsClassification = (record: OdooDay) =>
   (record.results.includes("Negative Attendance") ||
@@ -75,7 +84,7 @@ const groupDefinitions: Omit<TimekeepingQueueGroup, "records">[] = [
     id: "negative-attendance",
     label: "Negative attendance",
     description:
-      "HR chooses whether the variance is late, undertime, or early out.",
+      "Attendance below 8 hours is flagged for validation. Timing observations remain available.",
   },
   {
     id: "excessive-overtime",
@@ -126,7 +135,13 @@ const isInGroup = (record: OdooDay, id: TimekeepingQueueGroupId) => {
 };
 
 export function queueGroups(records: OdooDay[]): TimekeepingQueueGroup[] {
-  const active = records.filter(needsAction);
+  const active = records
+    .filter(needsAction)
+    .sort(
+      (a, b) =>
+        attendanceSeverities.indexOf(attendanceSeverity(a)) -
+        attendanceSeverities.indexOf(attendanceSeverity(b)),
+    );
   const assigned = new Set<string>();
   return groupDefinitions.map((definition) => {
     const matches = active.filter((record) => {
@@ -162,7 +177,7 @@ export function issueExplanation(record: OdooDay, excessiveHours = 16) {
   if (record.results.includes("Missing Time In"))
     return "A clock-in was not present in the uploaded Attendance report. Verify the source or track an Odoo correction.";
   if (record.results.includes("Negative Attendance"))
-    return "The worked-versus-expected variance is negative. The source cannot tell whether it was late, undertime, or early out.";
+    return "Recorded attendance is below the minimum 8-hour threshold. Verify the calculated duration and schedule observations before resolution.";
   if (record.results.includes("No Attendance"))
     return "There is no attendance source row for this cutoff date. HR must decide the reason; it is not automatically an absence.";
   if (record.results.includes("Multiple Entries"))
@@ -194,12 +209,27 @@ export function employeeAttendanceSummary(records: OdooDay[]) {
     unresolved: unresolved.length,
     clarification: unresolved.filter(needsClassification).length,
     awaitingVerification: awaiting.length,
+    leaveDays: records.filter(
+      (r) => r.schedule === "Leave" || r.review.classification === "Leave",
+    ).length,
+    absenceDays: records.filter(
+      (r) => r.schedule === "Absent" || r.review.classification === "Absent",
+    ).length,
+    restDays: records.filter(
+      (r) => r.schedule === "Rest Day" || r.review.classification === "Day Off",
+    ).length,
   };
 }
 
 export function cutoffWorkflow(records: OdooDay[]) {
   const groups = queueGroups(records);
-  const actionRequired = records.filter(needsAction);
+  const actionRequired = records
+    .filter(needsAction)
+    .sort(
+      (a, b) =>
+        attendanceSeverities.indexOf(attendanceSeverity(a)) -
+        attendanceSeverities.indexOf(attendanceSeverity(b)),
+    );
   const awaitingVerification = records.filter(awaitsVerification);
   const automaticallyCleared = records.filter(
     (record) =>
