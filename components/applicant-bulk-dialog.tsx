@@ -45,6 +45,7 @@ export function ApplicantBulkDialog({
     reject: "Reject",
     withdraw: "Withdraw",
     talent: "Move to talent pool",
+    screening: "Return to Screening",
     status: "Change status",
     assign: "Assign hiring need",
     note: "Add note",
@@ -75,14 +76,20 @@ export function ApplicantBulkDialog({
   };
   return (
     <Modal
-      title={`${label} · ${ids.length} applicants`}
+      title={`${label} · ${ids.length} applicant${ids.length === 1 ? "" : "s"}`}
       busy={busy}
       onClose={onClose}
     >
       <p>
-        {ids.length} selected applicants across all pages will receive this
-        action. Each record keeps its own audit history.
+        {ids.length} selected applicant{ids.length === 1 ? "" : "s"} will
+        receive this action. Each record keeps its own audit history.
       </p>
+      {action === "screening" && (
+        <p>
+          Return to Screening with For Review status. Applicant details, HR
+          corrections, notes and previous interview history are preserved.
+        </p>
+      )}
       {error && (
         <p className="error-banner" role="alert">
           {error}

@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import type { IssuanceEmployee } from "@/lib/issuance-employees";
 import type {
   IssuanceCategory,
@@ -12,7 +12,42 @@ import { requestJson } from "@/lib/client-request";
 import { useApp } from "./provider";
 import { Button, Field, Input, Select, Modal, Table } from "./ui";
 import { BulkActions } from "./bulk-actions";
-export function BulkIssuance({ employeeKeys }: { employeeKeys?: string[] }) {
+import { ActionMenu } from "./action-menu";
+import { SelectionHelp, SelectionSurface } from "./record-selection";
+function IssuancePanel({
+  embedded,
+  busy,
+  onClose,
+  children,
+}: {
+  embedded: boolean;
+  busy: boolean;
+  onClose: () => void;
+  children: ReactNode;
+}) {
+  return embedded ? (
+    <>{children}</>
+  ) : (
+    <Modal
+      title="Record issuance · Multiple employees"
+      busy={busy}
+      onClose={onClose}
+    >
+      {children}
+    </Modal>
+  );
+}
+export function BulkIssuance({
+  employeeKeys,
+  embedded = false,
+  onClose,
+  onBusyChange,
+}: {
+  employeeKeys?: string[];
+  embedded?: boolean;
+  onClose?: () => void;
+  onBusyChange?: (busy: boolean) => void;
+}) {
   const { state, dataset, notify, patchState } = useApp();
   const [open, setOpen] = useState(false),
     [roster, setRoster] = useState<IssuanceEmployee[]>([]),
@@ -25,6 +60,38 @@ export function BulkIssuance({ employeeKeys }: { employeeKeys?: string[] }) {
     [error, setError] = useState(""),
     [draft, setDraft] = useState<Record<string, unknown>>(),
     [requestId, setRequestId] = useState("");
+  const close = () => {
+    setOpen(false);
+    onClose?.();
+  };
+  async function loadEmployees() {
+    setBusy(true);
+    setError("");
+    try {
+      const r = await requestJson<{ employees: IssuanceEmployee[] }>(
+        "/api/issuance?employees=1",
+      );
+      setRoster(r.employees);
+      setIds(employeeKeys || []);
+      setQ("");
+      setBranch("");
+      setPage(1);
+      setDraft(undefined);
+      setRequestId(crypto.randomUUID());
+      setOpen(true);
+    } catch (e) {
+      notify((e as Error).message, "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+  useEffect(() => {
+    if (embedded) void loadEmployees();
+  }, [embedded]);
+  useEffect(() => {
+    onBusyChange?.(busy);
+  }, [busy, onBusyChange]);
+  useEffect(() => () => onBusyChange?.(false), [onBusyChange]);
   const filtered = roster.filter(
     (p) =>
       (!q ||
@@ -50,43 +117,33 @@ export function BulkIssuance({ employeeKeys }: { employeeKeys?: string[] }) {
   ];
   return (
     <>
-      <Button
-        variant="secondary"
-        disabled={busy || dataset === "demo" || !canManage(state?.currentUser)}
-        onClick={async () => {
-          setBusy(true);
-          setError("");
-          try {
-            const r = await requestJson<{ employees: IssuanceEmployee[] }>(
-              "/api/issuance?employees=1",
-            );
-            setRoster(r.employees);
-            setIds(employeeKeys || []);
-            setQ("");
-            setBranch("");
-            setPage(1);
-            setDraft(undefined);
-            setRequestId(crypto.randomUUID());
-            setOpen(true);
-          } catch (e) {
-            notify((e as Error).message, "error");
-          } finally {
-            setBusy(false);
+      {!embedded && (
+        <Button
+          variant="secondary"
+          disabled={
+            busy || dataset === "demo" || !canManage(state?.currentUser)
           }
-        }}
-      >
-        {busy
-          ? "Loading employees…"
-          : employeeKeys?.length
-            ? `Bulk issuance · ${employeeKeys.length} employees`
-            : "Bulk issuance"}
-      </Button>
-      {open && (
-        <Modal
-          title="Bulk employee issuance"
-          busy={busy}
-          onClose={() => setOpen(false)}
+          onClick={() => void loadEmployees()}
         >
+          {busy
+            ? "Loading employees…"
+            : employeeKeys?.length
+              ? `Record issuance · ${employeeKeys.length} employees`
+              : "Record issuance"}
+        </Button>
+      )}
+      {embedded && !open && (
+        <p role="status">
+          {busy ? "Loading employees…" : "Employees could not be loaded."}
+          {!busy && (
+            <Button variant="secondary" onClick={() => void loadEmployees()}>
+              Retry
+            </Button>
+          )}
+        </p>
+      )}
+      {open && (
+        <IssuancePanel embedded={embedded} busy={busy} onClose={close}>
           {error && (
             <p className="error-banner" role="alert">
               {error}
@@ -151,7 +208,7 @@ export function BulkIssuance({ employeeKeys }: { employeeKeys?: string[] }) {
                         ],
                         issuanceInventory: r.inventory,
                       }));
-                      setOpen(false);
+                      close();
                       notify(
                         `${r.records.length} individual issuance records created.`,
                       );
@@ -197,6 +254,7 @@ export function BulkIssuance({ employeeKeys }: { employeeKeys?: string[] }) {
                   </Select>
                 </Field>
               </div>
+              <SelectionHelp />
               <BulkActions
                 count={selected.length}
                 total={filtered.length}
@@ -207,39 +265,71 @@ export function BulkIssuance({ employeeKeys }: { employeeKeys?: string[] }) {
                 onClear={() => setIds([])}
                 busy={busy}
               />
-              <Table>
-                <thead>
-                  <tr>
-                    <th>Select</th>
-                    <th>Employee</th>
-                    <th>Position / branch</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filtered.slice((page - 1) * 20, page * 20).map((p) => (
-                    <tr key={p.key}>
-                      <td>
-                        <input
-                          type="checkbox"
-                          aria-label={`Issue to ${p.name}`}
-                          checked={ids.includes(p.key)}
-                          onChange={(e) =>
-                            setIds((ids) =>
-                              e.target.checked
-                                ? [...ids, p.key]
-                                : ids.filter((id) => id !== p.key),
-                            )
-                          }
-                        />
-                      </td>
-                      <td>{p.name}</td>
-                      <td>
-                        {p.position} · {p.branch}
-                      </td>
+              <SelectionSurface
+                className="multiple-issuance-roster"
+                disabled={busy}
+                onSelect={(id) => setIds((ids) => [...new Set([...ids, id])])}
+              >
+                <Table>
+                  <thead>
+                    <tr>
+                      {!!selected.length && <th>Select</th>}
+                      <th>Employee</th>
+                      <th>Position / branch</th>
+                      <th />
                     </tr>
-                  ))}
-                </tbody>
-              </Table>
+                  </thead>
+                  <tbody>
+                    {filtered.slice((page - 1) * 20, page * 20).map((p) => (
+                      <tr
+                        key={p.key}
+                        data-record-id={p.key}
+                        aria-selected={ids.includes(p.key)}
+                      >
+                        {!!selected.length && (
+                          <td>
+                            <input
+                              type="checkbox"
+                              aria-label={`Issue to ${p.name}`}
+                              checked={ids.includes(p.key)}
+                              onChange={(e) =>
+                                setIds((ids) =>
+                                  e.target.checked
+                                    ? [...ids, p.key]
+                                    : ids.filter((id) => id !== p.key),
+                                )
+                              }
+                            />
+                          </td>
+                        )}
+                        <td>{p.name}</td>
+                        <td>
+                          {p.position} · {p.branch}
+                        </td>
+                        <td>
+                          <ActionMenu
+                            label={`Actions for ${p.name}`}
+                            items={[
+                              {
+                                label: ids.includes(p.key)
+                                  ? "Deselect record"
+                                  : "Select record",
+                                disabled: busy,
+                                onClick: () =>
+                                  setIds((ids) =>
+                                    ids.includes(p.key)
+                                      ? ids.filter((id) => id !== p.key)
+                                      : [...ids, p.key],
+                                  ),
+                              },
+                            ]}
+                          />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </Table>
+              </SelectionSurface>
               {!filtered.length && (
                 <p role="status">No employees match the current filters.</p>
               )}
@@ -348,11 +438,7 @@ export function BulkIssuance({ employeeKeys }: { employeeKeys?: string[] }) {
                   signed their acknowledgments
                 </label>
                 <div className="modal-actions">
-                  <Button
-                    variant="secondary"
-                    type="button"
-                    onClick={() => setOpen(false)}
-                  >
+                  <Button variant="secondary" type="button" onClick={close}>
                     Cancel
                   </Button>
                   <Button type="submit" disabled={!selected.length || busy}>
@@ -362,7 +448,7 @@ export function BulkIssuance({ employeeKeys }: { employeeKeys?: string[] }) {
               </form>
             </>
           )}
-        </Modal>
+        </IssuancePanel>
       )}
     </>
   );

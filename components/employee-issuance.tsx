@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   CheckCircle2,
   Clock3,
@@ -39,6 +40,8 @@ import {
 import { RichTextEditor } from "./rich-text";
 import { BulkIssuance } from "./bulk-issuance";
 import { BulkActions } from "./bulk-actions";
+import { ActionMenu } from "./action-menu";
+import { SelectionHelp, SelectionSurface } from "./record-selection";
 import { requestJson } from "@/lib/client-request";
 
 const statuses: IssuanceStatus[] = [
@@ -60,6 +63,9 @@ export function EmployeeIssuance() {
   const { state, notify, refresh, patchState, dataset } = useApp();
   const today = () => dayKey(Date.now(), state?.preferences.timezone);
   const individualRequestId = useRef("");
+  const params = useSearchParams();
+  const recordIntent = params.get("record");
+  const openedFromLink = useRef(false);
   const [view, setView] = useState("All issuance");
   const [statusFilter, setStatusFilter] = useState<"All" | IssuanceStatus>(
     "All",
@@ -83,6 +89,10 @@ export function EmployeeIssuance() {
     IssuanceInventory | "new" | null
   >(null);
   const [busy, setBusy] = useState("");
+  const [issuanceMode, setIssuanceMode] = useState<"single" | "multiple">(
+    "single",
+  );
+  const [multipleBusy, setMultipleBusy] = useState(false);
   const [selectedIds, setSelectedIds] = useState<string[]>([]),
     [bulkAction, setBulkAction] = useState("");
   const bulkRequestId = useRef("");
@@ -179,6 +189,16 @@ export function EmployeeIssuance() {
     ["Admin", "Talent Acquisition", "HR Generalist"].includes(
       state?.currentUser?.role || "",
     );
+  useEffect(() => {
+    if (recordIntent === "1" && editable && !openedFromLink.current) {
+      openedFromLink.current = true;
+      individualRequestId.current = crypto.randomUUID();
+      setNewStatus("Issued");
+      setNewReleasedAt(dayKey(Date.now(), state?.preferences.timezone));
+      setIssuanceMode("single");
+      setAdding(true);
+    }
+  }, [recordIntent, editable, state?.preferences.timezone]);
 
   if (!state) return <LoadingSkeleton />;
 
@@ -373,7 +393,6 @@ export function EmployeeIssuance() {
             Employee asset and acknowledgment records
           </span>
           <div className="button-row">
-            <BulkIssuance />
             <input
               className="sr-only"
               ref={file}
@@ -404,6 +423,7 @@ export function EmployeeIssuance() {
                 individualRequestId.current = crypto.randomUUID();
                 setNewStatus("Issued");
                 setNewReleasedAt(today());
+                setIssuanceMode("single");
                 setAdding(true);
               }}
             >
@@ -648,6 +668,7 @@ export function EmployeeIssuance() {
             />
           </div>
         </div>
+        {editable && <SelectionHelp />}
         {editable && (
           <BulkActions
             count={filtered.filter((r) => selectedIds.includes(r.id)).length}
@@ -687,99 +708,134 @@ export function EmployeeIssuance() {
           </BulkActions>
         )}
         {filtered.length ? (
-          <Table>
-            <thead>
-              <tr>
-                <th>Select</th>
-                <th>Employee</th>
-                <th>Issuance</th>
-                <th>Size / quantity</th>
-                <th>Issued / received</th>
-                <th>Status</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((record) => (
-                <tr key={record.id}>
-                  <td>
-                    <input
-                      type="checkbox"
-                      aria-label={`Select ${record.employeeName} · ${record.item}`}
-                      disabled={!editable || !!busy}
-                      checked={selectedIds.includes(record.id)}
-                      onChange={(e) =>
-                        setSelectedIds((ids) =>
-                          e.target.checked
-                            ? [...new Set([...ids, record.id])]
-                            : ids.filter((id) => id !== record.id),
-                        )
-                      }
-                    />
-                  </td>
-                  <td>
-                    <strong>{record.employeeName}</strong>
-                    <small className="cell-secondary">
-                      {[record.employeeId, record.position, record.branch]
-                        .filter(Boolean)
-                        .join(" · ") || "Employee details not recorded"}
-                    </small>
-                  </td>
-                  <td>
-                    <Badge
-                      tone={record.category === "Uniform" ? "blue" : "green"}
-                    >
-                      {record.category}
-                    </Badge>
-                    <small className="cell-secondary">{record.item}</small>
-                  </td>
-                  <td>
-                    <strong>{record.quantity}</strong>
-                    <small className="cell-secondary">
-                      {record.size
-                        ? `Size ${record.size}`
-                        : "Size not recorded"}
-                      {record.condition ? ` · ${record.condition}` : ""}
-                    </small>
-                  </td>
-                  <td>
-                    <strong>
-                      {record.issuedAt
-                        ? formatDate(record.issuedAt, state.preferences)
-                        : "Not issued"}
-                    </strong>
-                    <small className="cell-secondary">
-                      {record.receivedAt
-                        ? `Received ${formatDate(record.receivedAt, state.preferences)}`
-                        : "Receipt pending"}
-                    </small>
-                    {record.issuedBy && (
-                      <small className="cell-secondary">
-                        Issued by {record.issuedBy}
-                      </small>
-                    )}
-                  </td>
-                  <td>
-                    <StatusBadge status={record.status} />
-                    <small className="cell-secondary">
-                      {record.signed
-                        ? "Acknowledgment recorded"
-                        : "Acknowledgment pending"}
-                    </small>
-                  </td>
-                  <td>
-                    <Button
-                      variant="secondary"
-                      disabled={!editable || !!busy}
-                      onClick={() => setEditing(record)}
-                    >
-                      Update
-                    </Button>
-                  </td>
+          <SelectionSurface
+            disabled={!editable || !!busy}
+            onSelect={(id) =>
+              setSelectedIds((ids) => [...new Set([...ids, id])])
+            }
+          >
+            <Table>
+              <thead>
+                <tr>
+                  {!!selectedIds.length && <th>Select</th>}
+                  <th>Employee</th>
+                  <th>Issuance</th>
+                  <th>Size / quantity</th>
+                  <th>Issued / received</th>
+                  <th>Status</th>
+                  <th />
                 </tr>
-              ))}
-            </tbody>
-          </Table>
+              </thead>
+              <tbody>
+                {filtered.map((record) => (
+                  <tr
+                    key={record.id}
+                    data-record-id={record.id}
+                    aria-selected={selectedIds.includes(record.id)}
+                  >
+                    {!!selectedIds.length && (
+                      <td>
+                        <input
+                          type="checkbox"
+                          aria-label={`Select ${record.employeeName} · ${record.item}`}
+                          disabled={!editable || !!busy}
+                          checked={selectedIds.includes(record.id)}
+                          onChange={(e) =>
+                            setSelectedIds((ids) =>
+                              e.target.checked
+                                ? [...new Set([...ids, record.id])]
+                                : ids.filter((id) => id !== record.id),
+                            )
+                          }
+                        />
+                      </td>
+                    )}
+                    <td>
+                      <strong>{record.employeeName}</strong>
+                      <small className="cell-secondary">
+                        {[record.employeeId, record.position, record.branch]
+                          .filter(Boolean)
+                          .join(" · ") || "Employee details not recorded"}
+                      </small>
+                    </td>
+                    <td>
+                      <Badge
+                        tone={record.category === "Uniform" ? "blue" : "green"}
+                      >
+                        {record.category}
+                      </Badge>
+                      <small className="cell-secondary">{record.item}</small>
+                    </td>
+                    <td>
+                      <strong>{record.quantity}</strong>
+                      <small className="cell-secondary">
+                        {record.size
+                          ? `Size ${record.size}`
+                          : "Size not recorded"}
+                        {record.condition ? ` · ${record.condition}` : ""}
+                      </small>
+                    </td>
+                    <td>
+                      <strong>
+                        {record.issuedAt
+                          ? formatDate(record.issuedAt, state.preferences)
+                          : "Not issued"}
+                      </strong>
+                      <small className="cell-secondary">
+                        {record.receivedAt
+                          ? `Received ${formatDate(record.receivedAt, state.preferences)}`
+                          : "Receipt pending"}
+                      </small>
+                      {record.issuedBy && (
+                        <small className="cell-secondary">
+                          Issued by {record.issuedBy}
+                        </small>
+                      )}
+                    </td>
+                    <td>
+                      <StatusBadge status={record.status} />
+                      <small className="cell-secondary">
+                        {record.signed
+                          ? "Acknowledgment recorded"
+                          : "Acknowledgment pending"}
+                      </small>
+                    </td>
+                    <td>
+                      <Button
+                        variant="secondary"
+                        disabled={!editable || !!busy}
+                        onClick={() => setEditing(record)}
+                      >
+                        Update
+                      </Button>
+                      <ActionMenu
+                        label={`Actions for ${record.employeeName} · ${record.item}`}
+                        items={[
+                          {
+                            label: selectedIds.includes(record.id)
+                              ? "Deselect record"
+                              : "Select record",
+                            disabled: !editable || !!busy,
+                            onClick: () =>
+                              setSelectedIds((ids) =>
+                                ids.includes(record.id)
+                                  ? ids.filter((id) => id !== record.id)
+                                  : [...ids, record.id],
+                              ),
+                          },
+                          {
+                            label: "Update record",
+                            disabled: !editable || !!busy,
+                            onClick: () => setEditing(record),
+                          },
+                        ]}
+                      />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </Table>
+          </SelectionSurface>
         ) : (
           <EmptyState
             title={
@@ -797,136 +853,172 @@ export function EmployeeIssuance() {
       </Card>
       {adding && (
         <Modal
-          title="Record employee issuance"
-          busy={!!busy}
+          title="Record issuance"
+          busy={!!busy || multipleBusy}
           onClose={() => setAdding(false)}
         >
-          <form className="form-stack" onSubmit={saveRecord}>
-            <div className="form-grid">
-              <Field label="Category">
-                <Select
-                  name="category"
-                  value={newCategory}
-                  onChange={(event) =>
-                    setNewCategory(event.target.value as IssuanceCategory)
-                  }
-                >
-                  {categories.map((category) => (
-                    <option key={category}>{category}</option>
-                  ))}
-                </Select>
-              </Field>
-              <Field label="Employee name">
-                <Input name="employeeName" required />
-              </Field>
-              <Field label="Employee ID">
-                <Input name="employeeId" />
-              </Field>
-              <Field label="Position">
-                <Input name="position" />
-              </Field>
-              <Field label="Branch / location">
-                <Input name="branch" />
-              </Field>
-              <Field label="Item">
-                <Select name="item" required defaultValue="">
-                  <option value="" disabled>
-                    Select configured item
-                  </option>
-                  {catalog
-                    .filter((item) => item.category === newCategory)
-                    .map((item) => (
-                      <option key={item.id} value={item.name}>
-                        {item.name}
-                      </option>
+          <div
+            className="issuance-mode"
+            role="group"
+            aria-label="Issuance mode"
+          >
+            <Button
+              variant={issuanceMode === "single" ? "primary" : "secondary"}
+              disabled={!!busy || multipleBusy}
+              aria-pressed={issuanceMode === "single"}
+              onClick={() => setIssuanceMode("single")}
+            >
+              Single employee
+            </Button>
+            <Button
+              variant={issuanceMode === "multiple" ? "primary" : "secondary"}
+              disabled={!!busy || multipleBusy}
+              aria-pressed={issuanceMode === "multiple"}
+              onClick={() => setIssuanceMode("multiple")}
+            >
+              Multiple employees
+            </Button>
+          </div>
+          {issuanceMode === "multiple" ? (
+            <BulkIssuance
+              embedded
+              onClose={() => setAdding(false)}
+              onBusyChange={setMultipleBusy}
+            />
+          ) : (
+            <form className="form-stack" onSubmit={saveRecord}>
+              <div className="form-grid">
+                <Field label="Category">
+                  <Select
+                    name="category"
+                    value={newCategory}
+                    onChange={(event) =>
+                      setNewCategory(event.target.value as IssuanceCategory)
+                    }
+                  >
+                    {categories.map((category) => (
+                      <option key={category}>{category}</option>
                     ))}
-                </Select>
-                <small className="field-note">
-                  Configure items in Settings → Employee Issuance.
-                </small>
+                  </Select>
+                </Field>
+                <Field label="Employee name">
+                  <Input name="employeeName" required />
+                </Field>
+                <Field label="Employee ID">
+                  <Input name="employeeId" />
+                </Field>
+                <Field label="Position">
+                  <Input name="position" />
+                </Field>
+                <Field label="Branch / location">
+                  <Input name="branch" />
+                </Field>
+                <Field label="Item">
+                  <Select name="item" required defaultValue="">
+                    <option value="" disabled>
+                      Select configured item
+                    </option>
+                    {catalog
+                      .filter((item) => item.category === newCategory)
+                      .map((item) => (
+                        <option key={item.id} value={item.name}>
+                          {item.name}
+                        </option>
+                      ))}
+                  </Select>
+                  <small className="field-note">
+                    Configure items in Settings → Employee Issuance.
+                  </small>
+                </Field>
+                <Field label="Size">
+                  <Input
+                    name="size"
+                    placeholder="Optional for non-sized items"
+                  />
+                </Field>
+                <Field label="Quantity">
+                  <Input
+                    name="quantity"
+                    type="number"
+                    min="1"
+                    defaultValue="1"
+                    required
+                  />
+                </Field>
+                <Field label="Condition">
+                  <Input
+                    name="condition"
+                    placeholder="New, used, replacement"
+                  />
+                </Field>
+                <Field label="Issued by">
+                  <Input
+                    name="issuedBy"
+                    defaultValue={
+                      state.currentUser?.name || state.currentUser?.email
+                    }
+                    required
+                  />
+                </Field>
+                <Field label="Status">
+                  <Select
+                    name="status"
+                    value={newStatus}
+                    onChange={(event) =>
+                      setNewStatus(
+                        statusAfterReleaseDate(
+                          event.target.value as IssuanceStatus,
+                          newReleasedAt,
+                        ),
+                      )
+                    }
+                  >
+                    {statuses.map((status) => (
+                      <option key={status}>{status}</option>
+                    ))}
+                  </Select>
+                </Field>
+                <Field label="Date released">
+                  <Input
+                    name="issuedAt"
+                    type="date"
+                    value={newReleasedAt}
+                    onChange={(event) => {
+                      setNewReleasedAt(event.target.value);
+                      setNewStatus((status) =>
+                        statusAfterReleaseDate(status, event.target.value),
+                      );
+                    }}
+                  />
+                  <small className="muted">
+                    A release date changes Pending to Issued.
+                  </small>
+                </Field>
+                <Field label="Date received">
+                  <Input name="receivedAt" type="date" />
+                </Field>
+              </div>
+              <label className="check-row">
+                <input name="signed" type="checkbox" defaultChecked /> Issuance
+                acknowledgment signed
+              </label>
+              <Field label="Remarks">
+                <RichTextEditor name="remarks" rows={3} />
               </Field>
-              <Field label="Size">
-                <Input name="size" placeholder="Optional for non-sized items" />
-              </Field>
-              <Field label="Quantity">
-                <Input
-                  name="quantity"
-                  type="number"
-                  min="1"
-                  defaultValue="1"
-                  required
-                />
-              </Field>
-              <Field label="Condition">
-                <Input name="condition" placeholder="New, used, replacement" />
-              </Field>
-              <Field label="Issued by">
-                <Input
-                  name="issuedBy"
-                  defaultValue={
-                    state.currentUser?.name || state.currentUser?.email
-                  }
-                  required
-                />
-              </Field>
-              <Field label="Status">
-                <Select
-                  name="status"
-                  value={newStatus}
-                  onChange={(event) =>
-                    setNewStatus(
-                      statusAfterReleaseDate(
-                        event.target.value as IssuanceStatus,
-                        newReleasedAt,
-                      ),
-                    )
-                  }
+              <div className="modal-actions">
+                <Button
+                  variant="secondary"
+                  type="button"
+                  onClick={() => setAdding(false)}
                 >
-                  {statuses.map((status) => (
-                    <option key={status}>{status}</option>
-                  ))}
-                </Select>
-              </Field>
-              <Field label="Date released">
-                <Input
-                  name="issuedAt"
-                  type="date"
-                  value={newReleasedAt}
-                  onChange={(event) => {
-                    setNewReleasedAt(event.target.value);
-                    setNewStatus((status) =>
-                      statusAfterReleaseDate(status, event.target.value),
-                    );
-                  }}
-                />
-                <small className="muted">
-                  A release date changes Pending to Issued.
-                </small>
-              </Field>
-              <Field label="Date received">
-                <Input name="receivedAt" type="date" />
-              </Field>
-            </div>
-            <label className="check-row">
-              <input name="signed" type="checkbox" defaultChecked /> Issuance
-              acknowledgment signed
-            </label>
-            <Field label="Remarks">
-              <RichTextEditor name="remarks" rows={3} />
-            </Field>
-            <div className="modal-actions">
-              <Button
-                variant="secondary"
-                type="button"
-                onClick={() => setAdding(false)}
-              >
-                Cancel
-              </Button>
-              <Button type="submit" disabled={!!busy}>
-                Save issuance
-              </Button>
-            </div>
-          </form>
+                  Cancel
+                </Button>
+                <Button type="submit" disabled={!!busy}>
+                  Save issuance
+                </Button>
+              </div>
+            </form>
+          )}
         </Modal>
       )}
       {editing && (

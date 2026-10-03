@@ -22,6 +22,8 @@ import {
 import { formatDate } from "@/lib/dates";
 import { BulkIssuance } from "./bulk-issuance";
 import { BulkActions } from "./bulk-actions";
+import { ActionMenu } from "./action-menu";
+import { SelectionHelp, SelectionSurface } from "./record-selection";
 import { requestJson } from "@/lib/client-request";
 import { canManage } from "@/lib/data-policy";
 import type { Application } from "@/types";
@@ -88,23 +90,50 @@ export function PeopleOperations() {
     ),
   ];
   const selected = selectedKeys.filter((key) => employeeKeys.includes(key));
-  const selectEmployee = (a: Application) => (
-    <input
-      type="checkbox"
-      aria-label={`Select ${a.applicant.name}`}
-      checked={selected.includes(`person:${a.applicant.id}`)}
-      disabled={
-        dataset === "demo" ||
-        !canManage(state.currentUser) ||
-        (!!a.employment && a.employment.status !== "Active")
-      }
-      onChange={(e) =>
-        setSelectedKeys((ids) =>
-          e.target.checked
-            ? [...new Set([...ids, `person:${a.applicant.id}`])]
-            : ids.filter((id) => id !== `person:${a.applicant.id}`),
-        )
-      }
+  const selectEmployee = (a: Application) =>
+    selected.length > 0 && (
+      <input
+        type="checkbox"
+        aria-label={`Select ${a.applicant.name}`}
+        checked={selected.includes(`person:${a.applicant.id}`)}
+        disabled={
+          dataset === "demo" ||
+          !canManage(state.currentUser) ||
+          (!!a.employment && a.employment.status !== "Active")
+        }
+        onChange={(e) =>
+          setSelectedKeys((ids) =>
+            e.target.checked
+              ? [...new Set([...ids, `person:${a.applicant.id}`])]
+              : ids.filter((id) => id !== `person:${a.applicant.id}`),
+          )
+        }
+      />
+    );
+  const employeeMenu = (a: Application) => (
+    <ActionMenu
+      label={`Actions for ${a.applicant.name}`}
+      items={[
+        {
+          label: selected.includes(`person:${a.applicant.id}`)
+            ? "Deselect record"
+            : "Select record",
+          disabled:
+            dataset !== "real" ||
+            !canManage(state.currentUser) ||
+            (!!a.employment && a.employment.status !== "Active"),
+          onClick: () =>
+            setSelectedKeys((ids) =>
+              ids.includes(`person:${a.applicant.id}`)
+                ? ids.filter((id) => id !== `person:${a.applicant.id}`)
+                : [...ids, `person:${a.applicant.id}`],
+            ),
+        },
+        {
+          label: "Open record",
+          onClick: () => router.push(`/applications/${a.id}`),
+        },
+      ]}
     />
   );
   const requirements = employees.flatMap((employee) =>
@@ -128,7 +157,9 @@ export function PeopleOperations() {
             confirmed hire through handover.
           </p>
         </div>
-        <BulkIssuance employeeKeys={selected.length ? selected : undefined} />
+        <Link className="button primary" href="/issuance?record=1">
+          Record issuance
+        </Link>
       </div>
       <p className="workspace-heading-note people-help-note">
         This workspace uses confirmed hiring data; it does not create an
@@ -209,6 +240,9 @@ export function PeopleOperations() {
           <p role="status">Loading employees…</p>
         )}
         {canManage(state.currentUser) && dataset === "real" && (
+          <SelectionHelp />
+        )}
+        {canManage(state.currentUser) && dataset === "real" && (
           <BulkActions
             count={selected.length}
             total={employeeKeys.length}
@@ -225,218 +259,252 @@ export function PeopleOperations() {
             <BulkIssuance employeeKeys={selected} />
           </BulkActions>
         )}
-        {dataset === "real" && !completeEmployees && !loadError ? (
-          <LoadingSkeleton />
-        ) : !employees.length ? (
-          <EmptyState
-            title={
-              query || branch
-                ? "No employees match the current filters"
-                : "No employee records yet"
-            }
-            description={
-              query || branch
-                ? "Adjust the employee search or branch filter."
-                : "Employees appear here after HR confirms an applicant as hired."
-            }
-          />
-        ) : view === "Directory" ? (
-          <Table>
-            <thead>
-              <tr>
-                <th>Select</th>
-                <th>Employee</th>
-                <th>Position / branch</th>
-                <th>Hired</th>
-                <th>Onboarding</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {employees.map((employee) => (
-                <tr key={employee.id}>
-                  <td>{selectEmployee(employee)}</td>
-                  <td>
-                    <strong>{employee.applicant.name}</strong>
-                    <small className="cell-secondary">
-                      {employee.applicant.email}
-                    </small>
-                  </td>
-                  <td>
-                    {employee.position}
-                    <small className="cell-secondary">
-                      {employee.assignedBranch ||
-                        employee.location ||
-                        "Location not recorded"}
-                    </small>
-                  </td>
-                  <td>
-                    {formatDate(
-                      employee.hiredAt || employee.appliedAt,
-                      state.preferences,
-                    )}
-                  </td>
-                  <td>
-                    <Badge
-                      tone={
-                        employee.onboardingStatus === "Completed"
-                          ? "green"
-                          : "blue"
-                      }
-                    >
-                      {employee.onboardingStatus}
-                    </Badge>
-                  </td>
-                  <td>
-                    <Link
-                      className="text-link"
-                      href={`/applications/${employee.id}`}
-                    >
-                      Open record
-                    </Link>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </Table>
-        ) : view === "Requirements" ? (
-          requirements.length ? (
+        <SelectionSurface
+          disabled={dataset !== "real" || !canManage(state.currentUser)}
+          onSelect={(id) => {
+            if (employeeKeys.includes(id))
+              setSelectedKeys((ids) => [...new Set([...ids, id])]);
+          }}
+        >
+          {dataset === "real" && !completeEmployees && !loadError ? (
+            <LoadingSkeleton />
+          ) : !employees.length ? (
+            <EmptyState
+              title={
+                query || branch
+                  ? "No employees match the current filters"
+                  : "No employee records yet"
+              }
+              description={
+                query || branch
+                  ? "Adjust the employee search or branch filter."
+                  : "Employees appear here after HR confirms an applicant as hired."
+              }
+            />
+          ) : view === "Directory" ? (
             <Table>
               <thead>
                 <tr>
-                  <th>Select employee</th>
+                  {!!selected.length && <th>Select</th>}
                   <th>Employee</th>
-                  <th>Requirement</th>
-                  <th>Status</th>
-                  <th>Deadline</th>
+                  <th>Position / branch</th>
+                  <th>Hired</th>
+                  <th>Onboarding</th>
                   <th />
                 </tr>
               </thead>
               <tbody>
-                {requirements.map(({ employee, requirement }) => (
-                  <tr key={`${employee.id}-${requirement.id}`}>
-                    <td>{selectEmployee(employee)}</td>
+                {employees.map((employee) => (
+                  <tr
+                    key={employee.id}
+                    data-record-id={`person:${employee.applicant.id}`}
+                    aria-selected={selected.includes(
+                      `person:${employee.applicant.id}`,
+                    )}
+                  >
+                    {!!selected.length && <td>{selectEmployee(employee)}</td>}
                     <td>
                       <strong>{employee.applicant.name}</strong>
                       <small className="cell-secondary">
-                        {employee.position} ·{" "}
-                        {employee.assignedBranch || employee.location}
+                        {employee.applicant.email}
                       </small>
                     </td>
-                    <td>{requirement.name}</td>
+                    <td>
+                      {employee.position}
+                      <small className="cell-secondary">
+                        {employee.assignedBranch ||
+                          employee.location ||
+                          "Location not recorded"}
+                      </small>
+                    </td>
+                    <td>
+                      {formatDate(
+                        employee.hiredAt || employee.appliedAt,
+                        state.preferences,
+                      )}
+                    </td>
                     <td>
                       <Badge
                         tone={
-                          requirement.status === "Complete"
+                          employee.onboardingStatus === "Completed"
                             ? "green"
-                            : requirement.status === "Needs Correction"
-                              ? "amber"
-                              : "blue"
+                            : "blue"
                         }
                       >
-                        {requirement.status}
+                        {employee.onboardingStatus}
                       </Badge>
-                    </td>
-                    <td>
-                      {requirement.date
-                        ? formatDate(requirement.date, state.preferences)
-                        : "No deadline"}
                     </td>
                     <td>
                       <Link
                         className="text-link"
                         href={`/applications/${employee.id}`}
                       >
-                        Review
+                        Open record
                       </Link>
+                      {employeeMenu(employee)}
                     </td>
                   </tr>
                 ))}
               </tbody>
             </Table>
+          ) : view === "Requirements" ? (
+            requirements.length ? (
+              <Table>
+                <thead>
+                  <tr>
+                    {!!selected.length && <th>Select employee</th>}
+                    <th>Employee</th>
+                    <th>Requirement</th>
+                    <th>Status</th>
+                    <th>Deadline</th>
+                    <th />
+                  </tr>
+                </thead>
+                <tbody>
+                  {requirements.map(({ employee, requirement }) => (
+                    <tr
+                      key={`${employee.id}-${requirement.id}`}
+                      data-record-id={`person:${employee.applicant.id}`}
+                      aria-selected={selected.includes(
+                        `person:${employee.applicant.id}`,
+                      )}
+                    >
+                      <td>{selectEmployee(employee)}</td>
+                      <td>
+                        <strong>{employee.applicant.name}</strong>
+                        <small className="cell-secondary">
+                          {employee.position} ·{" "}
+                          {employee.assignedBranch || employee.location}
+                        </small>
+                      </td>
+                      <td>{requirement.name}</td>
+                      <td>
+                        <Badge
+                          tone={
+                            requirement.status === "Complete"
+                              ? "green"
+                              : requirement.status === "Needs Correction"
+                                ? "amber"
+                                : "blue"
+                          }
+                        >
+                          {requirement.status}
+                        </Badge>
+                      </td>
+                      <td>
+                        {requirement.date
+                          ? formatDate(requirement.date, state.preferences)
+                          : "No deadline"}
+                      </td>
+                      <td>
+                        <Link
+                          className="text-link"
+                          href={`/applications/${employee.id}`}
+                        >
+                          Review
+                        </Link>
+                        {employeeMenu(employee)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </Table>
+            ) : (
+              <EmptyState
+                title="No employee requirements recorded"
+                description="Requirement monitoring starts once HR adds requirements to a hired employee’s record."
+              />
+            )
           ) : (
-            <EmptyState
-              title="No employee requirements recorded"
-              description="Requirement monitoring starts once HR adds requirements to a hired employee’s record."
-            />
-          )
-        ) : (
-          <div className="onboarding-grid">
-            {employees.map((employee) => {
-              const total = employee.requirements.length;
-              const complete = employee.requirements.filter(
-                (item) => item.status === "Complete",
-              ).length;
-              const employeeIssuance = issuance.filter(
-                (item) =>
-                  item.employeeName.trim().toLowerCase() ===
-                  employee.applicant.name.trim().toLowerCase(),
-              );
-              const uniformIssued = employeeIssuance.some(
-                (item) =>
-                  item.category === "Uniform" && item.status === "Issued",
-              );
-              const kitIssued = employeeIssuance.some(
-                (item) =>
-                  item.category === "Welcome Kit" && item.status === "Issued",
-              );
-              const completedChecks = [
-                employee.stage === "Hired",
-                total > 0 && complete === total,
-                uniformIssued,
-                kitIssued,
-                employee.onboardingStatus === "Completed",
-              ].filter(Boolean).length;
-              const possibleChecks = 5;
-              return (
-                <Card className="onboarding-card" key={employee.id}>
-                  <label className="checkbox-label">
-                    {selectEmployee(employee)} Select employee
-                  </label>
-                  <div className="section-heading">
-                    <div>
-                      <h2>{employee.applicant.name}</h2>
-                      <p>
-                        {employee.position} ·{" "}
-                        {employee.assignedBranch || employee.location}
-                      </p>
-                    </div>
-                    <Badge>
-                      {Math.round((completedChecks / possibleChecks) * 100)}%
-                    </Badge>
-                  </div>
-                  <ProgressBar
-                    value={Math.round((completedChecks / possibleChecks) * 100)}
-                  />
-                  <div className="onboarding-checks">
-                    <span>
-                      {employee.stage === "Hired" ? "✓" : "○"} Hire recorded
-                    </span>
-                    <span>
-                      {total ? `${complete}/${total}` : "—"} Requirements
-                    </span>
-                    <span>{uniformIssued ? "✓" : "○"} Uniform</span>
-                    <span>{kitIssued ? "✓" : "○"} Welcome kit</span>
-                    <span>
-                      {employee.onboardingStatus === "Completed" ? "✓" : "○"}{" "}
-                      Onboarding
-                    </span>
-                  </div>
-                  <p className="fine-print">
-                    System account and branch assignment are shown only when
-                    those fields are recorded in the employee profile.
-                  </p>
-                  <Link
-                    className="text-link"
-                    href={`/applications/${employee.id}`}
+            <div className="onboarding-grid">
+              {employees.map((employee) => {
+                const total = employee.requirements.length;
+                const complete = employee.requirements.filter(
+                  (item) => item.status === "Complete",
+                ).length;
+                const employeeIssuance = issuance.filter(
+                  (item) =>
+                    item.employeeName.trim().toLowerCase() ===
+                    employee.applicant.name.trim().toLowerCase(),
+                );
+                const uniformIssued = employeeIssuance.some(
+                  (item) =>
+                    item.category === "Uniform" && item.status === "Issued",
+                );
+                const kitIssued = employeeIssuance.some(
+                  (item) =>
+                    item.category === "Welcome Kit" && item.status === "Issued",
+                );
+                const completedChecks = [
+                  employee.stage === "Hired",
+                  total > 0 && complete === total,
+                  uniformIssued,
+                  kitIssued,
+                  employee.onboardingStatus === "Completed",
+                ].filter(Boolean).length;
+                const possibleChecks = 5;
+                return (
+                  <Card
+                    className="onboarding-card"
+                    key={employee.id}
+                    data-record-id={`person:${employee.applicant.id}`}
                   >
-                    Open onboarding record
-                  </Link>
-                </Card>
-              );
-            })}
-          </div>
-        )}
+                    {!!selected.length && (
+                      <label className="checkbox-label">
+                        {selectEmployee(employee)} Select employee
+                      </label>
+                    )}
+                    <div className="section-heading">
+                      <div>
+                        <h2>{employee.applicant.name}</h2>
+                        <p>
+                          {employee.position} ·{" "}
+                          {employee.assignedBranch || employee.location}
+                        </p>
+                      </div>
+                      <div className="need-card-actions">
+                        <Badge>
+                          {Math.round((completedChecks / possibleChecks) * 100)}
+                          %
+                        </Badge>
+                        {employeeMenu(employee)}
+                      </div>
+                    </div>
+                    <ProgressBar
+                      value={Math.round(
+                        (completedChecks / possibleChecks) * 100,
+                      )}
+                    />
+                    <div className="onboarding-checks">
+                      <span>
+                        {employee.stage === "Hired" ? "✓" : "○"} Hire recorded
+                      </span>
+                      <span>
+                        {total ? `${complete}/${total}` : "—"} Requirements
+                      </span>
+                      <span>{uniformIssued ? "✓" : "○"} Uniform</span>
+                      <span>{kitIssued ? "✓" : "○"} Welcome kit</span>
+                      <span>
+                        {employee.onboardingStatus === "Completed" ? "✓" : "○"}{" "}
+                        Onboarding
+                      </span>
+                    </div>
+                    <p className="fine-print">
+                      System account and branch assignment are shown only when
+                      those fields are recorded in the employee profile.
+                    </p>
+                    <Link
+                      className="text-link"
+                      href={`/applications/${employee.id}`}
+                    >
+                      Open onboarding record
+                    </Link>
+                  </Card>
+                );
+              })}
+            </div>
+          )}
+        </SelectionSurface>
       </Card>
     </div>
   );

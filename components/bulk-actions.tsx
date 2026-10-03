@@ -20,6 +20,7 @@ export function BulkActions({
   busy?: boolean;
   children?: ReactNode;
 }) {
+  if (!count) return null;
   return (
     <div
       className="bulk-action-toolbar"

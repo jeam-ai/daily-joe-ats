@@ -37,6 +37,8 @@ import { canManage } from "@/lib/data-policy";
 import { RichTextEditor } from "./rich-text";
 import { requestJson } from "@/lib/client-request";
 import { BulkActions } from "./bulk-actions";
+import { ActionMenu } from "./action-menu";
+import { SelectionHelp, SelectionSurface } from "./record-selection";
 
 function operationalUrgency(need: HiringNeed) {
   if (need.status !== "Open") return need.urgency;
@@ -319,157 +321,202 @@ export function HiringNeeds() {
           </Select>
         </BulkActions>
       )}
-      <div className="needs-grid">
-        {rows.map((n) => (
-          <Card key={n.id} className="need-card hiring-need-card">
-            <div className="section-heading need-card-top">
-              {dataset === "real" && (
-                <input
-                  type="checkbox"
-                  aria-label={`Select ${n.position} at ${n.location}`}
-                  checked={selectedIds.includes(n.id)}
-                  disabled={savingNeed || !canManage(state.currentUser)}
-                  onChange={(e) =>
-                    setSelectedIds((ids) =>
-                      e.target.checked
-                        ? [...new Set([...ids, n.id])]
-                        : ids.filter((id) => id !== n.id),
-                    )
-                  }
-                />
-              )}
-              <span className="job-icon">
-                <UsersRound size={24} />
-              </span>
-              <span title="Urgency is raised automatically when an open target is due within seven days or overdue.">
-                <StatusBadge status={operationalUrgency(n)} />
-              </span>
-            </div>
-            <h2>
-              {n.isDemo ? "DEMO — " : ""}
-              {n.position}
-            </h2>
-            <p className="location-line">
-              <MapPin size={15} />
-              {n.location}
-            </p>
-            {n.status === "Open" && (
-              <p className="need-days-open">
-                {n.openedAt
-                  ? (() => {
-                      const parsedOpenedAt = Date.parse(n.openedAt);
-                      if (!Number.isFinite(parsedOpenedAt))
-                        return "Open date not recorded";
-                      const days = Math.max(
-                        0,
-                        Math.floor((Date.now() - parsedOpenedAt) / 86400000),
-                      );
-                      return days
-                        ? `Open for ${days} day${days === 1 ? "" : "s"}`
-                        : "Opened today";
-                    })()
-                  : "Open date not recorded"}
-                <HelpTip
-                  label="Days open explanation"
-                  icon={<CircleHelp size={13} aria-hidden />}
-                >
-                  Days open is counted from the date HR declared this vacancy
-                  open, not from a later edit.
-                </HelpTip>
+      {canManage(state.currentUser) && dataset === "real" && <SelectionHelp />}
+      <SelectionSurface
+        disabled={
+          savingNeed || !canManage(state.currentUser) || dataset !== "real"
+        }
+        onSelect={(id) => setSelectedIds((ids) => [...new Set([...ids, id])])}
+      >
+        <div className="needs-grid">
+          {rows.map((n) => (
+            <Card
+              key={n.id}
+              className="need-card hiring-need-card"
+              data-record-id={n.id}
+              aria-selected={selectedIds.includes(n.id)}
+            >
+              <div className="section-heading need-card-top">
+                <div className="need-card-identity">
+                  {dataset === "real" && !!selectedIds.length && (
+                    <input
+                      type="checkbox"
+                      aria-label={`Select ${n.position} at ${n.location}`}
+                      checked={selectedIds.includes(n.id)}
+                      disabled={savingNeed || !canManage(state.currentUser)}
+                      onChange={(e) =>
+                        setSelectedIds((ids) =>
+                          e.target.checked
+                            ? [...new Set([...ids, n.id])]
+                            : ids.filter((id) => id !== n.id),
+                        )
+                      }
+                    />
+                  )}
+                  <span className="job-icon">
+                    <UsersRound size={24} />
+                  </span>
+                </div>
+                <div className="need-card-actions">
+                  <span title="Urgency is raised automatically when an open target is due within seven days or overdue.">
+                    <StatusBadge status={operationalUrgency(n)} />
+                  </span>
+                  <ActionMenu
+                    label={`Actions for ${n.position} at ${n.location}`}
+                    items={[
+                      {
+                        label: selectedIds.includes(n.id)
+                          ? "Deselect record"
+                          : "Select record",
+                        disabled:
+                          savingNeed ||
+                          !canManage(state.currentUser) ||
+                          dataset !== "real",
+                        onClick: () =>
+                          setSelectedIds((ids) =>
+                            ids.includes(n.id)
+                              ? ids.filter((id) => id !== n.id)
+                              : [...ids, n.id],
+                          ),
+                      },
+                      {
+                        label: "Edit request",
+                        disabled:
+                          savingNeed ||
+                          !canManage(state.currentUser) ||
+                          dataset !== "real",
+                        onClick: () => setEditing(n.id),
+                      },
+                    ]}
+                  />
+                </div>
+              </div>
+              <h2>
+                {n.isDemo ? "DEMO — " : ""}
+                {n.position}
+              </h2>
+              <p className="location-line">
+                <MapPin size={15} />
+                {n.location}
               </p>
-            )}
-            <div className="need-numbers">
-              <div>
-                <strong>{Math.max(0, n.slots - n.filled)}</strong>
-                <span>open slots</span>
-              </div>
-              <div>
-                <strong>
-                  {state.applicationSummary?.[dataset].activeByHiringNeed[
-                    n.id
-                  ] || 0}
-                </strong>
-                <span>in pipeline</span>
-              </div>
-              <div>
-                <strong>{n.filled}</strong>
-                <span>filled</span>
-              </div>
-            </div>
-            <div className="section-heading muted">
-              <span>Hiring progress</span>
-              <span>
-                {n.filled} of {n.slots}
-              </span>
-            </div>
-            <ProgressBar value={(n.filled / n.slots) * 100} />
-            <p className="location-line">
-              <CalendarDays size={15} />
-              Target: {formatDate(n.targetDate, state.preferences)}
-            </p>
-            {(() => {
-              const days = Math.ceil(
-                (Date.parse(n.targetDate) - Date.now()) / 86400000,
-              );
-              if (!Number.isFinite(days)) return null;
-              if (days > 7) return null;
-              const graceDays = n.retentionExpiresAt
-                ? Math.max(
-                    0,
-                    Math.ceil(
-                      (Date.parse(n.retentionExpiresAt) - Date.now()) /
-                        86400000,
-                    ),
-                  )
-                : Math.max(0, days + 10);
-              return (
-                <p className="retention-inline">
-                  {days > 0
-                    ? `Hiring request target date is in ${days} day${days === 1 ? "" : "s"}.`
-                    : graceDays > 0
-                      ? `This hiring need becomes eligible for permanent cleanup in ${graceDays} day${graceDays === 1 ? "" : "s"} unless its target date is extended.`
-                      : "Hiring need retention period has elapsed. Extend the target date to retain it."}
+              {n.status === "Open" && (
+                <p className="need-days-open">
+                  {n.openedAt
+                    ? (() => {
+                        const parsedOpenedAt = Date.parse(n.openedAt);
+                        if (!Number.isFinite(parsedOpenedAt))
+                          return "Open date not recorded";
+                        const days = Math.max(
+                          0,
+                          Math.floor((Date.now() - parsedOpenedAt) / 86400000),
+                        );
+                        return days
+                          ? `Open for ${days} day${days === 1 ? "" : "s"}`
+                          : "Opened today";
+                      })()
+                    : "Open date not recorded"}
+                  <HelpTip
+                    label="Days open explanation"
+                    icon={<CircleHelp size={13} aria-hidden />}
+                  >
+                    Days open is counted from the date HR declared this vacancy
+                    open, not from a later edit.
+                  </HelpTip>
                 </p>
-              );
-            })()}
-            {(n.criteria?.length || 0) > 0 && (
-              <details className="need-criteria">
-                <summary>
-                  {n.criteria!.length} qualification
-                  {n.criteria!.length === 1 ? "" : "s"} configured
-                </summary>
-                <ul>
-                  {n.criteria?.map((r) => (
-                    <li key={r.id}>
-                      {r.label} · {r.kind}
-                    </li>
-                  ))}
-                </ul>
-              </details>
-            )}
-            <div className="need-card-footer">
-              <Link className="text-link" href={`/applications?need=${n.id}`}>
-                View associated applicants →
-              </Link>
-              <Badge>{n.status}</Badge>
-              {n.id.startsWith("sample-need-") && (
-                <Badge tone="amber">Sample configuration</Badge>
               )}
-              <Button
-                variant="secondary"
-                disabled={!canManage(state.currentUser) || savingNeed}
-                onClick={() => {
-                  setRules(n.criteria || []);
-                  setEditing(n.id);
-                }}
-              >
-                <Pencil size={14} />
-                Edit request
-              </Button>
-            </div>
-          </Card>
-        ))}
-      </div>
+              <div className="need-numbers">
+                <div>
+                  <strong>{Math.max(0, n.slots - n.filled)}</strong>
+                  <span>open slots</span>
+                </div>
+                <div>
+                  <strong>
+                    {state.applicationSummary?.[dataset].activeByHiringNeed[
+                      n.id
+                    ] || 0}
+                  </strong>
+                  <span>in pipeline</span>
+                </div>
+                <div>
+                  <strong>{n.filled}</strong>
+                  <span>filled</span>
+                </div>
+              </div>
+              <div className="section-heading muted">
+                <span>Hiring progress</span>
+                <span>
+                  {n.filled} of {n.slots}
+                </span>
+              </div>
+              <ProgressBar value={(n.filled / n.slots) * 100} />
+              <p className="location-line">
+                <CalendarDays size={15} />
+                Target: {formatDate(n.targetDate, state.preferences)}
+              </p>
+              {(() => {
+                const days = Math.ceil(
+                  (Date.parse(n.targetDate) - Date.now()) / 86400000,
+                );
+                if (!Number.isFinite(days)) return null;
+                if (days > 7) return null;
+                const graceDays = n.retentionExpiresAt
+                  ? Math.max(
+                      0,
+                      Math.ceil(
+                        (Date.parse(n.retentionExpiresAt) - Date.now()) /
+                          86400000,
+                      ),
+                    )
+                  : Math.max(0, days + 10);
+                return (
+                  <p className="retention-inline">
+                    {days > 0
+                      ? `Hiring request target date is in ${days} day${days === 1 ? "" : "s"}.`
+                      : graceDays > 0
+                        ? `This hiring need becomes eligible for permanent cleanup in ${graceDays} day${graceDays === 1 ? "" : "s"} unless its target date is extended.`
+                        : "Hiring need retention period has elapsed. Extend the target date to retain it."}
+                  </p>
+                );
+              })()}
+              {(n.criteria?.length || 0) > 0 && (
+                <details className="need-criteria">
+                  <summary>
+                    {n.criteria!.length} qualification
+                    {n.criteria!.length === 1 ? "" : "s"} configured
+                  </summary>
+                  <ul>
+                    {n.criteria?.map((r) => (
+                      <li key={r.id}>
+                        {r.label} · {r.kind}
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+              <div className="need-card-footer">
+                <Link className="text-link" href={`/applications?need=${n.id}`}>
+                  View associated applicants →
+                </Link>
+                <Badge>{n.status}</Badge>
+                {n.id.startsWith("sample-need-") && (
+                  <Badge tone="amber">Sample configuration</Badge>
+                )}
+                <Button
+                  variant="secondary"
+                  disabled={!canManage(state.currentUser) || savingNeed}
+                  onClick={() => {
+                    setRules(n.criteria || []);
+                    setEditing(n.id);
+                  }}
+                >
+                  <Pencil size={14} />
+                  Edit request
+                </Button>
+              </div>
+            </Card>
+          ))}
+        </div>
+      </SelectionSurface>
       {!rows.length && (
         <EmptyState
           title={

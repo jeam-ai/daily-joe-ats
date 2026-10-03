@@ -372,7 +372,17 @@ export function validateApplicationChange(
   before: Application,
   after: Application,
   confirmed: boolean,
+  returnToScreening = false,
 ) {
+  const screeningReturn =
+    returnToScreening &&
+    before.status === "Talent Pool" &&
+    after.status === "For Review" &&
+    after.stage === "Screening";
+  if (returnToScreening && !screeningReturn)
+    throw new DomainError(
+      "Only Talent Pool applicants can be returned to Screening.",
+    );
   for (const key of [
     "id",
     "isDemo",
@@ -437,11 +447,15 @@ export function validateApplicationChange(
     (after.status !== before.status || after.stage !== before.stage)
   )
     throw new DomainError("Closed application history cannot be changed.");
-  if (before.status === "Talent Pool" && after.stage !== before.stage)
+  if (
+    before.status === "Talent Pool" &&
+    after.stage !== before.stage &&
+    !screeningReturn
+  )
     throw new DomainError(
       "Return the applicant to recruitment at their existing stage first.",
     );
-  if (before.stage !== after.stage) {
+  if (before.stage !== after.stage && !screeningReturn) {
     if (stages.indexOf(after.stage) !== stages.indexOf(before.stage) + 1)
       throw new DomainError("Complete each recruitment stage in order.");
     if (

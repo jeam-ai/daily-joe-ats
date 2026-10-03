@@ -873,28 +873,35 @@ tbody tr:hover {
   min-width: 1020px;
   table-layout: fixed;
 }
-.applications-table th:nth-child(1) {
+.applications-table.is-selecting th:nth-child(1) {
   width: 44px;
 }
-.applications-table th:nth-child(2) {
+.applications-table.is-selecting th:nth-child(2),
+.applications-table:not(.is-selecting) th:nth-child(1) {
   width: 24%;
 }
-.applications-table th:nth-child(3) {
+.applications-table.is-selecting th:nth-child(3),
+.applications-table:not(.is-selecting) th:nth-child(2) {
   width: 22%;
 }
-.applications-table th:nth-child(4) {
+.applications-table.is-selecting th:nth-child(4),
+.applications-table:not(.is-selecting) th:nth-child(3) {
   width: 13%;
 }
-.applications-table th:nth-child(5) {
+.applications-table.is-selecting th:nth-child(5),
+.applications-table:not(.is-selecting) th:nth-child(4) {
   width: 12%;
 }
-.applications-table th:nth-child(6) {
+.applications-table.is-selecting th:nth-child(6),
+.applications-table:not(.is-selecting) th:nth-child(5) {
   width: 9%;
 }
-.applications-table th:nth-child(7) {
+.applications-table.is-selecting th:nth-child(7),
+.applications-table:not(.is-selecting) th:nth-child(6) {
   width: auto;
 }
-.applications-table th:nth-child(8) {
+.applications-table.is-selecting th:nth-child(8),
+.applications-table:not(.is-selecting) th:nth-child(7) {
   width: 52px;
 }
 .applications-table .application-selection-cell {
@@ -4360,5 +4367,47 @@ input[type="checkbox"] {
   }
   .cutoff-readiness-metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.selection-help {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0 14px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.need-card-identity,
+.need-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.need-card-actions {
+  margin-left: auto;
+}
+tr[aria-selected="true"] {
+  background: var(--bg-selected, #e8f0f9);
+}
+.issuance-mode {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.multiple-issuance-roster .table-scroll {
+  max-height: 260px;
+  overflow: auto;
+}
+.selection-help .help-tip {
+  flex-shrink: 0;
+}
+@media (pointer: coarse) {
+  [data-selection-surface] [data-record-id] {
+    -webkit-touch-callout: none;
+    user-select: none;
   }
 }

@@ -751,3 +751,100 @@ test("bulk attendance resolves all filtered overtime while retaining raw rows an
     /selection changed/,
   );
 });
+
+test("returning Talent Pool applicants to Screening preserves history and HR corrections, audits each record and retries safely", async () => {
+  await seed(3);
+  await transaction(async (tx) => {
+    const s = await getState(tx);
+    for (const a of s.applications) a.id = "return-" + a.id;
+    for (const a of s.applications.slice(0, 2)) {
+      a.status = "Talent Pool";
+      a.stage = "Final Interview";
+      a.talentPoolAddedAt = new Date().toISOString();
+      a.applicant.name = "HR Corrected " + a.id;
+      a.notes = ["Historical HR correction"];
+      a.interviews = [
+        {
+          id: "past-" + a.id,
+          stage: "Initial Interview",
+          status: "Passed",
+          scheduledAt: "2026-09-01T00:00:00Z",
+          notes: "Preserve interview",
+        },
+      ];
+    }
+    await saveState(tx, s, { sync: false });
+  });
+  const before = await readTransaction(getState);
+  const body = {
+    action: "screening",
+    ids: before.applications.slice(0, 2).map((a) => a.id),
+    filters: "talent=1",
+    allFiltered: true,
+    revision: before.revision,
+    requestId: crypto.randomUUID(),
+    reason: "Review for a new opening",
+    confirmed: true,
+  };
+  const result = await bulkApplicants(body, user);
+  assert.equal(result.updated, 2);
+  assert.deepEqual(await bulkApplicants(body, user), result);
+  const saved = await readTransaction(getState);
+  for (const original of before.applications.slice(0, 2)) {
+    const a = saved.applications.find((a) => a.id === original.id)!;
+    assert.equal(a.stage, "Screening");
+    assert.equal(a.status, "For Review");
+    assert.deepEqual(a.applicant, original.applicant);
+    assert.deepEqual(a.interviews, original.interviews);
+    assert.deepEqual(a.screening, original.screening);
+    assert.deepEqual(a.notes, [...original.notes, body.reason]);
+    assert.equal(a.timeline.at(-1)?.metadata?.previousStage, "Final Interview");
+  }
+  assert.equal(saved.applications[2].status, "New");
+  const audits = await readTransaction((tx) =>
+    tx.query(
+      "SELECT application_id FROM audit_logs WHERE action='application.bulk_screening'",
+    ),
+  );
+  assert.equal(audits.length, 2);
+  const memberships = await readTransaction((tx) =>
+    tx.query("SELECT applicant_id FROM talent_pool_memberships"),
+  );
+  assert.equal(memberships.length, 0);
+  const pool = await listApplications(new URLSearchParams("talent=1"));
+  assert.equal(pool.total, 0);
+});
+
+test("Return to Screening is limited to Talent Pool and requires confirmation, current revision and authorized HR", async () => {
+  await seed(1);
+  await transaction(async (tx) => {
+    const s = await getState(tx);
+    s.applications[0].id = "return-guard";
+    await saveState(tx, s, { sync: false });
+  });
+  const s = await readTransaction(getState);
+  const body = {
+    action: "screening",
+    filters: "",
+    ids: [s.applications[0].id],
+    revision: s.revision,
+    requestId: crypto.randomUUID(),
+    confirmed: true,
+  };
+  await assert.rejects(bulkApplicants(body, user), /Only Talent Pool/);
+  await assert.rejects(
+    bulkApplicants({ ...body, confirmed: false }, user),
+    /Confirm a valid/,
+  );
+  await assert.rejects(
+    bulkApplicants(body, { ...user, role: "Viewer" }),
+    /manager access required/,
+  );
+  await assert.rejects(
+    bulkApplicants({ ...body, revision: (s.revision || 0) - 1 }, user),
+    /changed/,
+  );
+  const saved = await readTransaction(getState);
+  assert.equal(saved.applications[0].status, "New");
+  assert.equal(saved.applications[0].timeline.length, 0);
+});

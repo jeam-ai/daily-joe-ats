@@ -34,6 +34,7 @@ const schema = z.object({
     "withdraw",
     "talent",
     "status",
+    "screening",
     "assign",
     "note",
     "delete",
@@ -156,7 +157,7 @@ export async function bulkApplicants(input: unknown, user: User, demo = false) {
       !body.reason
     )
       throw new SafeError("Enter a reason or note for this bulk action.");
-    if (["delete", "proceed"].includes(body.action)) {
+    if (["delete", "proceed", "screening"].includes(body.action)) {
       const pending = [
         ...(await tx.query(
           "SELECT payload FROM records WHERE collection='email_drafts'",
@@ -219,6 +220,14 @@ export async function bulkApplicants(input: unknown, user: User, demo = false) {
         );
         if (body.action === "reject") next.rejectionReason = body.reason;
         if (body.action === "withdraw") next.withdrawalReason = body.reason;
+      } else if (body.action === "screening") {
+        if (a.status !== "Talent Pool")
+          throw new SafeError(
+            "Only Talent Pool applicants can be returned to Screening.",
+          );
+        next.stage = "Screening";
+        next.status = "For Review";
+        if (body.reason) next.notes.push(body.reason);
       } else if (body.action === "status") {
         if (
           ![
@@ -297,7 +306,8 @@ export async function bulkApplicants(input: unknown, user: User, demo = false) {
         next.deletedBy = user.email;
         next.deletionReason = body.reason;
       }
-      if (body.action !== "delete") validateApplicationChange(a, next, true);
+      if (body.action !== "delete")
+        validateApplicationChange(a, next, true, body.action === "screening");
       next.lastActivity = now;
       next.timeline.push({
         id: crypto.randomUUID(),
@@ -308,6 +318,8 @@ export async function bulkApplicants(input: unknown, user: User, demo = false) {
         metadata: {
           note: body.reason,
           previousStatus: a.status,
+          previousStage: a.stage,
+          nextStage: next.stage,
           value: body.value,
           requestId: body.requestId,
         },

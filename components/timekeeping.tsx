@@ -27,6 +27,8 @@ import {
 } from "./ui";
 import { RichTextContent, RichTextEditor } from "./rich-text";
 import { BulkActions } from "./bulk-actions";
+import { ActionMenu } from "./action-menu";
+import { SelectionHelp, SelectionSurface } from "./record-selection";
 import {
   attendanceSeverities,
   attendanceSeverity,
@@ -340,7 +342,6 @@ export function Timekeeping() {
   const [correctedInOdoo, setCorrectedInOdoo] = useState(false),
     [retainedSourceRows, setRetainedSourceRows] = useState<number[]>([]),
     [reviewNext, setReviewNext] = useState(false),
-    [selectedOvertimeIds, setSelectedOvertimeIds] = useState<string[]>([]),
     [confirmOvertimeCompletion, setConfirmOvertimeCompletion] = useState(false),
     [overtimeCompletionNote, setOvertimeCompletionNote] = useState("");
   const [overtimeScope, setOvertimeScope] = useState<"employee" | "cutoff">(
@@ -507,7 +508,7 @@ export function Timekeeping() {
     setEmployee("");
     setDetail("");
     setPage(1);
-    setSelectedOvertimeIds([]);
+    setGlobalIds([]);
   }
   function showPreview(value: Preview) {
     setPreview(value);
@@ -618,12 +619,11 @@ export function Timekeeping() {
     if (!target) return;
     setEmployee(target[0]);
     setGlobalIds([]);
-    setSelectedOvertimeIds([]);
     if (inDetail) openRecord(target[1].find(needsAction) || target[1][0]);
   }
   const selectedNormalOvertime = employeeRows.filter(
     (record) =>
-      selectedOvertimeIds.includes(record.id) &&
+      globalIds.includes(record.id) &&
       isNormalOvertimeForSeparateMonitoring(record),
   );
   const bulkFilters: AttendanceFilters = {
@@ -677,12 +677,10 @@ export function Timekeeping() {
   const completionEmployees = new Set(completionRows.map(key)).size;
   const allNormalOvertimeSelected =
     normalOvertimeRows.length > 0 &&
-    normalOvertimeRows.every((record) =>
-      selectedOvertimeIds.includes(record.id),
-    );
+    normalOvertimeRows.every((record) => globalIds.includes(record.id));
   function toggleAllNormalOvertime() {
     const visibleIds = new Set(normalOvertimeRows.map((record) => record.id));
-    setSelectedOvertimeIds((current) =>
+    setGlobalIds((current) =>
       allNormalOvertimeSelected
         ? current.filter((id) => !visibleIds.has(id))
         : [...new Set([...current, ...visibleIds])],
@@ -1715,6 +1713,7 @@ export function Timekeeping() {
                 </Button>
               )}
             </div>
+            <SelectionHelp />
             <BulkActions
               count={selectedGlobalRows.length}
               total={selectableRows.length}
@@ -1770,470 +1769,549 @@ export function Timekeeping() {
                 Export selected
               </Button>
             </BulkActions>
-            {employee ? (
-              <>
-                <div className="button-row">
-                  <Button variant="ghost" onClick={() => setEmployee("")}>
-                    <ArrowLeft size={16} />
-                    All employees
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    disabled={!!busy || employeeIndex <= 0}
-                    onClick={() => moveEmployee(-1)}
-                  >
-                    <ArrowLeft size={16} /> Previous employee
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    disabled={
-                      !!busy ||
-                      employeeIndex < 0 ||
-                      employeeIndex >= employees.length - 1
-                    }
-                    onClick={() => moveEmployee(1)}
-                  >
-                    Next employee <ArrowRight size={16} />
-                  </Button>
-                </div>
-                <h3>{employeeRows[0]?.employee || employee}</h3>
-                <p className="muted">
-                  {date(batch.period.start)} – {date(batch.period.end)} ·{" "}
-                  {batch.rules.timezone}
-                </p>
-                <div className="timekeeping-employee-bulk-action">
-                  <div>
-                    <strong>Resolve employee attendance</strong>
-                    <p className="muted">
-                      Tick records to resolve together, or resolve all pending
-                      records for this employee in the current filters.
-                    </p>
-                  </div>
+            <SelectionSurface
+              disabled={!!busy}
+              onSelect={(id) => {
+                const rows = id.startsWith("employee:")
+                  ? employees.find(
+                      ([employeeId]) => employeeId === id.slice(9),
+                    )?.[1] || []
+                  : filtered.filter((r) => r.id === id);
+                setGlobalIds((ids) => [
+                  ...new Set([...ids, ...rows.map((r) => r.id)]),
+                ]);
+              }}
+            >
+              {employee ? (
+                <>
                   <div className="button-row">
+                    <Button variant="ghost" onClick={() => setEmployee("")}>
+                      <ArrowLeft size={16} />
+                      All employees
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      disabled={!!busy || employeeIndex <= 0}
+                      onClick={() => moveEmployee(-1)}
+                    >
+                      <ArrowLeft size={16} /> Previous employee
+                    </Button>
                     <Button
                       variant="secondary"
                       disabled={
                         !!busy ||
-                        !employeePendingRows.some((row) =>
-                          globalIds.includes(row.id),
-                        )
+                        employeeIndex < 0 ||
+                        employeeIndex >= employees.length - 1
                       }
-                      onClick={() =>
-                        openBulkReview(
+                      onClick={() => moveEmployee(1)}
+                    >
+                      Next employee <ArrowRight size={16} />
+                    </Button>
+                  </div>
+                  <h3>{employeeRows[0]?.employee || employee}</h3>
+                  <p className="muted">
+                    {date(batch.period.start)} – {date(batch.period.end)} ·{" "}
+                    {batch.rules.timezone}
+                  </p>
+                  <div className="timekeeping-employee-bulk-action">
+                    <div>
+                      <strong>Resolve employee attendance</strong>
+                      <p className="muted">
+                        Select records from the ⋮ menu to resolve together, or
+                        resolve all pending records for this employee in the
+                        current filters.
+                      </p>
+                    </div>
+                    <div className="button-row">
+                      <Button
+                        variant="secondary"
+                        disabled={
+                          !!busy ||
+                          !employeePendingRows.some((row) =>
+                            globalIds.includes(row.id),
+                          )
+                        }
+                        onClick={() =>
+                          openBulkReview(
+                            employeePendingRows.filter((row) =>
+                              globalIds.includes(row.id),
+                            ),
+                          )
+                        }
+                      >
+                        Resolve selected (
+                        {
                           employeePendingRows.filter((row) =>
                             globalIds.includes(row.id),
-                          ),
+                          ).length
+                        }
                         )
-                      }
-                    >
-                      Resolve selected (
-                      {
-                        employeePendingRows.filter((row) =>
-                          globalIds.includes(row.id),
-                        ).length
-                      }
-                      )
-                    </Button>
-                    <Button
-                      disabled={!!busy || !employeePendingRows.length}
-                      onClick={() => openBulkReview(employeePendingRows)}
-                    >
-                      <CheckCircle2 size={16} /> Resolve all for this employee (
-                      {employeePendingRows.length})
-                    </Button>
+                      </Button>
+                      <Button
+                        disabled={!!busy || !employeePendingRows.length}
+                        onClick={() => openBulkReview(employeePendingRows)}
+                      >
+                        <CheckCircle2 size={16} /> Resolve all for this employee
+                        ({employeePendingRows.length})
+                      </Button>
+                    </div>
                   </div>
-                </div>
-                <div className="timekeeping-employee-bulk-action">
-                  <div>
-                    <strong>Normal overtime completion</strong>
-                    <p className="muted">
-                      Tick records with Overtime as their only classification.
-                      Approval remains in the separate overtime-monitoring
-                      process.
-                    </p>
+                  <div className="timekeeping-employee-bulk-action">
+                    <div>
+                      <strong>Normal overtime completion</strong>
+                      <p className="muted">
+                        Select records with Overtime as their only
+                        classification. Approval remains in the separate
+                        overtime-monitoring process.
+                      </p>
+                    </div>
+                    <div className="timekeeping-overtime-actions">
+                      {!!globalIds.length && (
+                        <Button
+                          variant="ghost"
+                          disabled={!normalOvertimeRows.length || !!busy}
+                          onClick={toggleAllNormalOvertime}
+                        >
+                          {allNormalOvertimeSelected
+                            ? "Clear normal overtime"
+                            : `Select all overtime (${normalOvertimeRows.length})`}
+                        </Button>
+                      )}
+                      <Button
+                        variant="secondary"
+                        disabled={!selectedNormalOvertime.length || !!busy}
+                        onClick={() => {
+                          setOvertimeScope("employee");
+                          setOvertimeCompletionNote(
+                            "Normal overtime reviewed; approval is tracked in the separate overtime-monitoring process.",
+                          );
+                          setConfirmOvertimeCompletion(true);
+                        }}
+                      >
+                        <CheckCircle2 size={16} />
+                        Complete selected ({selectedNormalOvertime.length})
+                      </Button>
+                    </div>
                   </div>
-                  <div className="timekeeping-overtime-actions">
-                    <Button
-                      variant="ghost"
-                      disabled={!normalOvertimeRows.length || !!busy}
-                      onClick={toggleAllNormalOvertime}
-                    >
-                      {allNormalOvertimeSelected
-                        ? "Clear normal overtime"
-                        : `Select all overtime (${normalOvertimeRows.length})`}
-                    </Button>
-                    <Button
-                      variant="secondary"
-                      disabled={!selectedNormalOvertime.length || !!busy}
-                      onClick={() => {
-                        setOvertimeScope("employee");
-                        setOvertimeCompletionNote(
-                          "Normal overtime reviewed; approval is tracked in the separate overtime-monitoring process.",
-                        );
-                        setConfirmOvertimeCompletion(true);
-                      }}
-                    >
-                      <CheckCircle2 size={16} />
-                      Complete selected ({selectedNormalOvertime.length})
-                    </Button>
-                  </div>
-                </div>
-                <Table>
-                  <thead>
-                    <tr>
-                      {[
-                        "Resolve",
-                        "Date",
-                        "Time in / out",
-                        "Worked / expected",
-                        "Calculated result",
-                        "HR review",
-                        "Complete",
-                        "Details",
-                      ].map((h) => (
-                        <th key={h}>{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {employeeRows.map((r) => (
-                      <tr key={r.id}>
-                        <td>
-                          {needsAction(r) || awaitsVerification(r) ? (
-                            <input
-                              type="checkbox"
-                              disabled={!!busy}
-                              aria-label={`Select ${r.employee} on ${date(r.date)} to resolve`}
-                              checked={globalIds.includes(r.id)}
-                              onChange={(event) => {
-                                setGlobalIds((ids) =>
-                                  event.target.checked
-                                    ? [...new Set([...ids, r.id])]
-                                    : ids.filter((id) => id !== r.id),
-                                );
-                              }}
-                            />
-                          ) : (
-                            <label className="checkbox-label">
-                              <input
-                                type="checkbox"
-                                aria-label={`Select ${r.employee} on ${r.date}`}
-                                checked={globalIds.includes(r.id)}
-                                onChange={(e) =>
-                                  setGlobalIds((ids) =>
-                                    e.target.checked
-                                      ? [...new Set([...ids, r.id])]
-                                      : ids.filter((id) => id !== r.id),
-                                  )
-                                }
-                              />
-                              <CheckCircle2 size={16} aria-label="Resolved" />
-                            </label>
+                  <Table>
+                    <thead>
+                      <tr>
+                        {[
+                          ...(globalIds.length ? ["Select"] : []),
+                          "Date",
+                          "Time in / out",
+                          "Worked / expected",
+                          "Calculated result",
+                          "HR review",
+                          "Complete",
+                          "Details",
+                        ].map((h) => (
+                          <th key={h}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {employeeRows.map((r) => (
+                        <tr
+                          key={r.id}
+                          data-record-id={r.id}
+                          aria-selected={globalIds.includes(r.id)}
+                        >
+                          {!!globalIds.length && (
+                            <td>
+                              {needsAction(r) || awaitsVerification(r) ? (
+                                <input
+                                  type="checkbox"
+                                  disabled={!!busy}
+                                  aria-label={`Select ${r.employee} on ${date(r.date)} to resolve`}
+                                  checked={globalIds.includes(r.id)}
+                                  onChange={(event) => {
+                                    setGlobalIds((ids) =>
+                                      event.target.checked
+                                        ? [...new Set([...ids, r.id])]
+                                        : ids.filter((id) => id !== r.id),
+                                    );
+                                  }}
+                                />
+                              ) : (
+                                <label className="checkbox-label">
+                                  <input
+                                    type="checkbox"
+                                    aria-label={`Select ${r.employee} on ${r.date}`}
+                                    checked={globalIds.includes(r.id)}
+                                    onChange={(e) =>
+                                      setGlobalIds((ids) =>
+                                        e.target.checked
+                                          ? [...new Set([...ids, r.id])]
+                                          : ids.filter((id) => id !== r.id),
+                                      )
+                                    }
+                                  />
+                                  <CheckCircle2
+                                    size={16}
+                                    aria-label="Resolved"
+                                  />
+                                </label>
+                              )}
+                            </td>
                           )}
-                        </td>
-                        <td>{date(r.date)}</td>
-                        <td>
-                          {r.raw.length
-                            ? r.raw.map((entry) => (
-                                <div className="clock-entry" key={entry.row}>
-                                  <span>
-                                    {clockTime(
-                                      entry.checkIn,
-                                      batch.rules.timezone,
-                                      r.date,
-                                    )}
-                                  </span>
-                                  {" → "}
-                                  <span>
-                                    {clockTime(
-                                      entry.checkOut,
-                                      batch.rules.timezone,
-                                      r.date,
-                                    )}
-                                  </span>
-                                </div>
-                              ))
-                            : "—"}
-                        </td>
-                        <td>
-                          {hours(r.worked)} / {hours(r.expected)} h
-                          <AttendanceCalculation record={r} />
-                        </td>
-                        <td>
-                          <SeverityBadge record={r} />
-                          <div className="actions">
-                            {r.results.map((s) => (
-                              <button
-                                className="issue-button"
-                                key={s}
+                          <td>{date(r.date)}</td>
+                          <td>
+                            {r.raw.length
+                              ? r.raw.map((entry) => (
+                                  <div className="clock-entry" key={entry.row}>
+                                    <span>
+                                      {clockTime(
+                                        entry.checkIn,
+                                        batch.rules.timezone,
+                                        r.date,
+                                      )}
+                                    </span>
+                                    {" → "}
+                                    <span>
+                                      {clockTime(
+                                        entry.checkOut,
+                                        batch.rules.timezone,
+                                        r.date,
+                                      )}
+                                    </span>
+                                  </div>
+                                ))
+                              : "—"}
+                          </td>
+                          <td>
+                            {hours(r.worked)} / {hours(r.expected)} h
+                            <AttendanceCalculation record={r} />
+                          </td>
+                          <td>
+                            <SeverityBadge record={r} />
+                            <div className="actions">
+                              {r.results.map((s) => (
+                                <button
+                                  className="issue-button"
+                                  key={s}
+                                  onClick={() => {
+                                    openRecord(r);
+                                  }}
+                                >
+                                  <Badge
+                                    tone={
+                                      s === "Normal" ||
+                                      s === "Rest Day / Day Off"
+                                        ? "green"
+                                        : "amber"
+                                    }
+                                  >
+                                    {s}
+                                  </Badge>
+                                </button>
+                              ))}
+                              {!!r.review.duplicateResolution
+                                ?.disregardedRecords?.length && (
+                                <Badge tone="green">
+                                  Previously multiple entries · corrected
+                                </Badge>
+                              )}
+                            </div>
+                          </td>
+                          <td>
+                            <Badge
+                              tone={
+                                r.review.status === "For Review"
+                                  ? "orange"
+                                  : "green"
+                              }
+                            >
+                              {r.review.status}
+                            </Badge>
+                            {r.review.classification && (
+                              <Badge tone="neutral">
+                                {r.review.classification}
+                              </Badge>
+                            )}
+                          </td>
+                          <td>
+                            <small className="muted">
+                              {isNormalOvertimeForSeparateMonitoring(r)
+                                ? "Overtime monitored separately"
+                                : "Individual review"}
+                            </small>
+                          </td>
+                          <td>
+                            <div className="timekeeping-table-actions">
+                              {classificationsFor(r).length > 0 &&
+                                !r.review.classification && (
+                                  <label className="timekeeping-inline-classification">
+                                    <span>Possible classification</span>
+                                    <Select
+                                      aria-label={`Choose a possible classification for ${r.employee} on ${date(r.date)}`}
+                                      value=""
+                                      onChange={(event) => {
+                                        const choice = event.target
+                                          .value as AttendanceClassification;
+                                        if (choice)
+                                          beginClassification(r, choice);
+                                      }}
+                                    >
+                                      <option value="">Choose…</option>
+                                      {classificationsFor(r).map((choice) => (
+                                        <option key={choice} value={choice}>
+                                          {choice}
+                                        </option>
+                                      ))}
+                                    </Select>
+                                  </label>
+                                )}
+                              <ActionMenu
+                                label={`Actions for ${r.employee} on ${date(r.date)}`}
+                                items={[
+                                  {
+                                    label: globalIds.includes(r.id)
+                                      ? "Deselect record"
+                                      : "Select record",
+                                    disabled: !!busy,
+                                    onClick: () =>
+                                      setGlobalIds((ids) =>
+                                        ids.includes(r.id)
+                                          ? ids.filter((id) => id !== r.id)
+                                          : [...ids, r.id],
+                                      ),
+                                  },
+                                  {
+                                    label: "Review record",
+                                    onClick: () => openRecord(r),
+                                  },
+                                ]}
+                              />
+                              <Button
+                                variant="ghost"
                                 onClick={() => {
                                   openRecord(r);
                                 }}
                               >
+                                Review <ChevronRight size={15} />
+                              </Button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </Table>
+                </>
+              ) : (
+                <>
+                  <Table>
+                    <thead>
+                      <tr>
+                        {[
+                          "Employee",
+                          "Days",
+                          "Worked hours",
+                          "Expected hours",
+                          "For review",
+                          "Details",
+                        ].map((h) => (
+                          <th key={h}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {employees
+                        .slice((currentPage - 1) * 20, currentPage * 20)
+                        .map(([id, rows]) => {
+                          const summary = employeeAttendanceSummary(
+                            allEmployeeRows.get(id) || rows,
+                          );
+                          return (
+                            <tr
+                              key={id}
+                              data-record-id={`employee:${id}`}
+                              aria-selected={rows.every((r) =>
+                                globalIds.includes(r.id),
+                              )}
+                            >
+                              <td>
+                                {!!globalIds.length && (
+                                  <input
+                                    type="checkbox"
+                                    aria-label={`Select filtered attendance for ${rows[0].employee}`}
+                                    checked={rows.every((r) =>
+                                      globalIds.includes(r.id),
+                                    )}
+                                    disabled={!!busy}
+                                    onChange={(e) =>
+                                      setGlobalIds((ids) =>
+                                        e.target.checked
+                                          ? [
+                                              ...new Set([
+                                                ...ids,
+                                                ...rows.map((r) => r.id),
+                                              ]),
+                                            ]
+                                          : ids.filter(
+                                              (selectedId) =>
+                                                !rows.some(
+                                                  (r) => r.id === selectedId,
+                                                ),
+                                            ),
+                                      )
+                                    }
+                                  />
+                                )}
+                                <SeverityBadge
+                                  record={
+                                    [...rows].sort(
+                                      (a, b) =>
+                                        attendanceSeverities.indexOf(
+                                          attendanceSeverity(a),
+                                        ) -
+                                        attendanceSeverities.indexOf(
+                                          attendanceSeverity(b),
+                                        ),
+                                    )[0]
+                                  }
+                                />
+                                <strong>{rows[0].employee}</strong>
+                                <small className="muted">
+                                  {rows[0].employeeId ||
+                                    "Matched by source name"}
+                                </small>
+                              </td>
+                              <td>
+                                <strong>
+                                  {summary.cutoffDays} cutoff days
+                                </strong>
+                                <small className="muted">
+                                  {summary.recordedDays} recorded ·{" "}
+                                  {summary.normalDays} normal
+                                  {" · "}
+                                  {summary.leaveDays} leave ·{" "}
+                                  {summary.absenceDays} absence ·{" "}
+                                  {summary.restDays} rest
+                                </small>
+                              </td>
+                              <td>
+                                {hours(
+                                  rows.reduce(
+                                    (sum, r) => sum + (r.worked ?? 0),
+                                    0,
+                                  ),
+                                )}
+                              </td>
+                              <td>
+                                {rows.some((r) => r.expected !== null)
+                                  ? hours(
+                                      rows.reduce(
+                                        (sum, r) => sum + (r.expected ?? 0),
+                                        0,
+                                      ),
+                                    )
+                                  : "—"}
+                                {rows.some((r) => r.expected === null) && (
+                                  <small className="muted">
+                                    {
+                                      rows.filter((r) => r.expected === null)
+                                        .length
+                                    }{" "}
+                                    dates unavailable
+                                  </small>
+                                )}
+                              </td>
+                              <td>
                                 <Badge
                                   tone={
-                                    s === "Normal" || s === "Rest Day / Day Off"
-                                      ? "green"
-                                      : "amber"
+                                    rows.some(
+                                      (r) => r.review.status === "For Review",
+                                    )
+                                      ? "orange"
+                                      : "green"
                                   }
                                 >
-                                  {s}
+                                  {summary.unresolved} remaining
                                 </Badge>
-                              </button>
-                            ))}
-                            {!!r.review.duplicateResolution?.disregardedRecords
-                              ?.length && (
-                              <Badge tone="green">
-                                Previously multiple entries · corrected
-                              </Badge>
-                            )}
-                          </div>
-                        </td>
-                        <td>
-                          <Badge
-                            tone={
-                              r.review.status === "For Review"
-                                ? "orange"
-                                : "green"
-                            }
-                          >
-                            {r.review.status}
-                          </Badge>
-                          {r.review.classification && (
-                            <Badge tone="neutral">
-                              {r.review.classification}
-                            </Badge>
-                          )}
-                        </td>
-                        <td>
-                          {isNormalOvertimeForSeparateMonitoring(r) ? (
-                            <label className="timekeeping-completion-check">
-                              <input
-                                type="checkbox"
-                                aria-label={`Mark normal overtime on ${date(r.date)} as completed`}
-                                checked={selectedOvertimeIds.includes(r.id)}
-                                onChange={(event) =>
-                                  setSelectedOvertimeIds((current) =>
-                                    event.target.checked
-                                      ? [...current, r.id]
-                                      : current.filter((id) => id !== r.id),
-                                  )
-                                }
-                              />
-                              Overtime monitored
-                            </label>
-                          ) : (
-                            <small className="muted">Individual review</small>
-                          )}
-                        </td>
-                        <td>
-                          <div className="timekeeping-table-actions">
-                            {classificationsFor(r).length > 0 &&
-                              !r.review.classification && (
-                                <label className="timekeeping-inline-classification">
-                                  <span>Possible classification</span>
-                                  <Select
-                                    aria-label={`Choose a possible classification for ${r.employee} on ${date(r.date)}`}
-                                    value=""
-                                    onChange={(event) => {
-                                      const choice = event.target
-                                        .value as AttendanceClassification;
-                                      if (choice)
-                                        beginClassification(r, choice);
-                                    }}
-                                  >
-                                    <option value="">Choose…</option>
-                                    {classificationsFor(r).map((choice) => (
-                                      <option key={choice} value={choice}>
-                                        {choice}
-                                      </option>
-                                    ))}
-                                  </Select>
-                                </label>
-                              )}
-                            <Button
-                              variant="ghost"
-                              onClick={() => {
-                                openRecord(r);
-                              }}
-                            >
-                              Review <ChevronRight size={15} />
-                            </Button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </Table>
-              </>
-            ) : (
-              <>
-                <Table>
-                  <thead>
-                    <tr>
-                      {[
-                        "Employee",
-                        "Days",
-                        "Worked hours",
-                        "Expected hours",
-                        "For review",
-                        "Details",
-                      ].map((h) => (
-                        <th key={h}>{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {employees
-                      .slice((currentPage - 1) * 20, currentPage * 20)
-                      .map(([id, rows]) => {
-                        const summary = employeeAttendanceSummary(
-                          allEmployeeRows.get(id) || rows,
-                        );
-                        return (
-                          <tr key={id}>
-                            <td>
-                              <input
-                                type="checkbox"
-                                aria-label={`Select filtered attendance for ${rows[0].employee}`}
-                                checked={rows.every((r) =>
-                                  globalIds.includes(r.id),
+                                {(summary.resolved > 0 ||
+                                  summary.clarification > 0) && (
+                                  <small className="muted">
+                                    {summary.resolved} resolved ·{" "}
+                                    {summary.clarification} need classification
+                                  </small>
                                 )}
-                                disabled={!!busy}
-                                onChange={(e) =>
-                                  setGlobalIds((ids) =>
-                                    e.target.checked
-                                      ? [
-                                          ...new Set([
-                                            ...ids,
-                                            ...rows.map((r) => r.id),
-                                          ]),
-                                        ]
-                                      : ids.filter(
-                                          (selectedId) =>
-                                            !rows.some(
-                                              (r) => r.id === selectedId,
-                                            ),
+                              </td>
+                              <td>
+                                <ActionMenu
+                                  label={`Actions for ${rows[0].employee}`}
+                                  items={[
+                                    {
+                                      label: rows.every((r) =>
+                                        globalIds.includes(r.id),
+                                      )
+                                        ? "Deselect records"
+                                        : "Select records",
+                                      disabled: !!busy,
+                                      onClick: () =>
+                                        setGlobalIds((ids) =>
+                                          rows.every((r) => ids.includes(r.id))
+                                            ? ids.filter(
+                                                (id) =>
+                                                  !rows.some(
+                                                    (r) => r.id === id,
+                                                  ),
+                                              )
+                                            : [
+                                                ...new Set([
+                                                  ...ids,
+                                                  ...rows.map((r) => r.id),
+                                                ]),
+                                              ],
                                         ),
-                                  )
-                                }
-                              />
-                              <SeverityBadge
-                                record={
-                                  [...rows].sort(
-                                    (a, b) =>
-                                      attendanceSeverities.indexOf(
-                                        attendanceSeverity(a),
-                                      ) -
-                                      attendanceSeverities.indexOf(
-                                        attendanceSeverity(b),
-                                      ),
-                                  )[0]
-                                }
-                              />
-                              <strong>{rows[0].employee}</strong>
-                              <small className="muted">
-                                {rows[0].employeeId || "Matched by source name"}
-                              </small>
-                            </td>
-                            <td>
-                              <strong>{summary.cutoffDays} cutoff days</strong>
-                              <small className="muted">
-                                {summary.recordedDays} recorded ·{" "}
-                                {summary.normalDays} normal
-                                {" · "}
-                                {summary.leaveDays} leave ·{" "}
-                                {summary.absenceDays} absence ·{" "}
-                                {summary.restDays} rest
-                              </small>
-                            </td>
-                            <td>
-                              {hours(
-                                rows.reduce(
-                                  (sum, r) => sum + (r.worked ?? 0),
-                                  0,
-                                ),
-                              )}
-                            </td>
-                            <td>
-                              {rows.some((r) => r.expected !== null)
-                                ? hours(
-                                    rows.reduce(
-                                      (sum, r) => sum + (r.expected ?? 0),
-                                      0,
-                                    ),
-                                  )
-                                : "—"}
-                              {rows.some((r) => r.expected === null) && (
-                                <small className="muted">
-                                  {
-                                    rows.filter((r) => r.expected === null)
-                                      .length
-                                  }{" "}
-                                  dates unavailable
-                                </small>
-                              )}
-                            </td>
-                            <td>
-                              <Badge
-                                tone={
-                                  rows.some(
-                                    (r) => r.review.status === "For Review",
-                                  )
-                                    ? "orange"
-                                    : "green"
-                                }
-                              >
-                                {summary.unresolved} remaining
-                              </Badge>
-                              {(summary.resolved > 0 ||
-                                summary.clarification > 0) && (
-                                <small className="muted">
-                                  {summary.resolved} resolved ·{" "}
-                                  {summary.clarification} need classification
-                                </small>
-                              )}
-                            </td>
-                            <td>
-                              <Button
-                                variant="ghost"
-                                onClick={() => setEmployee(id)}
-                              >
-                                View days <ChevronRight size={15} />
-                              </Button>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                  </tbody>
-                </Table>
-                {!employees.length && (
-                  <EmptyState
-                    title="No matching attendance"
-                    description="Adjust the employee, date or status filters."
-                  />
-                )}
-                <div className="pagination">
-                  <span>
-                    {employees.length} employees · Page {currentPage} of {pages}
-                  </span>
-                  <Button
-                    variant="secondary"
-                    disabled={currentPage <= 1}
-                    onClick={() => setPage(currentPage - 1)}
-                  >
-                    Previous
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    disabled={currentPage >= pages}
-                    onClick={() => setPage(currentPage + 1)}
-                  >
-                    Next
-                  </Button>
-                </div>
-              </>
-            )}
+                                    },
+                                    {
+                                      label: "View days",
+                                      onClick: () => setEmployee(id),
+                                    },
+                                  ]}
+                                />
+                                <Button
+                                  variant="ghost"
+                                  onClick={() => setEmployee(id)}
+                                >
+                                  View days <ChevronRight size={15} />
+                                </Button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                    </tbody>
+                  </Table>
+                  {!employees.length && (
+                    <EmptyState
+                      title="No matching attendance"
+                      description="Adjust the employee, date or status filters."
+                    />
+                  )}
+                  <div className="pagination">
+                    <span>
+                      {employees.length} employees · Page {currentPage} of{" "}
+                      {pages}
+                    </span>
+                    <Button
+                      variant="secondary"
+                      disabled={currentPage <= 1}
+                      onClick={() => setPage(currentPage - 1)}
+                    >
+                      Previous
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      disabled={currentPage >= pages}
+                      onClick={() => setPage(currentPage + 1)}
+                    >
+                      Next
+                    </Button>
+                  </div>
+                </>
+              )}
+            </SelectionSurface>
           </Card>
         </>
       )}
@@ -2284,7 +2362,7 @@ export function Timekeeping() {
                   setPreview(null);
                   setEmployee("");
                   setDetail("");
-                  setSelectedOvertimeIds([]);
+                  setGlobalIds([]);
                   setJob(null);
                   sessionStorage.removeItem("djc-timekeeping-job");
                   const url = new URL(window.location.href);
@@ -2365,7 +2443,7 @@ export function Timekeeping() {
                     }),
                   );
                   setBatch(result.batch);
-                  setSelectedOvertimeIds([]);
+                  setGlobalIds([]);
                   setConfirmOvertimeCompletion(false);
                   notify(
                     `${completionRows.length} overtime-only record${completionRows.length === 1 ? "" : "s"} marked completed for separate overtime monitoring.`,

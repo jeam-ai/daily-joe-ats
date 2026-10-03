@@ -1,5 +1,15 @@
 # Daily Joe Careers — production implementation validation
 
+## October 4, 2026 — selection gestures, Talent Pool return and issuance modes
+
+- Record checkboxes and Select all are hidden until the first selection. Applications/Talent Pool, hiring cards, onboarding, issuance history and attendance share right-click actions, an accessible ⋮ → Select action, and long press. A short instruction and question-mark help explain selection. Clearing or deselecting the last record exits selection mode. Form checklists retain their ordinary behavior.
+- Hiring Need headers keep the role icon and optional checkbox together, with urgency/actions aligned at the right. Applicant table widths adjust correctly when selection mode appears or disappears.
+- Talent Pool has individual, profile-header and bulk Return to Screening, confirmed before applying. It sets Screening / For Review, preserves HR corrections and interview/source history, records each applicant's audit, and removes inactive pool membership. Ordinary closed-history protections, current revision and role checks remain enforced; retrying the same request does not duplicate changes.
+- Record issuance defaults to Single employee and offers Multiple employees for identical new releases. It reuses the existing shared-item transaction and creates separate employee records/audits. Onboarding opens the single form by default or passes selected employees to multiple mode. Menus remain clickable inside the native dialog; Escape dismisses a menu without closing the form. The roster scrolls inside the dialog.
+- Validation: 112 unit tests and 103 server tests passed (215 total), including hold/release, cancel-on-scroll, protected history and retries. All 15 full-system API groups and six issuance API groups passed on the fictional SQLite fixture. TypeScript, formatting and the production build passed.
+- Browser checks verified default zero selection checkboxes, right-click selection, deselect/clear behavior, question-mark help, all 360 applicants across pages, all 72 filtered overtime records, Talent Pool confirmation and single issuance. Multiple mode selected 30 Naga employees across two pages and created 30 distinct records with shared notes and matching employee audits. A 360 × 640 check verified dialog/button/menu bounds. Temporary QA login access was removed and returned 404 before the production build. No real HR data or emails were changed; these changes have not been deployed.
+- UI proof: `test-results/hiring-needs-selection-default.png`, `test-results/issuance-single-default.png`, and `test-results/issuance-multiple-mode.png`.
+
 ## October 3, 2026 — compact selection and applicant navigation
 
 - Applications and Talent Pool now reserve 44px for row selection, rather than assigning the checkbox the former applicant column's 24% width. The applicant/role columns reclaim that space; the table keeps its existing mobile scroll container.

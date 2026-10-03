@@ -22,6 +22,22 @@ export function ActionMenu({
     menu = useRef<HTMLDivElement>(null);
   const id = useId();
   useEffect(() => {
+    const button = trigger.current;
+    const context = (event: Event) => {
+      const point = (event as CustomEvent<{ x: number; y: number }>).detail;
+      setPosition({
+        top: Math.max(
+          8,
+          Math.min(point.y, window.innerHeight - items.length * 42 - 24),
+        ),
+        left: Math.max(8, Math.min(point.x, window.innerWidth - 238)),
+      });
+      setOpen(true);
+    };
+    button?.addEventListener("record-context-menu", context);
+    return () => button?.removeEventListener("record-context-menu", context);
+  }, [items.length]);
+  useEffect(() => {
     if (!open) return;
     menu.current
       ?.querySelector<HTMLButtonElement>("button:not(:disabled)")
@@ -47,6 +63,8 @@ export function ActionMenu({
     <>
       <button
         ref={trigger}
+        data-record-menu
+        type="button"
         className="icon-button"
         aria-label={label}
         aria-haspopup="menu"
@@ -104,6 +122,8 @@ export function ActionMenu({
                 ]?.focus();
               }
               if (event.key === "Escape") {
+                event.preventDefault();
+                event.stopPropagation();
                 setOpen(false);
                 trigger.current?.focus();
               }
@@ -114,6 +134,7 @@ export function ActionMenu({
               <button
                 key={item.label}
                 role="menuitem"
+                type="button"
                 disabled={item.disabled}
                 title={item.reason}
                 className={item.danger ? "destructive-text" : ""}
@@ -127,7 +148,7 @@ export function ActionMenu({
               </button>
             ))}
           </div>,
-          document.body,
+          trigger.current?.closest("dialog") || document.body,
         )}
     </>
   );

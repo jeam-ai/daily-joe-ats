@@ -15,6 +15,7 @@ import { canManage, canEdit } from "@/lib/data-policy";
 import { ApplicantEditor, DeleteApplicantDialog } from "./applicant-management";
 import { RichTextContent, RichTextEditor } from "./rich-text";
 import { ActionMenu } from "./action-menu";
+import { ApplicantBulkDialog } from "./applicant-bulk-dialog";
 import { ApplicantReprocess } from "./applicant-reprocess";
 import {
   ArrowLeft,
@@ -257,6 +258,7 @@ export function ApplicantProfile({ id }: { id: string }) {
     [deleting, setDeleting] = useState(false);
   const [tab, setTab] = useState("Overview");
   const [decision, setDecision] = useState<Decision | null>(null);
+  const [returningToScreening, setReturningToScreening] = useState(false);
   const [note, setNote] = useState("");
   const [reason, setReason] = useState("");
   const [decisionNote, setDecisionNote] = useState("");
@@ -689,6 +691,15 @@ export function ApplicantProfile({ id }: { id: string }) {
                 <ActionMenu
                   label={`Actions for ${applicantDisplayName(a)}`}
                   items={[
+                    ...(a.status === "Talent Pool"
+                      ? [
+                          {
+                            label: "Return to Screening",
+                            onClick: () => setReturningToScreening(true),
+                            disabled: !manager || workspaceSaving,
+                          },
+                        ]
+                      : []),
                     {
                       label: "Edit Applicant",
                       onClick: requestEdit,
@@ -785,6 +796,22 @@ export function ApplicantProfile({ id }: { id: string }) {
             </p>
           </Card>
         )}
+      {returningToScreening && (
+        <ApplicantBulkDialog
+          action="screening"
+          ids={[a.id]}
+          allFiltered={false}
+          filters={new URLSearchParams({
+            dataset,
+            status: "Talent Pool",
+          }).toString()}
+          onClose={() => setReturningToScreening(false)}
+          onDone={() => {
+            setReturningToScreening(false);
+            void refresh();
+          }}
+        />
+      )}
       {a.status === "Talent Pool" && (
         <Card className="spaced retention-card">
           <div className="card-heading">

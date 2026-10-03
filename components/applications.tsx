@@ -29,6 +29,7 @@ import { canManage, canEdit, INTAKE_QUEUE_LIMIT } from "@/lib/data-policy";
 import { requestJson, downloadFile } from "@/lib/client-request";
 import { ApplicantEditor, DeleteApplicantDialog } from "./applicant-management";
 import { ActionMenu } from "./action-menu";
+import { SelectionHelp, SelectionSurface } from "./record-selection";
 import {
   formatDate,
   monthKey,
@@ -100,6 +101,7 @@ export function Applications({ talent = false }: { talent?: boolean }) {
   const [selecting, setSelecting] = useState(false);
   const [allSelected, setAllSelected] = useState(false);
   const [bulkAction, setBulkAction] = useState("");
+  const [individualScreeningId, setIndividualScreeningId] = useState("");
   const selectionRequest = useRef<AbortController | null>(null);
   useEffect(() => {
     setQ(params.get("q") || "");
@@ -597,6 +599,7 @@ export function Applications({ talent = false }: { talent?: boolean }) {
             `${total} applicant${total === 1 ? "" : "s"} found${q ? ` for “${q}”` : ""}`
           )}
         </div>
+        {canManage(state.currentUser) && <SelectionHelp />}
         {canManage(state.currentUser) && (
           <BulkActions
             count={selectedIds.length}
@@ -617,6 +620,7 @@ export function Applications({ talent = false }: { talent?: boolean }) {
             >
               <option value="">Choose bulk action…</option>
               {[
+                ...(talent ? [["screening", "Return to Screening"]] : []),
                 ["proceed", "Move to next stage"],
                 ["reject", "Reject"],
                 ["withdraw", "Withdraw"],
@@ -643,12 +647,19 @@ export function Applications({ talent = false }: { talent?: boolean }) {
         {listLoading && !rows.length ? (
           <LoadingSkeleton />
         ) : rows.length ? (
-          <div className="applications-table">
+          <SelectionSurface
+            className={`applications-table ${selectedIds.length ? "is-selecting" : ""}`}
+            disabled={resultsUnavailable || !canManage(state.currentUser)}
+            onSelect={(id) => {
+              setAllSelected(false);
+              setSelectedIds((ids) => [...new Set([...ids, id])]);
+            }}
+          >
             <Table>
               <thead>
                 <tr>
                   {[
-                    "Select",
+                    ...(selectedIds.length ? ["Select"] : []),
                     "Applicant",
                     "Role / urgency",
                     "Qualifications",
@@ -660,35 +671,47 @@ export function Applications({ talent = false }: { talent?: boolean }) {
                     <th
                       key={i}
                       className={
-                        i === 0 ? "application-selection-cell" : undefined
+                        c === "Select"
+                          ? "application-selection-cell"
+                          : undefined
                       }
                     >
-                      {i === 0 ? <span className="sr-only">{c}</span> : c}
+                      {c === "Select" ? (
+                        <span className="sr-only">{c}</span>
+                      ) : (
+                        c
+                      )}
                     </th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {visible.map((a) => (
-                  <tr key={a.id}>
-                    <td className="application-selection-cell">
-                      <input
-                        type="checkbox"
-                        aria-label={`Select ${applicantDisplayName(a)}`}
-                        checked={selectedIds.includes(a.id)}
-                        disabled={
-                          resultsUnavailable || !canManage(state.currentUser)
-                        }
-                        onChange={(e) => {
-                          setAllSelected(false);
-                          setSelectedIds((ids) =>
-                            e.target.checked
-                              ? [...new Set([...ids, a.id])]
-                              : ids.filter((id) => id !== a.id),
-                          );
-                        }}
-                      />
-                    </td>
+                  <tr
+                    key={a.id}
+                    data-record-id={a.id}
+                    aria-selected={selectedIds.includes(a.id)}
+                  >
+                    {!!selectedIds.length && (
+                      <td className="application-selection-cell">
+                        <input
+                          type="checkbox"
+                          aria-label={`Select ${applicantDisplayName(a)}`}
+                          checked={selectedIds.includes(a.id)}
+                          disabled={
+                            resultsUnavailable || !canManage(state.currentUser)
+                          }
+                          onChange={(e) => {
+                            setAllSelected(false);
+                            setSelectedIds((ids) =>
+                              e.target.checked
+                                ? [...new Set([...ids, a.id])]
+                                : ids.filter((id) => id !== a.id),
+                            );
+                          }}
+                        />
+                      </td>
+                    )}
                     <td>
                       <Link
                         className="applicant-cell"
@@ -797,6 +820,33 @@ export function Applications({ talent = false }: { talent?: boolean }) {
                         label={`Actions for ${applicantDisplayName(a)}`}
                         items={[
                           {
+                            label: selectedIds.includes(a.id)
+                              ? "Deselect record"
+                              : "Select record",
+                            onClick: () => {
+                              setAllSelected(false);
+                              setSelectedIds((ids) =>
+                                ids.includes(a.id)
+                                  ? ids.filter((id) => id !== a.id)
+                                  : [...ids, a.id],
+                              );
+                            },
+                            disabled:
+                              resultsUnavailable ||
+                              !canManage(state.currentUser),
+                          },
+                          ...(a.status === "Talent Pool"
+                            ? [
+                                {
+                                  label: "Return to Screening",
+                                  onClick: () => setIndividualScreeningId(a.id),
+                                  disabled:
+                                    !canManage(state.currentUser) ||
+                                    resultsUnavailable,
+                                },
+                              ]
+                            : []),
+                          {
                             label: "View Applicant",
                             onClick: () => router.push(profileHref(a.id)),
                           },
@@ -818,7 +868,7 @@ export function Applications({ talent = false }: { talent?: boolean }) {
                 ))}
               </tbody>
             </Table>
-          </div>
+          </SelectionSurface>
         ) : (
           <EmptyState
             title={
@@ -899,6 +949,21 @@ export function Applications({ talent = false }: { talent?: boolean }) {
           onClose={() => setBulkAction("")}
           onDone={() => {
             setBulkAction("");
+            setSelectedIds([]);
+            setAllSelected(false);
+            setReload((v) => v + 1);
+          }}
+        />
+      )}
+      {individualScreeningId && (
+        <ApplicantBulkDialog
+          action="screening"
+          ids={[individualScreeningId]}
+          allFiltered={false}
+          filters={selectionFilters}
+          onClose={() => setIndividualScreeningId("")}
+          onDone={() => {
+            setIndividualScreeningId("");
             setSelectedIds([]);
             setAllSelected(false);
             setReload((v) => v + 1);
