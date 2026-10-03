@@ -1,5 +1,12 @@
 # Daily Joe Careers — production implementation validation
 
+## October 3, 2026 — compact selection and applicant navigation
+
+- Applications and Talent Pool now reserve 44px for row selection, rather than assigning the checkbox the former applicant column's 24% width. The applicant/role columns reclaim that space; the table keeps its existing mobile scroll container.
+- Lists return small, filtered navigation hints beside their unchanged 20-row pages, including the adjacent page boundary. Profiles reuse those IDs while refreshing their order in the background; the cache is bounded and scoped to user, dataset, filters and workspace revision. Previous/Next remain available when their target is already known. Actual first/last results retain their boundary protection and use the default cursor rather than the prohibited cursor. Direct navigation shows explicit loading/error/retry feedback.
+- Browser checks measured the selection column shrinking from approximately 245px to 44px with no page overflow. Next worked from record 20 to 21 and within a 99-record Barista/Naga/New filter while the QA-only neighbor lookup was deliberately delayed by two seconds. Returning to the list preserved those filters. The delay and temporary fixture login route were removed before the production build. Screenshots: `test-results/applicant-checkbox-fixed.png` and `test-results/applicant-navigation-fixed.png` (fictional workspace).
+- Indexed-list regression checks confirm unchanged 20-row pagination, consistent activity ordering, adjacent-page IDs and filter boundaries. Navigation cache checks cover pagination reuse, user/dataset/revision isolation and expiry. Final checks passed 109 unit tests, 101 server tests, TypeScript, the production build and actual production-mode API/navigation checks. A fresh production browser confirmed Next within filtered results, first/last labels and default disabled cursor; its observed console had no errors/warnings. Logs are under `test-results/applicant-ui-*`; no deployment was performed for this follow-up.
+
 ## October 3, 2026 — full-system QA and workflow optimization
 
 - Full results, repaired bugs, calculation matrix, browser evidence and unexecuted live checks are in [QA_REPORT.md](QA_REPORT.md). Final verification passed 108 unit tests, 101 server tests, 21 grouped authenticated API checks, TypeScript and the production build. The existing protected-route/OAuth/origin/scheduler smoke suite also passed against the local production build.

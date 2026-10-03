@@ -40,6 +40,11 @@ import { applicantDisplayName } from "@/lib/applicant-information";
 import { BulkActions } from "./bulk-actions";
 import { ApplicantBulkDialog } from "./applicant-bulk-dialog";
 import { ApplicantReprocess } from "./applicant-reprocess";
+import {
+  applicantNavigationScope,
+  rememberApplicantNavigation,
+  type ApplicantNeighbors,
+} from "@/lib/applicant-navigation";
 const daysUntil = (timestamp: number) =>
   Math.max(0, Math.ceil((timestamp - Date.now()) / 86400000));
 function talentRetentionWarning(application: Application) {
@@ -72,19 +77,24 @@ export function Applications({ talent = false }: { talent?: boolean }) {
   const [needFilter, setNeedFilter] = useState(params.get("need") || "");
   const [status, setStatus] = useState(params.get("status") || "");
   const [stage, setStage] = useState(params.get("stage") || "");
-  const [position, setPosition] = useState("");
-  const [location, setLocation] = useState("");
-  const [screening, setScreening] = useState("");
+  const [position, setPosition] = useState(params.get("position") || "");
+  const [location, setLocation] = useState(params.get("location") || "");
+  const [screening, setScreening] = useState(params.get("screening") || "");
   const [date, setDate] = useState(
-    params.get("month") === "current" ? "month" : "",
+    params.get("date") || (params.get("month") === "current" ? "month" : ""),
   );
-  const [experience, setExperience] = useState("");
+  const [experience, setExperience] = useState(params.get("experience") || "");
   const [tab, setTab] = useState(
-    params.get("view") === "interviews" ? "Interviews" : "All applications",
+    params.get("tab") ||
+      (params.get("view") === "interviews" ? "Interviews" : "All applications"),
   );
-  const [page, setPage] = useState(1);
-  const [employmentStatus, setEmploymentStatus] = useState("");
-  const [urgency, setUrgency] = useState("");
+  const [page, setPage] = useState(
+    Math.floor(Math.max(1, Math.min(100000, Number(params.get("page")) || 1))),
+  );
+  const [employmentStatus, setEmploymentStatus] = useState(
+    params.get("employment") || "",
+  );
+  const [urgency, setUrgency] = useState(params.get("urgency") || "");
   const [exporting, setExporting] = useState(false);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [selecting, setSelecting] = useState(false);
@@ -96,12 +106,32 @@ export function Applications({ talent = false }: { talent?: boolean }) {
     setNeedFilter(params.get("need") || "");
     setStatus(params.get("status") || "");
     setStage(params.get("stage") || "");
-    setPage(1);
+    setPosition(params.get("position") || "");
+    setLocation(params.get("location") || "");
+    setScreening(params.get("screening") || "");
+    setExperience(params.get("experience") || "");
+    setUrgency(params.get("urgency") || "");
+    setEmploymentStatus(params.get("employment") || "");
+    setDate(
+      params.get("date") || (params.get("month") === "current" ? "month" : ""),
+    );
+    setTab(
+      params.get("tab") ||
+        (params.get("view") === "interviews"
+          ? "Interviews"
+          : "All applications"),
+    );
+    setPage(
+      Math.floor(
+        Math.max(1, Math.min(100000, Number(params.get("page")) || 1)),
+      ),
+    );
   }, [params]);
   const [listing, setListing] = useState<{
       applications: Application[];
       total: number;
       page: number;
+      neighborsById: Record<string, ApplicantNeighbors>;
     }>(),
     [listError, setListError] = useState(""),
     [listLoading, setListLoading] = useState(true),
@@ -124,6 +154,7 @@ export function Applications({ talent = false }: { talent?: boolean }) {
         ? "activity"
         : "received",
     talent: talent ? "1" : "0",
+    date,
     since:
       date === "week"
         ? scheduledIso(
@@ -137,6 +168,12 @@ export function Applications({ talent = false }: { talent?: boolean }) {
   const filterParams = new URLSearchParams(queryParams);
   filterParams.delete("page");
   const selectionFilters = filterParams.toString();
+  const navigationScope = applicantNavigationScope(
+    queryParams,
+    dataset,
+    state?.currentUser?.email,
+    state?.revision,
+  );
   useEffect(() => {
     selectionRequest.current?.abort();
     setSelecting(false);
@@ -149,12 +186,17 @@ export function Applications({ talent = false }: { talent?: boolean }) {
     setListLoading(true);
     setListError("");
     const timer = setTimeout(() => {
-      requestJson<{ applications: Application[]; total: number; page: number }>(
-        `/api/applications?${queryParams}`,
-        { signal: abort.signal },
-      )
+      requestJson<{
+        applications: Application[];
+        total: number;
+        page: number;
+        neighborsById: Record<string, ApplicantNeighbors>;
+      }>(`/api/applications?${queryParams}`, { signal: abort.signal })
         .then((r) => {
-          if (!abort.signal.aborted) setListing(r);
+          if (!abort.signal.aborted) {
+            rememberApplicantNavigation(navigationScope, r.neighborsById || {});
+            setListing(r);
+          }
         })
         .catch((e) => {
           if (!abort.signal.aborted) setListError(e.message);
@@ -167,7 +209,7 @@ export function Applications({ talent = false }: { talent?: boolean }) {
       clearTimeout(timer);
       abort.abort();
     };
-  }, [queryParams, dataset, state?.revision, reload]);
+  }, [queryParams, navigationScope, reload]);
   if (!state) return <LoadingSkeleton />;
   const selectedNeed = state.hiringNeeds.find((need) => need.id === needFilter);
   const rows = listing?.applications || [],
@@ -615,14 +657,21 @@ export function Applications({ talent = false }: { talent?: boolean }) {
                     tab === "Hired" ? "Hired date" : "Last activity",
                     "",
                   ].map((c, i) => (
-                    <th key={i}>{c}</th>
+                    <th
+                      key={i}
+                      className={
+                        i === 0 ? "application-selection-cell" : undefined
+                      }
+                    >
+                      {i === 0 ? <span className="sr-only">{c}</span> : c}
+                    </th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {visible.map((a) => (
                   <tr key={a.id}>
-                    <td>
+                    <td className="application-selection-cell">
                       <input
                         type="checkbox"
                         aria-label={`Select ${applicantDisplayName(a)}`}

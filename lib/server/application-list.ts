@@ -1,5 +1,6 @@
 import "server-only";
 import type { Application } from "@/types";
+import type { ApplicantNeighbors } from "@/lib/applicant-navigation";
 import { transaction, readTransaction, postgresConfigured } from "./database";
 import { getState, saveState } from "./repository";
 let readModelReady: Promise<void> | undefined;
@@ -32,6 +33,7 @@ export async function listApplications(params: URLSearchParams, demo = false) {
         total: 0,
         page,
         neighbors: null,
+        neighborsById: {} as Record<string, ApplicantNeighbors>,
         ids: (
           await tx.query(
             `SELECT a.id ${from} ORDER BY w.received_at DESC,a.id DESC`,
@@ -161,39 +163,81 @@ async function readApplicationPage(
   const around = params.get("around");
   if (around) {
     const sequence = await tx.query(
-      `SELECT id,previous_id,next_id,position,total FROM (
-          SELECT a.id,LAG(a.id) OVER (ORDER BY ${order}) AS previous_id,
+      `SELECT id,previous_id,next_id,previous_previous_id,next_next_id,position,total FROM (
+          SELECT a.id,LAG(a.id,2) OVER (ORDER BY ${order}) AS previous_previous_id,
+            LAG(a.id) OVER (ORDER BY ${order}) AS previous_id,
             LEAD(a.id) OVER (ORDER BY ${order}) AS next_id,
+            LEAD(a.id,2) OVER (ORDER BY ${order}) AS next_next_id,
             ROW_NUMBER() OVER (ORDER BY ${order}) AS position,COUNT(*) OVER() AS total
           ${listFrom}
         ) sequence WHERE id=${bind(around)}`,
       values,
     );
     const row = sequence[0];
+    const neighborsById: Record<string, ApplicantNeighbors> = {};
+    const total = Number(row?.total || 0);
+    const position = Number(row?.position || 0);
+    if (row) {
+      neighborsById[around] = {
+        previousId: row.previous_id ? String(row.previous_id) : null,
+        nextId: row.next_id ? String(row.next_id) : null,
+        position,
+        total,
+      };
+      if (row.previous_id)
+        neighborsById[String(row.previous_id)] = {
+          previousId: row.previous_previous_id
+            ? String(row.previous_previous_id)
+            : null,
+          nextId: around,
+          position: position - 1,
+          total,
+        };
+      if (row.next_id)
+        neighborsById[String(row.next_id)] = {
+          previousId: around,
+          nextId: row.next_next_id ? String(row.next_next_id) : null,
+          position: position + 1,
+          total,
+        };
+    }
     return {
       applications: [] as Application[],
-      total: Number(row?.total || 0),
+      total,
       page,
-      neighbors: row
-        ? {
-            previousId: row.previous_id ? String(row.previous_id) : null,
-            nextId: row.next_id ? String(row.next_id) : null,
-            position: Number(row.position),
-            total: Number(row.total),
-          }
-        : null,
+      neighbors: neighborsById[around] || null,
+      neighborsById,
     };
   }
   const total = Number(
     (await tx.query(`SELECT COUNT(*) AS n ${from}`, values))[0].n,
   );
   const actual = Math.min(page, Math.max(1, Math.ceil(total / limit)));
+  const offset = (actual - 1) * limit;
+  const leading = Math.min(offset, 2);
   const rows = await tx.query(
-    `SELECT a.payload,r.category AS retention_category,r.started_at AS retention_started_at,r.expires_at AS retention_expires_at,r.reason AS retention_reason,tp.expires_at AS talent_pool_expires_at,tp.grace_expires_at AS talent_pool_grace_expires_at,${activitySort ? latest : "NULL"} AS gmail_activity_at ${listFrom} ORDER BY ${order} LIMIT ${limit} OFFSET ${bind((actual - 1) * limit)}`,
+    `SELECT a.id,a.payload,r.category AS retention_category,r.started_at AS retention_started_at,r.expires_at AS retention_expires_at,r.reason AS retention_reason,tp.expires_at AS talent_pool_expires_at,tp.grace_expires_at AS talent_pool_grace_expires_at,${activitySort ? latest : "NULL"} AS gmail_activity_at ${listFrom} ORDER BY ${order} LIMIT ${limit + leading + 2} OFFSET ${bind(Math.max(0, offset - 2))}`,
     values,
   );
+  const visible = rows.slice(leading, leading + limit);
+  const navigationStart = Math.max(0, leading - 1);
+  const neighborsById = Object.fromEntries(
+    rows.slice(navigationStart, leading + limit + 1).map((row, index) => [
+      String(row.id),
+      {
+        previousId: rows[index + navigationStart - 1]?.id
+          ? String(rows[index + navigationStart - 1].id)
+          : null,
+        nextId: rows[index + navigationStart + 1]?.id
+          ? String(rows[index + navigationStart + 1].id)
+          : null,
+        position: offset - leading + navigationStart + index + 1,
+        total,
+      } satisfies ApplicantNeighbors,
+    ]),
+  );
   return {
-    applications: rows.map((r) => {
+    applications: visible.map((r) => {
       const application = JSON.parse(String(r.payload)) as Application;
       delete application.retentionCategory;
       delete application.retentionStartedAt;
@@ -228,6 +272,7 @@ async function readApplicationPage(
     total,
     page: actual,
     neighbors: null,
+    neighborsById,
   };
 }
 

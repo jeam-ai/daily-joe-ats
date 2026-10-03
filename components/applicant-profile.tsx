@@ -31,6 +31,7 @@ import {
   FileCheck2,
   Pencil,
   Trash2,
+  LoaderCircle,
 } from "lucide-react";
 import type {
   Application,
@@ -70,6 +71,12 @@ import { ApplicationSource } from "./application-source";
 import { AiAssist } from "./ai-assist";
 import { AuditHistory } from "./operations";
 import { ApplicantTools } from "./applicant-tools";
+import {
+  applicantNavigationScope,
+  cachedApplicantNavigation,
+  rememberApplicantNavigation,
+  type ApplicantNeighbors,
+} from "@/lib/applicant-navigation";
 export function ScreeningCriterion({ criterion: c }: { criterion: Criterion }) {
   return (
     <div className="criterion">
@@ -181,41 +188,70 @@ export function ApplicantProfile({ id }: { id: string }) {
   const params = useSearchParams();
   const listContext =
     params.get("list") || "sort=activity&tab=All+applications";
-  const [neighbors, setNeighbors] = useState<{
-    previousId: string | null;
-    nextId: string | null;
-    position: number;
-    total: number;
-  } | null>(null);
+  const navigationScope = applicantNavigationScope(
+    listContext,
+    dataset,
+    state?.currentUser?.email,
+    state?.revision,
+  );
+  const [neighbors, setNeighbors] = useState<ApplicantNeighbors | null>(() =>
+    cachedApplicantNavigation(navigationScope, id),
+  );
   const [navigationLoading, setNavigationLoading] = useState(true);
   const [navigationError, setNavigationError] = useState("");
+  const [navigationReload, setNavigationReload] = useState(0);
+  const navigationHints = useRef<Record<string, ApplicantNeighbors>>({});
+  const navigationIdentity = applicantNavigationScope(
+    listContext,
+    dataset,
+    state?.currentUser?.email,
+  );
+  const previousNavigationIdentity = useRef(navigationIdentity);
   useEffect(() => {
     const abort = new AbortController();
     const query = new URLSearchParams(listContext);
     query.set("around", id);
     setNavigationLoading(true);
-    setNeighbors(null);
+    const sameList = previousNavigationIdentity.current === navigationIdentity;
+    previousNavigationIdentity.current = navigationIdentity;
+    if (!sameList) navigationHints.current = {};
+    setNeighbors(
+      (current) =>
+        cachedApplicantNavigation(navigationScope, id) ||
+        (sameList ? current : null),
+    );
     setNavigationError("");
-    void requestJson<{ neighbors: typeof neighbors }>(
-      `/api/applications?${query}`,
-      { signal: abort.signal },
-    )
+    void requestJson<{
+      neighbors: ApplicantNeighbors | null;
+      neighborsById: Record<string, ApplicantNeighbors>;
+    }>(`/api/applications?${query}`, { signal: abort.signal })
       .then((result) => {
-        if (!abort.signal.aborted) setNeighbors(result.neighbors);
+        if (!abort.signal.aborted) {
+          navigationHints.current = result.neighborsById || {};
+          rememberApplicantNavigation(
+            navigationScope,
+            result.neighborsById || {},
+          );
+          setNeighbors(result.neighbors);
+        }
       })
       .catch(() => {
         if (!abort.signal.aborted)
-          setNavigationError(
-            "Applicant navigation could not load. Refresh to retry.",
-          );
+          setNavigationError("Applicant navigation could not load. Try again.");
       })
       .finally(() => {
         if (!abort.signal.aborted) setNavigationLoading(false);
       });
     return () => abort.abort();
-  }, [id, listContext, dataset]);
+  }, [id, listContext, navigationScope, navigationIdentity, navigationReload]);
   const neighborHref = (target: string) =>
     `/applications/${encodeURIComponent(target)}?list=${encodeURIComponent(listContext)}`;
+  function navigateToApplicant(target: string | null | undefined) {
+    if (!target || saving || workspaceSaving) return;
+    // Keep the next profile ready even after a long review of this applicant.
+    rememberApplicantNavigation(navigationScope, navigationHints.current);
+    router.push(neighborHref(target));
+  }
   const [editing, setEditing] = useState(false),
     [confirmEditing, setConfirmEditing] = useState(false),
     [deleting, setDeleting] = useState(false);
@@ -555,7 +591,10 @@ export function ApplicantProfile({ id }: { id: string }) {
   }
   return (
     <>
-      <Link className="back-link" href="/applications">
+      <Link
+        className="back-link"
+        href={`${new URLSearchParams(listContext).get("talent") === "1" ? "/talent-pool" : "/applications"}?${listContext}`}
+      >
         <ArrowLeft size={16} />
         Back to applications
       </Link>
@@ -565,16 +604,13 @@ export function ApplicantProfile({ id }: { id: string }) {
       >
         <Button
           variant="secondary"
-          disabled={
-            navigationLoading ||
-            !neighbors?.previousId ||
-            saving ||
-            workspaceSaving
+          title={
+            neighbors && !neighbors.previousId
+              ? "First applicant in these results"
+              : undefined
           }
-          onClick={() =>
-            neighbors?.previousId &&
-            router.push(neighborHref(neighbors.previousId))
-          }
+          disabled={!neighbors?.previousId || saving || workspaceSaving}
+          onClick={() => navigateToApplicant(neighbors?.previousId)}
         >
           <ArrowLeft size={16} /> Previous applicant
         </Button>
@@ -585,16 +621,38 @@ export function ApplicantProfile({ id }: { id: string }) {
         )}
         <Button
           variant="secondary"
-          disabled={
-            navigationLoading || !neighbors?.nextId || saving || workspaceSaving
+          title={
+            neighbors && !neighbors.nextId
+              ? "Last applicant in these results"
+              : undefined
           }
-          onClick={() =>
-            neighbors?.nextId && router.push(neighborHref(neighbors.nextId))
-          }
+          disabled={!neighbors?.nextId || saving || workspaceSaving}
+          onClick={() => navigateToApplicant(neighbors?.nextId)}
         >
           Next applicant <ArrowRight size={16} />
         </Button>
-        {navigationError && <small role="status">{navigationError}</small>}
+        {navigationLoading && !neighbors && (
+          <small role="status">
+            <LoaderCircle size={14} className="loading-spinner" /> Loading
+            applicant navigation…
+          </small>
+        )}
+        {!navigationLoading && !neighbors && !navigationError && (
+          <small role="status">
+            This applicant is outside the current filtered results.
+          </small>
+        )}
+        {navigationError && (
+          <>
+            <small role="status">{navigationError}</small>
+            <Button
+              variant="ghost"
+              onClick={() => setNavigationReload((value) => value + 1)}
+            >
+              Retry navigation
+            </Button>
+          </>
+        )}
       </div>
       <div className="profile-header">
         <div className="applicant-avatar-wrap">

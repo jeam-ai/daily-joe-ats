@@ -129,12 +129,33 @@ test("latest 100 membership, promotion, indexed server pages and HR source prote
     new URLSearchParams({ tab: "Active", page: "2" }),
   );
   assert.equal(second.applications[0].id, "window-084");
+  assert.deepEqual(first.neighborsById["window-085"], {
+    previousId: "window-086",
+    nextId: "window-084",
+    position: 20,
+    total: 100,
+  });
+  assert.deepEqual(second.neighborsById["window-084"], {
+    previousId: "window-085",
+    nextId: "window-083",
+    position: 21,
+    total: 100,
+  });
+  assert.deepEqual(
+    first.neighborsById["window-084"],
+    second.neighborsById["window-084"],
+  );
+  assert.equal(first.neighborsById["window-104"].previousId, null);
   const boundary = await listApplications(
     new URLSearchParams({ tab: "Active", around: first.applications[19].id }),
   );
   assert.equal(boundary.neighbors?.position, 20);
   assert.equal(boundary.neighbors?.nextId, second.applications[0].id);
   assert.equal(boundary.neighbors?.previousId, first.applications[18].id);
+  assert.deepEqual(
+    boundary.neighborsById["window-084"],
+    second.neighborsById["window-084"],
+  );
   assert.equal(
     (
       await listApplications(
@@ -155,6 +176,7 @@ test("latest 100 membership, promotion, indexed server pages and HR source prote
   );
   assert.equal(filteredNeighbor.neighbors?.total, 1);
   assert.equal(filteredNeighbor.neighbors?.nextId, null);
+  assert.deepEqual(Object.keys(filteredNeighbor.neighborsById), ["window-104"]);
   assert.equal(
     (
       await listApplications(
@@ -198,6 +220,7 @@ test("latest 100 membership, promotion, indexed server pages and HR source prote
   );
   assert.equal(activityNeighbor.neighbors?.previousId, null);
   assert.equal(activityNeighbor.neighbors?.nextId, "window-104");
+  assert.equal(conversations.neighborsById["window-000"].nextId, "window-104");
   assert.equal(
     conversations.applications[0].appliedAt,
     "2026-09-01T00:00:00.000Z",

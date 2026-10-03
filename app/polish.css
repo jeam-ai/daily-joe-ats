@@ -874,26 +874,44 @@ tbody tr:hover {
   table-layout: fixed;
 }
 .applications-table th:nth-child(1) {
-  width: 24%;
+  width: 44px;
 }
 .applications-table th:nth-child(2) {
-  width: 17%;
+  width: 24%;
 }
 .applications-table th:nth-child(3) {
+  width: 22%;
+}
+.applications-table th:nth-child(4) {
   width: 13%;
 }
-.applications-table th:nth-child(4),
 .applications-table th:nth-child(5) {
-  width: 11%;
+  width: 12%;
 }
 .applications-table th:nth-child(6) {
-  width: 17%;
+  width: 9%;
 }
 .applications-table th:nth-child(7) {
-  width: 7%;
+  width: auto;
+}
+.applications-table th:nth-child(8) {
+  width: 52px;
+}
+.applications-table .application-selection-cell {
+  padding-left: 12px;
+  padding-right: 12px;
+  text-align: center;
 }
 .applications-table td {
   white-space: normal;
+}
+.applicant-profile-navigation .button:disabled {
+  cursor: default;
+}
+.applicant-profile-navigation [role="status"] {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 .application-role-cell {
   vertical-align: middle;
